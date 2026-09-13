@@ -133,3 +133,15 @@ Build 15 passed both engine schema checks and the full isolated smoke suite, inc
 The user reported a blocked Keychain authorization dialog. Token saving previously called SecItemUpdate/SecItemAdd synchronously from the settings UI, and token reading still depended on Keychain. Removed all Security/LocalAuthentication usage from the credential implementation. It now reads `~/Library/Application Support/FeatherInput/lm-studio-token.txt` afresh and saves atomically with owner-only 0600 permissions, trims surrounding whitespace, and rejects multiline or oversized tokens. Debug-token redaction and loopback-only requests are unchanged.
 
 No attempt is made to migrate the old secret by accessing Keychain again. The user must paste the token once in settings, or place it in the file. The existing Keychain item is left untouched. 18 unit tests, both engine checks and the isolated app smoke suite passed with the file-based implementation.
+
+## Post-commit phrase continuation
+
+Added an independent default-off aiContinuationEnabled setting. A nonempty Rime commit with no remaining preedit schedules a 400 ms delayed request using the controller's last 80 committed characters. The model generates JSON containing new text rather than choosing an existing candidate. Completed suggestions appear as a single unnumbered AI continuation in the native candidate panel. Only its button inserts text; keyboard events cancel the suggestion, retaining existing typing/Space/Tab/numeric semantics. Acceptance does not trigger another automatic generation.
+
+Requests share cancellation/version machinery and the debug transport. Responses and clicks also validate foreground process, activation, mode/model settings, empty composition and selected range. Known nonempty selections suppress prediction. Clients reporting unknown positions still rely on delivered IMK events; unsignaled document changes cannot be fully detected. No surrounding document text is read. Empty, control/multiline, purely numeric/punctuation, oversized (>24 characters), obvious reasoning wrappers, and complete-context echoes are rejected.
+
+Real local Qwen3-0.6B-MLX tests with synthetic inputs initially produced unrelated numbers (and later a time string). Those are now rejected. A simpler schema plus a short demonstration gave: 今天的天气很好，适合 → 去散步 (278 ms); 这段代码的主要作用是 → 进行数据处理 (285 ms); 请把这份报告 → 发给我 (260 ms). These are small warm-service samples, not an accuracy or latency benchmark; they exclude the 400 ms debounce. Token was read from the authorized local file and never printed. Quality remains experimental.
+
+Regression coverage includes output rejection, real Rime post-commit scheduling with an injected delayed response, no automatic insertion, button acceptance, cancellation despite a late response, and rejection after the client's selected position changes.
+
+Build 17 passed all 19 unit tests, both Rime schema engine checks and the final isolated packaged smoke suite. It was installed, signature verified and launched with the prior source selection restored. Existing model/Token settings are retained; continuation defaults off until enabled by the user.

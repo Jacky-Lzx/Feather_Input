@@ -11,12 +11,17 @@ final class InputController: IMKInputController {
     private var recommendationTask: Task<Void, Never>?
     private var recommendationVersion = UUID()
     private var recentContext = ""
+    private var continuationText: String?
+    private var requestContinuation: (String, String, String) async throws -> String = {
+        try await LocalRecommendation.continueText(model: $0, token: $1, context: $2)
+    }
     private var requestRecommendation: (String, String, String, String, [String]) async throws -> Int = {
         try await LocalRecommendation.recommend(model: $0, token: $1, context: $2, preedit: $3, candidates: $4)
     }
     private func invalidateRecommendation(clearContext: Bool = false) {
         recommendationTask?.cancel()
         recommendationTask = nil
+        if continuationText != nil { candidatesPanel.hide(); continuationText = nil }
         recommendationVersion = UUID()
         candidatesPanel.markRecommendation(nil)
         if clearContext { recentContext = "" }
@@ -55,6 +60,7 @@ final class InputController: IMKInputController {
     }
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
+        if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         let changesPosition = event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode)
         invalidateRecommendation(clearContext: changesPosition)
         if event.type == .flagsChanged {
@@ -128,7 +134,8 @@ final class InputController: IMKInputController {
     private func refresh(_ client: IMKTextInput) {
         invalidateRecommendation()
         guard let session else { return }
-        if let text = session.takeCommit() {
+        let committed = session.takeCommit()
+        if let text = committed {
             recentContext = String((recentContext + text).suffix(80))
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
@@ -136,7 +143,11 @@ final class InputController: IMKInputController {
         client.setMarkedText(preedit.text, selectionRange: NSRange(location: preedit.cursor, length: 0),
                              replacementRange: NSRange(location: NSNotFound, length: 0))
         let candidates = session.candidates
-        guard !preedit.text.isEmpty, !candidates.texts.isEmpty else { candidatesPanel.hide(); return }
+        guard !preedit.text.isEmpty, !candidates.texts.isEmpty else {
+            candidatesPanel.hide()
+            if preedit.text.isEmpty, let committed, !committed.isEmpty { scheduleContinuation(client) }
+            return
+        }
         var caret = NSRect.zero
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
         if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0 { lastCaret = caret }
@@ -172,6 +183,52 @@ final class InputController: IMKInputController {
                       self.session?.preedit.text == preedit, self.session?.candidates.texts == texts else { return }
                 self.candidatesPanel.markRecommendation(index)
             } catch { /* Ordinary candidates remain usable on cancellation, timeout or invalid output. */ }
+        }
+    }
+    private func scheduleContinuation(_ client: IMKTextInput) {
+        let defaults = UserDefaults.standard
+        guard isActive, !ascii, defaults.bool(forKey: "aiContinuationEnabled"), !recentContext.isEmpty,
+              let model = defaults.string(forKey: "aiModel"), !model.isEmpty else { return }
+        let version = recommendationVersion
+        let context = recentContext
+        let range = client.selectedRange()
+        guard range.length == 0 else { return }
+        let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let token = ModelCredential.read()
+        let request = requestContinuation
+        recommendationTask = Task { @MainActor [weak self, weak client] in
+            do {
+                try await Task.sleep(nanoseconds: 400_000_000)
+                try Task.checkCancellation()
+                guard self?.isActive == true, self?.recommendationVersion == version,
+                      UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
+                      UserDefaults.standard.string(forKey: "aiModel") == model else { return }
+                let text = try await request(model, token, context)
+                try Task.checkCancellation()
+                guard let self, let client, self.isActive, !self.ascii,
+                      self.recommendationVersion == version, self.recentContext == context,
+                      self.session?.preedit.text.isEmpty == true,
+                      UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
+                      UserDefaults.standard.string(forKey: "aiModel") == model,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+                      NSEqualRanges(client.selectedRange(), range) else { return }
+                var caret = NSRect.zero
+                _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
+                let anchor = caret.height > 0 && caret.origin.x.isFinite && caret.origin.y.isFinite ? caret : self.lastCaret
+                guard let anchor else { return }
+                self.continuationText = text
+                self.candidatesPanel.show(texts: [text], highlight: -1, caret: anchor, continuation: true) { [weak self, weak client] _ in
+                    guard let self, let client, self.isActive, !self.ascii, self.recommendationVersion == version,
+                          self.continuationText == text, self.session?.preedit.text.isEmpty == true,
+                          UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
+                          UserDefaults.standard.string(forKey: "aiModel") == model,
+                          NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+                          NSEqualRanges(client.selectedRange(), range) else { return }
+                    self.invalidateRecommendation()
+                    client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+                    self.recentContext = String((context + text).suffix(80))
+                }
+            } catch { /* A continuation is optional; failures never affect committed text. */ }
         }
     }
     override func menu() -> NSMenu! {
@@ -232,6 +289,45 @@ final class InputController: IMKInputController {
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
         modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
+    }
+
+    static func verifyContinuationLifecycle(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let oldEnabled = defaults.object(forKey: "aiContinuationEnabled")
+        let oldModel = defaults.object(forKey: "aiModel")
+        defer {
+            for (key, value) in [("aiContinuationEnabled", oldEnabled), ("aiModel", oldModel)] {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(true, forKey: "aiContinuationEnabled")
+        defaults.set("test-model", forKey: "aiModel")
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(client)
+        controller.requestContinuation = { _, _, _ in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            return "好，明天见"
+        }
+        for key in "ni ".utf8 { controller.session?.process(Int32(key)) }
+        controller.refresh(client)
+        let committed = client.committed
+        RunLoop.current.run(until: Date().addingTimeInterval(0.65))
+        guard !committed.isEmpty, client.committed == committed, controller.continuationText == "好，明天见",
+              controller.candidatesPanel.verifyClick(on: 0), client.committed == committed + "好，明天见",
+              controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
+        controller.scheduleContinuation(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.42))
+        controller.invalidateRecommendation(clearContext: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        guard controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
+        controller.recentContext = "我们明天下午"
+        controller.scheduleContinuation(client)
+        client.insertText("改变位置", replacementRange: NSRange(location: NSNotFound, length: 0))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.65))
+        guard controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: post-commit continuation, click-only insertion, cancelled reply and changed selection rejection")
     }
 
     static func verifyRecommendationLifecycle(server: IMKServer) throws {

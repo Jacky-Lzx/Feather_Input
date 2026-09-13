@@ -26,6 +26,7 @@ private struct SettingsView: View {
     @AppStorage("candidateLayout") private var layout = "vertical"
     @AppStorage("showPersistentMode") private var showPersistentMode = true
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
+    @AppStorage("aiContinuationEnabled") private var continuationEnabled = false
     @AppStorage("aiModel") private var model = ""
     @ObservedObject private var debugLog = LLMDebugLog.shared
     @State private var token = ""
@@ -54,6 +55,9 @@ private struct SettingsView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 Divider()
                 Toggle("启用本地 AI 候选推荐", isOn: $aiEnabled)
+                Toggle("上屏后 AI 短语续写", isOn: $continuationEnabled)
+                Text("上屏后停顿 400 ms，预测最多 24 个字符。点击“AI 续写”插入；继续输入取消建议。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Text("LM Studio · 127.0.0.1:1234\n发送本次输入位置最近上屏的最多 80 个字符、拼音及候选。✦ 标记推荐项，原编号和空格行为不变。")
                     .font(.footnote).foregroundStyle(.secondary)
                 TextField("模型 ID", text: $model)
