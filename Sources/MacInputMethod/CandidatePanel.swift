@@ -84,7 +84,7 @@ final class CandidatePanel {
         let configuredSize = UserDefaults.standard.double(forKey: "candidateFontSize")
         let fontSize = configuredSize == 0 ? 17 : min(24, max(14, configuredSize))
         let font = NSFont.systemFont(ofSize: fontSize)
-        let labels = texts.enumerated().map { continuation ? "AI 续写 · " + $0.element : "\($0.offset + 1)  \($0.element)" }
+        let labels = texts.enumerated().map { continuation ? "AI · " + $0.element.replacingOccurrences(of: " ", with: "␠") : "\($0.offset + 1)  \($0.element)" }
         let recommendationSpace: CGFloat = UserDefaults.standard.bool(forKey: "aiRecommendationEnabled") ? 26 : 0
         let widths = labels.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 20 + recommendationSpace }
         let pad: CGFloat = 8, gap: CGFloat = 4, rowHeight = ceil(fontSize * 1.4) + 12

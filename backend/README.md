@@ -21,29 +21,30 @@ The launch agent points to this checkout and virtual environment. Keep both in
 place. Uninstall with `launchctl bootout gui/$(id -u)/im.feather.mlx-worker`, then
 remove `~/Library/LaunchAgents/im.feather.mlx-worker.plist`.
 
-Select **MLX 概率候选** as the continuation backend in Feather settings and enable
-**上屏后 AI 短语续写**. Candidate recommendation remains a separate LM Studio option.
+Select **MLX 下一 token** as the continuation backend in Feather settings and enable
+**上屏后 AI 预测**. Candidate recommendation remains a separate LM Studio option.
 The MLX test button uses synthetic text. Enable debug mode before a request to
 inspect context, the top 10 next tokens and their log probabilities/probabilities,
 and up to five continuation candidates. Clicking a candidate inserts that text;
 new input cancels the UI request and stale responses are discarded.
 
-The algorithm reads the unmodified model distribution from `generate_step`,
-branches on high-probability first tokens, then greedily extends each branch.
-Candidates rank by **mean token log probability**, not calibrated phrase
-probability. This is bounded first-token branching, not exhaustive beam search
-and does not guarantee the globally best phrases. Token probabilities are
-approximate due to model quantization/numerical precision. Top 10 need not sum to
-one. Raw continuation has no chat/JSON template and can be imperfect with chat
-models. No pinyin constraint or MLX Swift migration is implemented in this stage.
+The algorithm reads the unmodified next-token distribution from one
+`generate_step(..., max_tokens=1)` call. It does not extend branches, generate
+phrases, trim whitespace, or remove repeated context. Up to five unique displayable
+tokens from the raw top ten are shown in probability order, including punctuation
+and spaces. Space is displayed as ␠ in the candidate label but inserted unchanged.
+Special tokens, control characters and incomplete Unicode fragments are excluded
+from selectable candidates; raw top-ten values remain visible in debug output.
 
-Each request has an approximately 2.4-second generation budget checked between
-tokens, up to 10 additional tokens per branch, and at most 24 characters per
-candidate. In-flight Metal work cannot be interrupted mid-step. A busy worker
-rejects requests instead of queuing them. The app times out after 3 seconds.
-A disconnected client can leave up to the remaining generation budget running.
-No persistent KV cache reuse between requests yet. Cold model load happens before
-listening. Backend loss never blocks Rime keyboard handling.
+Each candidate has exactly one token ID and its real log probability. Probabilities
+are approximate due to quantization/numerical precision; top ten need not sum to
+one. No pinyin constraint or MLX Swift migration is implemented. Raw continuation
+can be imperfect with chat models; the output is not forced to be a comma.
+
+In-flight Metal work cannot be interrupted mid-step. A busy worker rejects requests
+instead of queuing them. The app times out after 3 seconds and discards stale
+responses. No persistent KV cache reuse between requests yet. Cold model load
+happens before listening. Backend loss never blocks Rime keyboard handling.
 
 Health: `GET /health`. Prediction: `POST /continuations` with a JSON `context`
 string of 1–80 characters. Browser-origin requests are rejected. The loopback

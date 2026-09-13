@@ -119,13 +119,11 @@ public enum LocalRecommendation {
         let reply = try JSONDecoder().decode(Reply.self, from: data)
         var texts: [String] = []
         for candidate in reply.candidates.prefix(5) {
-            let text = candidate.text.trimmingCharacters(in: .whitespaces)
+            let text = candidate.text
             guard candidate.score.isFinite, candidate.score <= 0,
-                  !text.isEmpty, text.count <= 24, !texts.contains(text),
-                  text.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) }),
+                  !text.isEmpty, !texts.contains(text),
                   !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) }),
-                  !text.contains("<"), !text.contains("\u{FFFD}"), !text.contains("```"),
-                  context.isEmpty || !text.hasPrefix(context) else { continue }
+                  !text.contains("\u{FFFD}") else { continue }
             texts.append(text)
         }
         guard !texts.isEmpty else { throw Failure.invalidContinuation }

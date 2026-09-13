@@ -7,11 +7,21 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
-def usable(text, context):
-    return (0 < len(text) <= 24 and any(c.isalpha() for c in text)
-            and not any(ord(c) < 32 or c in '\u2028\u2029' for c in text)
-            and '<' not in text and '\ufffd' not in text and '```' not in text
-            and not text.startswith(context))
+def token_candidates(top, special_ids):
+    candidates = []
+    for token in top:
+        text = token['text']
+        if (token['id'] in special_ids or not text or '\ufffd' in text
+                or any(ord(c) < 32 or c in '\u2028\u2029' for c in text)
+                or text in [c['text'] for c in candidates]):
+            continue
+        candidates.append({'text': text, 'token_ids': [token['id']],
+                           'token_logprobs': [token['logprob']],
+                           'logprob': token['logprob'], 'score': token['logprob'],
+                           'probability': token['probability']})
+        if len(candidates) == 5:
+            break
+    return candidates
 
 
 class Predictor:
@@ -34,33 +44,10 @@ class Predictor:
         top = [{'id': i, 'text': tokenizer.decode([i]), 'logprob': probs[i].item(),
                 'probability': math.exp(probs[i].item())} for i in ids]
         step.close()
-        candidates = []
-        eos = set(tokenizer.eos_token_ids)
-        for first in top:
-            if time.monotonic() - started > 2.4 or len(candidates) == 5:
-                break
-            if first['id'] in eos:
-                continue
-            tokens, scores = [first['id']], [first['logprob']]
-            generator = self.generate(mx.array(prompt + tokens), self.model, max_tokens=10)
-            for token, logprobs in generator:
-                if token in eos or time.monotonic() - started > 2.4:
-                    break
-                proposed = tokenizer.decode(tokens + [token])
-                if len(proposed) > 24 or any(c in proposed for c in '\n\r<>'):
-                    break
-                tokens.append(token)
-                scores.append(logprobs[token].item())
-                if proposed.endswith(('。', '！', '？', '，', '；', '.', '!', '?', ',', ';')):
-                    break
-            generator.close()
-            text = tokenizer.decode(tokens).strip()
-            if usable(text, context) and text not in [c['text'] for c in candidates]:
-                candidates.append({'text': text, 'token_ids': tokens, 'token_logprobs': scores,
-                                   'logprob': sum(scores), 'score': sum(scores) / len(scores)})
-        candidates.sort(key=lambda c: c['score'], reverse=True)
+        special_ids = set(tokenizer.eos_token_ids) | set(getattr(tokenizer, 'all_special_ids', []))
+        candidates = token_candidates(top, special_ids)
         return {'candidates': candidates, 'top_tokens': top,
-                'score_kind': 'mean token logprob; not phrase probability',
+                'score_kind': 'single next-token logprob (unmodified model distribution)',
                 'elapsed_ms': round((time.monotonic() - started) * 1000)}
 
 

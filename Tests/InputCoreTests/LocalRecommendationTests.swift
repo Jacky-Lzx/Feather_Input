@@ -47,4 +47,9 @@ final class LocalRecommendationTests: XCTestCase {
         XCTAssertEqual(try LocalRecommendation.parseMLXContinuations(data, context: "适合"), ["户外活动。", "出门散步，"])
         XCTAssertThrowsError(try LocalRecommendation.parseMLXContinuations(Data("{\"candidates\":[]}".utf8), context: "适合"))
     }
+    func testNextTokenPreservesPunctuationWhitespaceAndRepeatedTokens() throws {
+        let texts = ["，", " ", "你好", " world", "<"]
+        let data = try JSONSerialization.data(withJSONObject: ["candidates": texts.map { ["text": $0, "score": -1.0] as [String: Any] }])
+        XCTAssertEqual(try LocalRecommendation.parseMLXContinuations(data, context: "你好"), texts)
+    }
 }
