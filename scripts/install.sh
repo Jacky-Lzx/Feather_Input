@@ -10,4 +10,5 @@ if [ -e "$destination" ]; then
 fi
 mkdir -p "$HOME/Library/Input Methods"
 cp -R "$app" "$destination"
-echo 'Installed. Log out and back in if needed, then add Feather Input in System Settings > Keyboard > Text Input > Edit > + > Chinese, Simplified.'
+"$destination/Contents/MacOS/register-input-source" "$destination"
+echo "Installed and enabled. Choose Feather Input in the input source menu."

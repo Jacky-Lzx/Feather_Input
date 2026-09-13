@@ -14,10 +14,16 @@ Passed:
 
 Not yet verified:
 
-- System Settings registration and activation after installation/log-in.
+- Visual inspection of System Settings and actual typing after selecting the installed input source.
 - End-to-end typing and candidate positioning in Safari, chat apps, VS Code, terminals and multiple displays/Spaces.
 - Settings window appearance and interactions by GUI inspection.
 - Learning persistence after logout/restart, long-running resource usage and measured key latency.
 - Intel, older macOS versions, Developer ID signing and notarization.
 
-The generated bundle is a local development preview. The build script derives its minimum OS from the bundled dylibs (macOS 26.0 on this machine). Nothing has been installed into the user's Input Methods folder by this development run.
+The generated bundle is a local development preview. The build script derives its minimum OS from the bundled dylibs (macOS 26.0 on this machine). The corrected bundle has been installed into the user's Input Methods folder; see the registration follow-up below.
+
+## Registration fix
+
+The original bundle returned success from TISRegisterInputSource, but TISCreateInputSourceList could not enumerate it. Adding a visible ComponentInputModeDict alone did not resolve this. Changing the bundle identifier from `im.feather.inputmethod` to `im.feather.inputmethod.FeatherInput` (including the complete `.inputmethod.` segment) resolved enumeration. The server connection now uses the bundle-prefixed name declared in Info.plist.
+
+After rebuilding and replacing the installed app, the registration helper verified a selectable, enabled input source. Installed-app startup smoke testing also passed. The installer now checks enumeration and enabled state instead of treating the registration return code alone as success. It enables the input source without selecting it or modifying other input sources.

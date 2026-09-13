@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             Self.engine = try Engine(library: Bundle.main.bundlePath + "/Contents/Frameworks/librime.dylib",
                                      shared: resources + "/rime", user: user)
-            server = IMKServer(name: "FeatherInput_Connection", bundleIdentifier: Bundle.main.bundleIdentifier)
+            server = IMKServer(name: Bundle.main.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String, bundleIdentifier: Bundle.main.bundleIdentifier)
             guard server != nil, NSClassFromString("FeatherInputController") != nil else {
                 throw Engine.Failure.schemaUnavailable
             }
