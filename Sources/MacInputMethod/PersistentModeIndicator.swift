@@ -72,7 +72,8 @@ final class PersistentModeIndicator {
             return
         }
         var connected = Set<CGDirectDisplayID>()
-        for screen in NSScreen.screens {
+        // The primary display is stable across focus changes; NSScreen.main is not.
+        for screen in NSScreen.screens where (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == CGMainDisplayID() {
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
             let id = number.uint32Value
             connected.insert(id)
@@ -98,7 +99,7 @@ final class PersistentModeIndicator {
         var selected = true
         let indicator = PersistentModeIndicator(isSelected: { selected })
         indicator.update(ascii: false)
-        guard !indicator.windows.isEmpty,
+        guard indicator.windows.count == 1, indicator.windows[CGMainDisplayID()] != nil,
               indicator.windows.values.allSatisfy({ $0.isVisible && $0.label.stringValue == "中" && !$0.canBecomeKey && $0.ignoresMouseEvents }) else {
             throw Engine.Failure.schemaUnavailable
         }

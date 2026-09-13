@@ -61,3 +61,7 @@ The detector now uses keyCode to identify the side and the aggregate Control fla
 Added a shared, mouse-transparent, nonactivating panel on each connected screen at frame.minX + 12 / frame.minY + 40 points (34 × 34 points). It displays 中/英 while Feather is selected, updates on client activation and language toggles, survives normal focus changes and joins Spaces. It observes input-source, display, Space and preference notifications, and hides when another input source is selected or the setting is disabled. Screen frame rather than visibleFrame preserves the intended strip beside a left-side Dock.
 
 Release build, engine regression and packaged smoke checks passed. The new checks verified both labels, window reuse, non-key/mouse-transparent properties, hiding for other sources and the settings toggle. Inspected the rendered badge. Actual fullscreen and multi-screen switching remain subject to live GUI verification.
+
+## Primary-display-only badge
+
+The persistent badge now targets CGMainDisplayID instead of every connected display. Existing secondary-display panels are removed on refresh, and display-configuration notifications relocate it when the primary display changes. It does not follow the focused window to another monitor. The packaged smoke check requires exactly one panel on the primary display.
