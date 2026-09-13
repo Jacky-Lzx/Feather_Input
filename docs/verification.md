@@ -99,3 +99,9 @@ RightControlTap now rejects a press starting within 40 ms of the previous releas
 Regression tests replay the trace ordering, a burst, preserved timestamps, reset, held rejected presses, and shortcut cancellation. The controller supplies NSEvent's monotonic timestamp; synthetic events with no usable timestamp retain their untimed behavior. Physical keyboard confirmation remains necessary after installation.
 
 Build 12 passed all 14 unit tests, both schema engine checks and the isolated packaged smoke checks. It was installed, signature-verified, started, and the prior input-source selection restored.
+
+## Input menu display names
+
+The input source and section header were displaying localization keys. Added the bundle ID to InfoPlist.strings and provided all display-name mappings in Localizable.strings as well. The build compiles both tables into binary property lists. Installed-bundle lookups through both the InfoPlist and default tables now return Feather Input for CFBundleName and the Hans input-mode ID; both schema engine checks and signing verification passed.
+
+Build 13 was applied as a resource/metadata-only update with a backup. The running input engine was not restarted; TextInputMenuAgent was restarted to refresh its cached names. The computer-use connection timed out when attempting to inspect the actual menu, so visual confirmation of the menu labels remains pending.
