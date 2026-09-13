@@ -1,0 +1,25 @@
+import Foundation
+import InputCore
+
+let args = CommandLine.arguments
+ guard args.count == 4 else { fatalError("Usage: EngineCheck LIBRARY SHARED_DATA USER_DATA") }
+let engine = try Engine(library: args[1], shared: args[2], user: args[3])
+func check(_ condition: @autoclosure () -> Bool, _ message: String) {
+    guard condition() else { fputs("FAIL: \(message)\n", stderr); exit(1) }
+}
+for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
+    let session = try engine.session(scheme)
+    for c in input.utf8 { check(session.process(Int32(c)), "key \(c)") }
+    check(session.candidates.texts.contains("你好"), "\(scheme.title): 你好 candidate")
+    check(!session.preedit.text.isEmpty, "preedit")
+    session.process(32)
+    check(session.takeCommit() == "你好", "\(scheme.title): commit")
+    session.process(110); session.process(0xff1b)
+    check(session.preedit.text.isEmpty, "Escape clears")
+    session.process(110); session.process(0xff08)
+    check(session.preedit.text.isEmpty, "Backspace clears")
+    session.setASCII(true)
+    let handled = session.process(97)
+    check(!handled || session.takeCommit() == "a", "ASCII pass-through")
+    print("PASS: \(scheme.title), candidates, commit, Escape, Backspace, ASCII")
+}
