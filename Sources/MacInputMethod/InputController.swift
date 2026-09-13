@@ -179,14 +179,14 @@ final class InputController: IMKInputController {
         }
         for key in "nihao".utf8 { session.process(Int32(key)) }
         controller.refresh(textClient)
-        guard !flags(RightControlTap.rightControl | (1 << 18)), flags(0), controller.ascii,
+        guard !flags(1 << 18), flags(0), controller.ascii,
               textClient.committed == "你好你好", textClient.marked.isEmpty,
               controller.modeIndicator.isVisible, controller.modeIndicator.text == "英文" else { throw Engine.Failure.schemaUnavailable }
-        _ = flags(RightControlTap.rightControl | (1 << 18))
+        _ = flags(1 << 18)
         let shortcut = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0,
                                        windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
         guard !controller.handle(shortcut, client: textClient), !flags(0), controller.ascii else { throw Engine.Failure.schemaUnavailable }
-        _ = flags(RightControlTap.rightControl | (1 << 18))
+        _ = flags(1 << 18)
         guard flags(0), !controller.ascii, controller.modeIndicator.text == "中文", controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
         RunLoop.current.run(until: Date().addingTimeInterval(0.9))
         guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }

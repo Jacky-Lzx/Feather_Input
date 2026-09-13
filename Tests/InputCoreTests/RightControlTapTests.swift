@@ -2,6 +2,20 @@ import XCTest
 @testable import InputCore
 final class RightControlTapTests: XCTestCase {
     let right = RightControlTap.rightControl | (1 << 18)
+    func testIMKNormalizedFlagsWithoutDeviceBits() {
+        var tap = RightControlTap()
+        XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: 1 << 18))
+        XCTAssertTrue(tap.flagsChanged(keyCode: 62, flags: 0))
+    }
+    func testNormalizedLeftControlDoesNotToggleOrAllowChord() {
+        var tap = RightControlTap()
+        XCTAssertFalse(tap.flagsChanged(keyCode: 59, flags: 1 << 18))
+        XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: 1 << 18))
+        XCTAssertFalse(tap.flagsChanged(keyCode: 59, flags: 1 << 18))
+        XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: 0))
+        _ = tap.flagsChanged(keyCode: 62, flags: 1 << 18)
+        XCTAssertTrue(tap.flagsChanged(keyCode: 62, flags: 0))
+    }
     func testOnlyReleaseOfStandaloneRightControlToggles() {
         var tap = RightControlTap()
         XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: right))
