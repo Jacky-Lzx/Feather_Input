@@ -23,6 +23,47 @@ final class InputController: IMKInputController {
     private var displayedOriginal: [String] = []
     private var displayedPreedit = ""
     private var displayedHighlight = 0
+    private var scoringEnabled: Bool { UserDefaults.standard.bool(forKey: "aiCandidateScoringEnabled") }
+    private var scoredPreedit = ""
+    private var scoredOriginal: [String] = []
+    private var scoredContext = ""
+    private var scoringLockedPreedit = ""
+    private var scoringLockedOriginal: [String] = []
+    private var requestScoring: (String, String, [String]) async throws -> [LocalRecommendation.RankedToken] = {
+        try await LocalRecommendation.scoreCandidates(context: $0, preedit: $1, candidates: $2)
+    }
+    private func scheduleScoring(_ client: IMKTextInput, preedit: String, candidates: [String]) {
+        guard scoringEnabled, isActive, !ascii, !recentContext.isEmpty, candidates.count > 1,
+              scoredPreedit != preedit || scoredOriginal != candidates || scoredContext != recentContext else { return }
+        guard scoringLockedPreedit != preedit || scoringLockedOriginal != candidates else { return }
+        let version = recommendationVersion
+        let context = recentContext
+        let range = client.selectedRange()
+        let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let request = requestScoring
+        recommendationTask = Task { @MainActor [weak self, weak client] in
+            do {
+                try await Task.sleep(nanoseconds: 120_000_000)
+                try Task.checkCancellation()
+                let started = DispatchTime.now().uptimeNanoseconds
+                let result = try await request(context, preedit, candidates)
+                let delay = Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
+                try Task.checkCancellation()
+                guard let self, let client, self.isActive, !self.ascii, self.scoringEnabled,
+                      self.recommendationVersion == version, self.recentContext == context,
+                      self.session?.preedit.text == preedit, self.session?.candidates.texts == candidates,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+                      NSEqualRanges(client.selectedRange(), range), delay <= 700,
+                      !self.candidatesPanel.contains(NSEvent.mouseLocation) else { return }
+                self.scoredPreedit = preedit
+                self.scoredOriginal = candidates
+                self.scoredContext = context
+                self.frozenPrediction = result
+                self.frozenPredictionDelayMS = delay
+                self.refresh(client, allowScoring: false)
+            } catch { /* Rime's current page remains usable if scoring fails. */ }
+        }
+    }
     private var rankingEnabled: Bool { UserDefaults.standard.bool(forKey: "aiRerankingEnabled") }
     private var requestRanking: (String) async throws -> [LocalRecommendation.RankedToken] = {
         try await LocalRecommendation.mlxRankedTokens(context: $0)
@@ -35,7 +76,7 @@ final class InputController: IMKInputController {
     }
     private func scheduleRanking(_ client: IMKTextInput) {
         cancelRanking(clearCache: true)
-        guard rankingEnabled, isActive, !ascii, !recentContext.isEmpty else { return }
+        guard !scoringEnabled, rankingEnabled, isActive, !ascii, !recentContext.isEmpty else { return }
         let version = rankingVersion
         let context = recentContext
         let range = client.selectedRange()
@@ -84,6 +125,7 @@ final class InputController: IMKInputController {
         candidatesPanel.markRecommendation(nil)
         if clearContext {
             recentContext = ""
+            scoredPreedit = ""; scoredOriginal = []; scoredContext = ""
             cancelRanking(clearCache: true)
             if session?.preedit.text.isEmpty != false { frozenPrediction = nil }
         }
@@ -126,7 +168,8 @@ final class InputController: IMKInputController {
         guard let event, let client = sender as? IMKTextInput else { return false }
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
-        let changesPosition = event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode)
+        let composing = session?.preedit.text.isEmpty == false
+        let changesPosition = event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || (!composing && [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode))
         invalidateRecommendation(clearContext: changesPosition)
         if event.type == .flagsChanged {
             if capsLockSwitch.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
@@ -180,8 +223,13 @@ final class InputController: IMKInputController {
         else if let chars = characters, chars.unicodeScalars.count == 1,
                 let scalar = chars.unicodeScalars.first, scalar.value < 128 { key = Int32(scalar.value) }
         else { return false }
+        if scoringEnabled, !session.preedit.text.isEmpty, [0xff52, 0xff54, 0xff50, 0xff57].contains(key) {
+            scoringLockedPreedit = session.preedit.text
+            scoringLockedOriginal = session.candidates.texts
+        }
         if !ascii, session.preedit.text.isEmpty, (97...122).contains(key) {
-            frozenPrediction = rankingEnabled ? cachedPrediction : []
+            scoringLockedPreedit = ""; scoringLockedOriginal = []
+            frozenPrediction = rankingEnabled && !scoringEnabled ? cachedPrediction : []
             frozenPredictionDelayMS = rankingEnabled ? cachedPredictionDelayMS : nil
             cancelRanking(clearCache: true)
         }
@@ -215,12 +263,13 @@ final class InputController: IMKInputController {
         candidatesPanel.hide()
         invalidateRecommendation(clearContext: true)
     }
-    private func refresh(_ client: IMKTextInput) {
+    private func refresh(_ client: IMKTextInput, allowScoring: Bool = true) {
         invalidateRecommendation()
         guard let session else { return }
         let committed = session.takeCommit()
         if let text = committed {
             frozenPrediction = nil
+            scoredPreedit = ""; scoredOriginal = []; scoredContext = ""
             cancelRanking(clearCache: true)
             recentContext = String((recentContext + text).suffix(80))
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -235,7 +284,8 @@ final class InputController: IMKInputController {
             if preedit.text.isEmpty {
                 frozenPrediction = nil
                 if let committed, !committed.isEmpty {
-                    if rankingEnabled { scheduleRanking(client) }
+                    if scoringEnabled { /* Wait for Rime candidates. */ }
+                    else if rankingEnabled { scheduleRanking(client) }
                     else { scheduleContinuation(client) }
                 }
             }
@@ -245,6 +295,9 @@ final class InputController: IMKInputController {
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
         if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0 { lastCaret = caret }
         let anchor = lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
+        if scoringEnabled && (scoredPreedit != preedit.text || scoredOriginal != candidates.texts || scoredContext != recentContext) {
+            frozenPrediction = nil
+        }
         let order = CandidateRanking.order(candidates.texts, predictions: (frozenPrediction ?? []).map(\.text))
         if displayedOriginal != candidates.texts || displayedPreedit != preedit.text { displayedHighlight = 0 }
         displayedOriginal = candidates.texts
@@ -254,14 +307,16 @@ final class InputController: IMKInputController {
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
                              highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
                              llmRanks: order.map { index in frozenPrediction?.first(where: { $0.text == candidates.texts[index] })?.rank },
-                             llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS) { [weak self, weak client] index in
+                             llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS, llmTitle: scoringEnabled ? "LLM · 候选评分" : "LLM top-k · 本轮预测") { [weak self, weak client] index in
             guard let self, self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
                   self.displayedOrder == order else { return }
             self.rightControlTap.cancel()
             _ = self.selectDisplayed(index, client: client)
         }
-        if !rankingEnabled && frozenPrediction?.isEmpty != false {
+        if scoringEnabled {
+            if allowScoring { scheduleScoring(client, preedit: preedit.text, candidates: candidates.texts) }
+        } else if !rankingEnabled && frozenPrediction?.isEmpty != false {
             scheduleRecommendation(preedit: preedit.text, texts: candidates.texts)
         }
     }
@@ -408,6 +463,54 @@ final class InputController: IMKInputController {
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
         modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
+    }
+
+    static func verifyScoringLifecycle(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let saved = ["aiCandidateScoringEnabled", "scheme"].map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in saved {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(true, forKey: "aiCandidateScoringEnabled")
+        defaults.set(InputScheme.full.rawValue, forKey: "scheme")
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(client)
+        controller.recentContext = "我们"
+        controller.requestScoring = { _, _, texts in
+            texts.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1) }
+        }
+        func key(_ text: String, code: UInt16 = 0) -> Bool {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                        windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
+                                        isARepeat: false, keyCode: code)!
+            return controller.handle(event, client: client)
+        }
+        _ = key("n"); _ = key("i")
+        guard let original = controller.session?.candidates.texts, original.count > 1 else { throw Engine.Failure.schemaUnavailable }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        guard controller.displayedOrder.first == original.count - 1, controller.frozenPredictionDelayMS != nil else { throw Engine.Failure.schemaUnavailable }
+        let before = client.committed
+        guard key("1", code: 18), client.committed == before + original.last! else { throw Engine.Failure.schemaUnavailable }
+        controller.requestScoring = { _, _, texts in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            return texts.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1) }
+        }
+        _ = key("n"); _ = key("i")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        _ = key("", code: 125)
+        let locked = controller.displayedOrder
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        guard controller.displayedOrder == locked else { throw Engine.Failure.schemaUnavailable }
+        let context = controller.recentContext
+        _ = key("", code: 51)
+        guard controller.recentContext == context else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+        guard controller.frozenPrediction == nil else { throw Engine.Failure.schemaUnavailable }
+        print("PASS: candidate scoring reorders Rime, numeric mapping, navigation lock, backspace context and stale/deactivated rejection")
     }
 
     static func verifyRankingLifecycle(server: IMKServer) throws {

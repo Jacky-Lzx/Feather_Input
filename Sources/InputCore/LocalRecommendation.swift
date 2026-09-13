@@ -158,6 +158,27 @@ public enum LocalRecommendation {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "count": count])
         return try await traced(request: request, token: "") { try parseMLXRankedTokens($0, context: context, count: count) }
     }
+    public static func parseCandidateScores(_ data: Data, candidates: [String]) throws -> [RankedToken] {
+        struct Reply: Decodable {
+            struct Candidate: Decodable { let id: Int; let text: String; let score: Double }
+            let candidates: [Candidate]
+        }
+        let reply = try JSONDecoder().decode(Reply.self, from: data)
+        guard reply.candidates.count == candidates.count,
+              Set(reply.candidates.map(\.id)) == Set(candidates.indices),
+              reply.candidates.allSatisfy({ candidates.indices.contains($0.id) && candidates[$0.id] == $0.text && $0.score.isFinite && $0.score <= 0 }) else {
+            throw Failure.invalidResponse
+        }
+        return reply.candidates.sorted { $0.score == $1.score ? $0.id < $1.id : $0.score > $1.score }
+            .enumerated().map { RankedToken(text: $0.element.text, rank: $0.offset + 1) }
+    }
+    public static func scoreCandidates(context: String, preedit: String, candidates: [String]) async throws -> [RankedToken] {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:1235/score")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "preedit": preedit, "candidates": candidates])
+        return try await traced(request: request, token: "") { try parseCandidateScores($0, candidates: candidates) }
+    }
     private static func traced<T>(request: URLRequest, token: String, parse: (Data) throws -> T) async throws -> T {
         let id = await LLMDebugLog.shared.begin(request: request, token: token)
         var body: Data?

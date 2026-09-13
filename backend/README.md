@@ -80,3 +80,35 @@ The companion panel shows request round-trip delay in milliseconds. Timing uses 
 monotonic clock around the request and response parsing, includes local transport
 and inference, and is frozen with that prediction. It excludes the user's wait
 before typing the next composition and is not pure model compute time.
+
+## Candidate probability scoring (experimental)
+
+Enable **用 MLX 给当前拼音候选打分**. It takes precedence over cached top-k ranking,
+independent continuation, and legacy recommendation. Rime supplies the current
+page of pinyin-compatible candidates (both full pinyin and Flypy); the model does
+not interpret raw pinyin. `POST /score` accepts `context`, `preedit` (debug metadata),
+and 1–9 candidate strings (up to 64 characters/tokens each).
+
+For each candidate the worker evaluates `encode(context) + encode(candidate)`
+with an explicit token boundary and teacher-forced causal logits. Only candidate
+positions contribute. Responses include original candidate ID, token IDs, each
+conditional log probability, their sum, and their mean. Ranking uses mean token log
+probability to mitigate the raw sum's short-sequence bias; it is a heuristic that
+can favor longer predictable strings, not a calibrated probability of an intended
+word. Ties retain Rime order. No EOS probability is included. Context is limited to
+80 characters. Each candidate currently recomputes its context without KV sharing.
+
+The app immediately displays Rime's page, waits 120 ms after input, then requests
+scores. A response can reorder only the unchanged page and context within 700 ms
+of request start. Further input, navigation, selection, focus change, disabled
+settings, or cancellation invalidates the response. Hovering either candidate
+window also prevents a pending reorder. Up/down selection locks scoring for that
+page. This differs from frozen next-token mode: a stationary page may update once
+when scoring arrives. The side window is titled **LLM · 候选评分**; its ranks are
+among the supplied candidates, not full-vocabulary token ranks. Request delay
+remains visible; all per-token scores are available in the opt-in debug window.
+
+Timeouts, busy service, invalid responses, and missing context leave Rime usable.
+The 2.4 s worker budget is checked between candidates; one Metal call cannot be
+interrupted. No cross-page ranking or automatic insertion is performed. Disable
+this option to return to the previous cached top-k mode.

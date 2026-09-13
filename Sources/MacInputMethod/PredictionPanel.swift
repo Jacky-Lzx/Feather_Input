@@ -44,14 +44,14 @@ final class PredictionPanel {
     }
     func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
     func hide() { panel.orderOut(nil) }
-    func show(_ tokens: [LocalRecommendation.RankedToken], delayMS: Int? = nil, beside anchor: NSRect, visible: NSRect) {
+    func show(_ tokens: [LocalRecommendation.RankedToken], delayMS: Int? = nil, title: String = "LLM top-k · 本轮预测", beside anchor: NSRect, visible: NSRect) {
         guard !tokens.isEmpty else { hide(); return }
         let rows = tokens.sorted { $0.rank < $1.rank }.map {
             "#\($0.rank)  " + $0.text.replacingOccurrences(of: " ", with: "␠")
                 .replacingOccurrences(of: "\n", with: "↵").replacingOccurrences(of: "\t", with: "⇥")
         }
         let delay = delayMS.map { "延迟 \($0) ms（请求往返）" } ?? "延迟 —"
-        let lines = ["LLM top-k · 本轮预测", delay, ""] + rows
+        let lines = [title, delay, ""] + rows
         label.stringValue = lines.joined(separator: "\n")
         let width: CGFloat = min(300, max(190, lines.map { ($0 as NSString).size(withAttributes: [.font: label.font!]).width + 36 }.max() ?? 190))
         let height = CGFloat(lines.count) * 18 + 24

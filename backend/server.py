@@ -50,6 +50,35 @@ class Predictor:
                 'score_kind': 'single next-token logprob (unmodified model distribution)',
                 'elapsed_ms': round((time.monotonic() - started) * 1000)}
 
+    def score(self, context, candidates):
+        mx, tokenizer = self.mx, self.tokenizer
+        prefix = tokenizer.encode(context, add_special_tokens=False)
+        if not prefix:
+            raise ValueError('empty prefix')
+        started = time.monotonic()
+        results = []
+        for index, text in enumerate(candidates):
+            if time.monotonic() - started > 2.4:
+                raise TimeoutError('scoring budget exceeded')
+            tokens = tokenizer.encode(text, add_special_tokens=False)
+            if not tokens or len(tokens) > 64:
+                raise ValueError('invalid candidate tokens')
+            # Score only candidate positions; context tokens never enter the score.
+            # Explicit token boundary: encode(context) + encode(candidate).
+            inputs = mx.array([prefix + tokens[:-1]])
+            logits = self.model(inputs)[:, len(prefix) - 1:, :].astype(mx.float32)
+            logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+            scores = mx.take_along_axis(logprobs, mx.array(tokens)[None, :, None], axis=-1).reshape(-1)
+            mx.eval(scores)
+            values = scores.tolist()
+            total = sum(values)
+            results.append({'id': index, 'text': text, 'token_ids': tokens,
+                            'token_logprobs': values, 'logprob': total,
+                            'score': total / len(tokens)})
+        results.sort(key=lambda c: (-c['score'], c['id']))
+        return {'candidates': results, 'score_kind': 'mean candidate token logprob',
+                'elapsed_ms': round((time.monotonic() - started) * 1000)}
+
 
 def serve(model_path, port):
     predictor = Predictor(model_path)
@@ -80,7 +109,7 @@ def serve(model_path, port):
 
         def do_POST(self):
             # Reject browser-origin requests and never expose a network listener.
-            if self.path != '/continuations' or self.headers.get('Origin'):
+            if self.path not in ('/continuations', '/score') or self.headers.get('Origin'):
                 self.reply(403, {'error': 'unsupported request'})
                 return
             try:
@@ -89,6 +118,11 @@ def serve(model_path, port):
                     raise ValueError()
                 payload = json.loads(self.rfile.read(size))
                 context = payload['context']
+                candidates = payload.get('candidates')
+                if self.path == '/score':
+                    if (not isinstance(candidates, list) or not 1 <= len(candidates) <= 9
+                            or any(not isinstance(t, str) or not t or len(t) > 64 for t in candidates)):
+                        raise ValueError()
                 count = payload.get('count', 5)
                 if type(count) is not int or not 1 <= count <= 20:
                     raise ValueError()
@@ -101,7 +135,7 @@ def serve(model_path, port):
                 self.reply(503, {'error': 'busy'})
                 return
             try:
-                self.reply(200, predictor.predict(context, count))
+                self.reply(200, predictor.score(context, candidates) if self.path == "/score" else predictor.predict(context, count))
             except Exception:
                 self.reply(500, {'error': 'inference failed'})
             finally:

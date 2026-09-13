@@ -27,6 +27,7 @@ private struct SettingsView: View {
     @AppStorage("aiCandidateCount") private var aiCandidateCount = 5
     @AppStorage("candidateLayout") private var layout = "vertical"
     @AppStorage("showPersistentMode") private var showPersistentMode = true
+    @AppStorage("aiCandidateScoringEnabled") private var scoringEnabled = false
     @AppStorage("aiRerankingEnabled") private var rerankingEnabled = false
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
     @AppStorage("aiContinuationEnabled") private var continuationEnabled = false
@@ -60,6 +61,9 @@ private struct SettingsView: View {
                 Text("Caps Lock 或单按右 Control 切换中英文\n点击或数字键选词 · 空格上屏 · Page Up / Down 翻页")
                     .font(.footnote).foregroundStyle(.secondary)
                 Divider()
+                Toggle("用 MLX 给当前拼音候选打分", isOn: $scoringEnabled)
+                Text("优先使用此模式：停顿 120 ms 后给当前页 Rime 候选评分，支持多 token 词。700 ms 内返回才更新；继续输入或选择会取消旧请求。侧窗名次是候选评分排名。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("用 MLX 下一 token 给拼音候选排序", isOn: $rerankingEnabled)
                 Text("上屏后后台预测；下一轮拼音固定使用已缓存结果。当前页精确匹配的候选优先，未匹配项保持原顺序；无结果时沿用 Rime。开启后不显示独立预测窗口。")
                     .font(.footnote).foregroundStyle(.secondary)
