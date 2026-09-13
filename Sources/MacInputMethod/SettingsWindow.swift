@@ -27,6 +27,7 @@ private struct SettingsView: View {
     @AppStorage("showPersistentMode") private var showPersistentMode = true
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
     @AppStorage("aiModel") private var model = ""
+    @ObservedObject private var debugLog = LLMDebugLog.shared
     @State private var token = ""
     @State private var status = ""
     @State private var models: [String] = []
@@ -86,6 +87,8 @@ private struct SettingsView: View {
                         }
                     }.disabled(testing)
                 }
+                Toggle("LLM 调试模式（仅内存记录）", isOn: $debugLog.enabled)
+                Button("打开 LLM 调试窗口") { LLMDebugWindow.shared.show() }
                 if !status.isEmpty { Text(status).font(.footnote).textSelection(.enabled) }
                 Text("词库和学习记录保存在本机。")
                     .font(.footnote).foregroundStyle(.secondary)

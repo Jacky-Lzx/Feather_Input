@@ -60,17 +60,38 @@ public enum LocalRecommendation {
     public static func recommend(model: String, token: String, context: String, preedit: String, candidates: [String]) async throws -> Int {
         guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, candidates.count > 1 else { throw Failure.invalidResponse }
         let request = try request(model: model, token: token, context: context, preedit: preedit, candidates: candidates)
-        let (data, response) = try await session.data(for: request)
-        try validate(response)
-        return try parse(data, candidateCount: candidates.count)
+        return try await traced(request: request, token: token) { data in
+            try parse(data, candidateCount: candidates.count)
+        }
     }
     public static func models(token: String) async throws -> [String] {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:1234/v1/models")!)
         if !token.isEmpty { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-        let (data, response) = try await session.data(for: request)
-        try validate(response)
         struct Models: Decodable { struct Model: Decodable { let id: String }; let data: [Model] }
-        return try JSONDecoder().decode(Models.self, from: data).data.map(\.id)
+        return try await traced(request: request, token: token) { data in
+            try JSONDecoder().decode(Models.self, from: data).data.map(\.id)
+        }
+    }
+    private static func traced<T>(request: URLRequest, token: String, parse: (Data) throws -> T) async throws -> T {
+        let id = await LLMDebugLog.shared.begin(request: request, token: token)
+        var body: Data?
+        var status: Int?
+        do {
+            let (data, response) = try await session.data(for: request)
+            body = data
+            status = (response as? HTTPURLResponse)?.statusCode
+            try validate(response)
+            let result = try parse(data)
+            await LLMDebugLog.shared.finish(id, data: body, status: status, outcome: "成功（返回已解析）", token: token)
+            return result
+        } catch {
+            let outcome: String
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { outcome = "已取消（输入可能已变化）" }
+            else if (error as? URLError)?.code == .timedOut { outcome = "请求超时" }
+            else { outcome = (error as? Failure)?.errorDescription ?? "连接失败或返回格式无效" }
+            await LLMDebugLog.shared.finish(id, data: body, status: status, outcome: outcome, token: token)
+            throw error
+        }
     }
     private static func validate(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else { throw Failure.unavailable }

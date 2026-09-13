@@ -189,7 +189,13 @@ final class InputController: IMKInputController {
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "设置…", action: #selector(showSettings(_:)), keyEquivalent: "")
         settings.target = self; menu.addItem(settings)
+        let debug = NSMenuItem(title: "LLM 调试…", action: #selector(showLLMDebug(_:)), keyEquivalent: "")
+        debug.target = self
+        menu.addItem(debug)
         return menu
+    }
+    @objc private func showLLMDebug(_ sender: Any?) {
+        Task { @MainActor in LLMDebugWindow.shared.show() }
     }
     private func commandClient(_ sender: Any?) -> Any? {
         (sender as? NSDictionary)?[kIMKCommandClientName as String] ?? client()

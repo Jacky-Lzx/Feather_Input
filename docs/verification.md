@@ -117,3 +117,13 @@ Settings default AI off and provide model discovery, a synthetic inference check
 The real LM Studio server previously returned an authentication-required response. No token has been provided, so actual Qwen model quality, cold-load behavior, JSON compatibility and latency remain unverified. These require entering the token and running the settings connection check; no claim of successful real-model inference is made.
 
 Build 14 passed 16 unit tests, both engine schema checks, and the final isolated smoke suite including recommendation lifecycle checks. It was installed with the previous bundle backed up, signature verified, and the prior input-source selection restored. AI remains off until explicitly enabled in settings.
+
+## LLM debug window
+
+Added an opt-in, process-local observable log at the actual network boundary, covering model listing and chat recommendations. Entries include sanitized request body, returned body (including unsuccessful HTTP responses), HTTP status, elapsed time, and parse/transport/cancellation outcome. No headers are collected. Current-token redaction covers normal and JSON-escaped representations. Disabled mode skips record construction. The log caps history at 30 and displayed bodies at 32,000 characters. Clearing or disabling drops entry identities so in-flight completions cannot repopulate old records.
+
+The floating, resizable debug panel can remain visible while typing elsewhere. It exposes a mode toggle, follow-latest toggle, request selection, selectable text and clearing. Settings and the IMK menu both open the panel. Debug mode is not persisted and defaults off on process launch; closing just the window preserves active logging.
+
+18 unit tests passed, including opt-in, disabling/re-enabling while requests complete, clearing, history bounds, truncation and quoted/slashed token redaction. A standalone preview using the real LocalRecommendation.models implementation made an unauthenticated request to the real loopback server; the debug window showed one HTTP 401 entry, body and 13 ms duration. Its layout bitmap was inspected (system-composited control surfaces do not fully render in such captures). No actual user prompts or credentials were used in the preview.
+
+Build 15 passed both engine schema checks and the full isolated smoke suite, including asynchronous recommendation cancellation. It was installed with a backup, signature verified, started, and the prior input-source selection restored. Debug mode remains off at startup.
