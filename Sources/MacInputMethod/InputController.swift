@@ -12,8 +12,11 @@ final class InputController: IMKInputController {
     private var recommendationVersion = UUID()
     private var recentContext = ""
     private var continuationText: String?
-    private var requestContinuation: (String, String, String) async throws -> String = {
-        try await LocalRecommendation.continueText(model: $0, token: $1, context: $2)
+    private var requestContinuation: (String, String, String) async throws -> [String] = {
+        if UserDefaults.standard.string(forKey: "aiContinuationBackend") == "mlx" {
+            return try await LocalRecommendation.mlxContinuations(context: $2)
+        }
+        return [try await LocalRecommendation.continueText(model: $0, token: $1, context: $2)]
     }
     private var requestRecommendation: (String, String, String, String, [String]) async throws -> Int = {
         try await LocalRecommendation.recommend(model: $0, token: $1, context: $2, preedit: $3, candidates: $4)
@@ -187,8 +190,11 @@ final class InputController: IMKInputController {
     }
     private func scheduleContinuation(_ client: IMKTextInput) {
         let defaults = UserDefaults.standard
+        let backend = defaults.string(forKey: "aiContinuationBackend")
+        let savedModel = defaults.string(forKey: "aiModel")
+        let model = savedModel ?? ""
         guard isActive, !ascii, defaults.bool(forKey: "aiContinuationEnabled"), !recentContext.isEmpty,
-              let model = defaults.string(forKey: "aiModel"), !model.isEmpty else { return }
+              (backend == "mlx" || !model.isEmpty) else { return }
         let version = recommendationVersion
         let context = recentContext
         let range = client.selectedRange()
@@ -202,14 +208,17 @@ final class InputController: IMKInputController {
                 try Task.checkCancellation()
                 guard self?.isActive == true, self?.recommendationVersion == version,
                       UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
-                      UserDefaults.standard.string(forKey: "aiModel") == model else { return }
-                let text = try await request(model, token, context)
+                      UserDefaults.standard.string(forKey: "aiModel") == savedModel,
+                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend else { return }
+                let texts = try await request(model, token, context)
+                guard let text = texts.first else { return }
                 try Task.checkCancellation()
                 guard let self, let client, self.isActive, !self.ascii,
                       self.recommendationVersion == version, self.recentContext == context,
                       self.session?.preedit.text.isEmpty == true,
                       UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
-                      UserDefaults.standard.string(forKey: "aiModel") == model,
+                      UserDefaults.standard.string(forKey: "aiModel") == savedModel,
+                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
                       NSEqualRanges(client.selectedRange(), range) else { return }
                 var caret = NSRect.zero
@@ -217,16 +226,19 @@ final class InputController: IMKInputController {
                 let anchor = caret.height > 0 && caret.origin.x.isFinite && caret.origin.y.isFinite ? caret : self.lastCaret
                 guard let anchor else { return }
                 self.continuationText = text
-                self.candidatesPanel.show(texts: [text], highlight: -1, caret: anchor, continuation: true) { [weak self, weak client] _ in
+                self.candidatesPanel.show(texts: texts, highlight: -1, caret: anchor, continuation: true) { [weak self, weak client] index in
                     guard let self, let client, self.isActive, !self.ascii, self.recommendationVersion == version,
                           self.continuationText == text, self.session?.preedit.text.isEmpty == true,
                           UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
-                          UserDefaults.standard.string(forKey: "aiModel") == model,
+                          UserDefaults.standard.string(forKey: "aiModel") == savedModel,
+                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
                           NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
                           NSEqualRanges(client.selectedRange(), range) else { return }
+                    guard texts.indices.contains(index) else { return }
+                    let selected = texts[index]
                     self.invalidateRecommendation()
-                    client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-                    self.recentContext = String((context + text).suffix(80))
+                    client.insertText(selected, replacementRange: NSRange(location: NSNotFound, length: 0))
+                    self.recentContext = String((context + selected).suffix(80))
                 }
             } catch { /* A continuation is optional; failures never affect committed text. */ }
         }
@@ -307,14 +319,14 @@ final class InputController: IMKInputController {
         controller.activateServer(client)
         controller.requestContinuation = { _, _, _ in
             try? await Task.sleep(nanoseconds: 50_000_000)
-            return "好，明天见"
+            return ["好，明天见", "好，周末见"]
         }
         for key in "ni ".utf8 { controller.session?.process(Int32(key)) }
         controller.refresh(client)
         let committed = client.committed
         RunLoop.current.run(until: Date().addingTimeInterval(0.65))
         guard !committed.isEmpty, client.committed == committed, controller.continuationText == "好，明天见",
-              controller.candidatesPanel.verifyClick(on: 0), client.committed == committed + "好，明天见",
+              controller.candidatesPanel.verifyClick(on: 1), client.committed == committed + "好，周末见",
               controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
         controller.scheduleContinuation(client)
         RunLoop.current.run(until: Date().addingTimeInterval(0.42))

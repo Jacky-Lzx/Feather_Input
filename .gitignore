@@ -3,3 +3,6 @@
 dist/
 .DS_Store
 .swiftpm/
+
+.venv-mlx/
+__pycache__/

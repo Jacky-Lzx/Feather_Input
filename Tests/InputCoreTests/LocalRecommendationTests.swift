@@ -36,4 +36,15 @@ final class LocalRecommendationTests: XCTestCase {
         }
     }
 
+    func testMLXFiltersInvalidCandidatesAndPreservesDistinctOrder() throws {
+        let data = try JSONSerialization.data(withJSONObject: ["candidates": [
+            ["text": "户外活动。", "score": -0.8],
+            ["text": "户外活动。", "score": -1.0],
+            ["text": "第一行\n第二行", "score": -1.1],
+            ["text": "出门散步，", "score": -1.2],
+            ["text": "错误概率", "score": 0.5]
+        ]])
+        XCTAssertEqual(try LocalRecommendation.parseMLXContinuations(data, context: "适合"), ["户外活动。", "出门散步，"])
+        XCTAssertThrowsError(try LocalRecommendation.parseMLXContinuations(Data("{\"candidates\":[]}".utf8), context: "适合"))
+    }
 }

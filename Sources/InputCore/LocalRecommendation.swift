@@ -1,6 +1,6 @@
 import Foundation
 
-/// Only candidate identities cross this boundary; generated text is never committed.
+/// Local inference requests; generated continuations require explicit selection.
 public enum LocalRecommendation {
     public enum Failure: Error, LocalizedError {
         case unauthorized, unavailable, invalidResponse, invalidContinuation
@@ -110,6 +110,34 @@ public enum LocalRecommendation {
         if !token.isEmpty { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await traced(request: request, token: token) { try parseContinuation($0, context: context) }
+    }
+    public static func parseMLXContinuations(_ data: Data, context: String) throws -> [String] {
+        struct Reply: Decodable {
+            struct Candidate: Decodable { let text: String; let score: Double }
+            let candidates: [Candidate]
+        }
+        let reply = try JSONDecoder().decode(Reply.self, from: data)
+        var texts: [String] = []
+        for candidate in reply.candidates.prefix(5) {
+            let text = candidate.text.trimmingCharacters(in: .whitespaces)
+            guard candidate.score.isFinite, candidate.score <= 0,
+                  !text.isEmpty, text.count <= 24, !texts.contains(text),
+                  text.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) }),
+                  !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) }),
+                  !text.contains("<"), !text.contains("\u{FFFD}"), !text.contains("```"),
+                  context.isEmpty || !text.hasPrefix(context) else { continue }
+            texts.append(text)
+        }
+        guard !texts.isEmpty else { throw Failure.invalidContinuation }
+        return texts
+    }
+    public static func mlxContinuations(context: String) async throws -> [String] {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:1235/continuations")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80))])
+        return try await traced(request: request, token: "") { try parseMLXContinuations($0, context: context) }
     }
     private static func traced<T>(request: URLRequest, token: String, parse: (Data) throws -> T) async throws -> T {
         let id = await LLMDebugLog.shared.begin(request: request, token: token)

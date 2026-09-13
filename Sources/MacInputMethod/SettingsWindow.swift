@@ -27,6 +27,7 @@ private struct SettingsView: View {
     @AppStorage("showPersistentMode") private var showPersistentMode = true
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
     @AppStorage("aiContinuationEnabled") private var continuationEnabled = false
+    @AppStorage("aiContinuationBackend") private var continuationBackend = "lmstudio"
     @AppStorage("aiModel") private var model = ""
     @ObservedObject private var debugLog = LLMDebugLog.shared
     @State private var token = ""
@@ -56,6 +57,20 @@ private struct SettingsView: View {
                 Divider()
                 Toggle("启用本地 AI 候选推荐", isOn: $aiEnabled)
                 Toggle("上屏后 AI 短语续写", isOn: $continuationEnabled)
+                Picker("续写后端", selection: $continuationBackend) {
+                    Text("LM Studio").tag("lmstudio")
+                    Text("MLX 概率候选 · 本机 1235").tag("mlx")
+                }
+                Button("测试 MLX 概率候选") {
+                    testing = true
+                    Task { @MainActor in
+                        defer { testing = false }
+                        do {
+                            let texts = try await LocalRecommendation.mlxContinuations(context: "今天的天气很好，适合")
+                            status = "MLX：" + texts.joined(separator: " / ")
+                        } catch { status = "MLX 请求失败，请检查 1235 端口后端；详细响应见调试窗口。" }
+                    }
+                }.disabled(testing)
                 Text("上屏后停顿 400 ms，预测最多 24 个字符。点击“AI 续写”插入；继续输入取消建议。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Text("LM Studio · 127.0.0.1:1234\n发送本次输入位置最近上屏的最多 80 个字符、拼音及候选。✦ 标记推荐项，原编号和空格行为不变。")
