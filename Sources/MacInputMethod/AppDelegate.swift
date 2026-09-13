@@ -18,7 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard server != nil, NSClassFromString("FeatherInputController") != nil else {
                 throw Engine.Failure.schemaUnavailable
             }
+            PersistentModeIndicator.shared.refresh()
             if smokeTest {
+                try PersistentModeIndicator.verify()
                 try InputController.verifyMenuCommands(server: server!)
                 try CandidatePanel.verifyPresentation()
                 try InputController.verifyKeyboardAndClick(server: server!)

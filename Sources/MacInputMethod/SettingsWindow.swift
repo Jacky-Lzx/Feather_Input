@@ -7,7 +7,7 @@ final class SettingsWindow {
     private var window: NSWindow?
     func show() {
         if window == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 280),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 310),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Feather Input 设置"
             window.contentView = NSHostingView(rootView: SettingsView())
@@ -24,6 +24,7 @@ private struct SettingsView: View {
     @AppStorage("scheme") private var scheme = InputScheme.full.rawValue
     @AppStorage("candidateFontSize") private var fontSize = 17.0
     @AppStorage("candidateLayout") private var layout = "vertical"
+    @AppStorage("showPersistentMode") private var showPersistentMode = true
     var body: some View {
         Form {
             Picker("输入方案", selection: $scheme) {
@@ -31,6 +32,7 @@ private struct SettingsView: View {
                     Text(mode.title).tag(mode.rawValue)
                 }
             }
+            Toggle("屏幕左下角常驻显示中／英", isOn: $showPersistentMode)
             Picker("候选排列", selection: $layout) {
                 Text("竖排").tag("vertical")
                 Text("横排").tag("horizontal")

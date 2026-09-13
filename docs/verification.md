@@ -55,3 +55,9 @@ Release build and engine checks passed. The packaged smoke test verified visible
 A temporary modifier-only trace of the user's physical right-Control presses captured `key=62, flags=262144 (0x40000)` on press and `key=62, flags=0` on release, with a valid IMK client. The old detector required NX_DEVICERCTLKEYMASK (0x2000), which was absent after IMK normalization. This explains why synthesized smoke events containing the device bit passed while the real key did nothing.
 
 The detector now uses keyCode to identify the side and the aggregate Control flag when device bits are absent, while retaining device-bit support and left-Control/chord cancellation. Two regression tests failed against the old implementation and passed after the fix; all six detector tests passed. The installed-app event smoke check now uses the captured normalized flag sequence. Temporary diagnostic logging was removed from the final build.
+
+## Persistent corner mode display
+
+Added a shared, mouse-transparent, nonactivating panel on each connected screen at frame.minX + 12 / frame.minY + 40 points (34 × 34 points). It displays 中/英 while Feather is selected, updates on client activation and language toggles, survives normal focus changes and joins Spaces. It observes input-source, display, Space and preference notifications, and hides when another input source is selected or the setting is disabled. Screen frame rather than visibleFrame preserves the intended strip beside a left-side Dock.
+
+Release build, engine regression and packaged smoke checks passed. The new checks verified both labels, window reuse, non-key/mouse-transparent properties, hiding for other sources and the settings toggle. Inspected the rendered badge. Actual fullscreen and multi-screen switching remain subject to live GUI verification.

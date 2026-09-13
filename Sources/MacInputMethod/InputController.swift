@@ -23,6 +23,7 @@ final class InputController: IMKInputController {
         session?.select(scheme)
         activeScheme = scheme
         session?.setASCII(ascii)
+        PersistentModeIndicator.shared.update(ascii: ascii)
     }
     override func deactivateServer(_ sender: Any!) {
         isActive = false
@@ -149,6 +150,7 @@ final class InputController: IMKInputController {
         commitComposition(target)
         ascii.toggle()
         session?.setASCII(ascii)
+        PersistentModeIndicator.shared.update(ascii: ascii)
         guard let textClient = target as? IMKTextInput else { modeIndicator.hide(); return }
         var caret = NSRect.zero
         _ = textClient.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
