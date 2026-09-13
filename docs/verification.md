@@ -43,3 +43,9 @@ Added English and Simplified Chinese InfoPlist.strings for the application title
 - Seven unit tests passed, including modifier cancellation, left/right Control separation, session reset, bottom-edge flipping, negative-origin displays and oversized frames. Real-engine integration additionally verified selecting the second candidate on page two and rejecting invalid indices.
 - Packaged smoke tests passed native button actions, hidden-callback invalidation, NSEvent right-Control dispatch through InputController, Control-shortcut pass-through, pending composition commit and candidate-button insertion into an in-process IMK client. This fixture is supplied to event handlers, not the IMK controller initializer, which requires a system client.
 - Rendered light vertical and dark horizontal candidate panels and visually inspected both. These checks do not replace physical keyboard/mouse testing or live multi-display/Space behavior in third-party applications.
+
+## Caret language indicator
+
+Mode changes from right Control, Control-Shift-Space and the menu now share one switch path. A nonactivating, mouse-transparent panel displays 中文 or 英文 beside the current client caret for 0.8 seconds. Repeated switches replace the timer; input/mouse activity and session deactivation hide the panel. The indicator uses the current text-client rectangle (falling back only to this session's last valid caret), clamps to the screen and inherits a level above the client.
+
+Release build and engine checks passed. The packaged smoke test verified visible 英文/中文 labels after NSEvent-driven switches and automatic dismissal via the main run loop. Physical cross-application caret positioning remains subject to the client's text-input geometry support.

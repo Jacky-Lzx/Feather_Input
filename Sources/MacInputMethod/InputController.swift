@@ -6,6 +6,7 @@ import InputCore
 final class InputController: IMKInputController {
     private var session: Session?
     private let candidatesPanel = CandidatePanel()
+    private let modeIndicator = ModeIndicator()
     private var ascii = false
     private var rightControlTap = RightControlTap()
     private var isActive = false
@@ -25,6 +26,7 @@ final class InputController: IMKInputController {
     }
     override func deactivateServer(_ sender: Any!) {
         isActive = false
+        modeIndicator.hide()
         rightControlTap.reset()
         commitComposition(sender)
         candidatesPanel.hide()
@@ -42,6 +44,7 @@ final class InputController: IMKInputController {
             return false
         }
         rightControlTap.cancel()
+        modeIndicator.hide()
         if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
             // Adding flagsChanged opts out of IMK's keyDown-only default mouse handling.
             if !candidatesPanel.contains(NSEvent.mouseLocation) { commitComposition(sender) }
@@ -58,8 +61,8 @@ final class InputController: IMKInputController {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // Control-Shift-Space toggles Chinese/English without intercepting bare Shift.
         if event.keyCode == 49 && flags.contains([.control, .shift]) && !flags.contains(.command) {
-            commitComposition(sender)
-            ascii.toggle(); session.setASCII(ascii); return true
+            toggleASCII([kIMKCommandClientName as String: client])
+            return true
         }
         if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) {
             commitComposition(sender)
@@ -126,6 +129,7 @@ final class InputController: IMKInputController {
         (sender as? NSDictionary)?[kIMKCommandClientName as String] ?? client()
     }
     @objc private func showSettings(_ sender: Any?) {
+        modeIndicator.hide()
         commitComposition(commandClient(sender))
         SettingsWindow.shared.show()
     }
@@ -141,7 +145,18 @@ final class InputController: IMKInputController {
         session?.setASCII(ascii)
     }
     @objc private func toggleASCII(_ sender: Any?) {
-        commitComposition(commandClient(sender)); ascii.toggle(); session?.setASCII(ascii)
+        let target = commandClient(sender)
+        commitComposition(target)
+        ascii.toggle()
+        session?.setASCII(ascii)
+        guard let textClient = target as? IMKTextInput else { modeIndicator.hide(); return }
+        var caret = NSRect.zero
+        _ = textClient.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
+        if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0, caret.height.isFinite {
+            lastCaret = caret
+        }
+        guard let anchor = lastCaret else { modeIndicator.hide(); return }
+        modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
     }
 
     static func verifyKeyboardAndClick(server: IMKServer) throws {
@@ -165,14 +180,18 @@ final class InputController: IMKInputController {
         for key in "nihao".utf8 { session.process(Int32(key)) }
         controller.refresh(textClient)
         guard !flags(RightControlTap.rightControl | (1 << 18)), flags(0), controller.ascii,
-              textClient.committed == "你好你好", textClient.marked.isEmpty else { throw Engine.Failure.schemaUnavailable }
+              textClient.committed == "你好你好", textClient.marked.isEmpty,
+              controller.modeIndicator.isVisible, controller.modeIndicator.text == "英文" else { throw Engine.Failure.schemaUnavailable }
         _ = flags(RightControlTap.rightControl | (1 << 18))
         let shortcut = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0,
                                        windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
         guard !controller.handle(shortcut, client: textClient), !flags(0), controller.ascii else { throw Engine.Failure.schemaUnavailable }
         _ = flags(RightControlTap.rightControl | (1 << 18))
-        guard flags(0), !controller.ascii else { throw Engine.Failure.schemaUnavailable }
+        guard flags(0), !controller.ascii, controller.modeIndicator.text == "中文", controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.9))
+        guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(textClient)
+        print("PASS: caret mode indicator labels and automatic dismissal")
         print("PASS: NSEvent right-Control tap, shortcut pass-through, pending composition commit, candidate button to IMK client insertion")
     }
 
