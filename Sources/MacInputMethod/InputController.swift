@@ -121,6 +121,29 @@ final class InputController: IMKInputController {
     private var requestRecommendation: (String, String, String, String, [String]) async throws -> Int = {
         try await LocalRecommendation.recommend(model: $0, token: $1, context: $2, preedit: $3, candidates: $4)
     }
+    // Query after the host has processed navigation/deletion, before creating marked text.
+    private func restoreContextBeforeComposition(_ client: IMKTextInput) {
+        let selection = client.selectedRange()
+        guard selection.location != NSNotFound, selection.location >= 0 else { return }
+        let count = min(selection.location, 320) // IMK ranges are UTF-16, not Swift characters.
+        let range = NSRange(location: selection.location - count, length: count)
+        var actual = NSRange(location: NSNotFound, length: 0)
+        let plain = client.string(from: range, actualRange: &actual)
+        let text: String?
+        if let plain, NSEqualRanges(actual, range), plain.utf16.count == count {
+            text = plain
+        } else if let attributed = client.attributedSubstring(from: range), attributed.length == count {
+            text = attributed.string
+        } else {
+            text = nil // Some terminal clients expose marked text only.
+        }
+        guard let text else { return }
+        let context = String(text.suffix(80))
+        if context != recentContext {
+            invalidateRecommendation(clearContext: true)
+            recentContext = context
+        }
+    }
     private func invalidateRecommendation(clearContext: Bool = false) {
         recommendationTask?.cancel()
         recommendationTask = nil
@@ -232,6 +255,7 @@ final class InputController: IMKInputController {
             scoringLockedOriginal = session.candidates.texts
         }
         if !ascii, session.preedit.text.isEmpty, (97...122).contains(key) {
+            restoreContextBeforeComposition(client)
             scoringLockedPreedit = ""; scoringLockedOriginal = []
             frozenPrediction = rankingEnabled && !scoringEnabled ? cachedPrediction : []
             frozenPredictionDelayMS = rankingEnabled ? cachedPredictionDelayMS : nil
@@ -513,7 +537,36 @@ final class InputController: IMKInputController {
         controller.deactivateServer(client)
         RunLoop.current.run(until: Date().addingTimeInterval(0.35))
         guard controller.frozenPrediction == nil else { throw Engine.Failure.schemaUnavailable }
-        print("PASS: candidate scoring reorders Rime, numeric mapping, navigation lock, backspace context and stale/deactivated rejection")
+        // Host document edits happen after IMK returns the navigation/delete event.
+        controller.activateServer(client)
+        client.exposesDocument = true
+        client.committed = "😀我们需要保护环境"
+        client.documentSelection = NSRange(location: ("😀我们需要保护" as NSString).length, length: 0)
+        controller.requestScoring = { context, _, texts in
+            guard context == "😀我们需要保护" else { throw Engine.Failure.schemaUnavailable }
+            return texts.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1) }
+        }
+        _ = key("", code: 123)
+        _ = key("n"); _ = key("i")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        guard controller.recentContext == "😀我们需要保护", controller.frozenPrediction?.isEmpty == false else { throw Engine.Failure.schemaUnavailable }
+        _ = key("", code: 53)
+        _ = key("", code: 51)
+        client.committed = "😀我们保护环境"
+        client.documentSelection = NSRange(location: ("😀我们保护" as NSString).length, length: 0)
+        controller.requestScoring = { context, _, texts in
+            guard context == "😀我们保护" else { throw Engine.Failure.schemaUnavailable }
+            return texts.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1) }
+        }
+        _ = key("n"); _ = key("i")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        guard controller.recentContext == "😀我们保护", controller.frozenPrediction?.isEmpty == false else { throw Engine.Failure.schemaUnavailable }
+        _ = key("", code: 53)
+        client.documentSelection = NSRange(location: 0, length: 0)
+        _ = key("n")
+        guard controller.recentContext.isEmpty else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: candidate scoring, navigation/delete context recovery, UTF-16 caret, document start and stale rejection")
     }
 
     static func verifyRankingLifecycle(server: IMKServer) throws {

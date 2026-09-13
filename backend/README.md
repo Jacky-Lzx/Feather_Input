@@ -110,6 +110,16 @@ first-token distribution, and deep-copies its KV cache for each multi-token
 candidate. Candidate branches cannot modify each other's prefix. There is no
 persistent cache or reuse across requests.
 
+Before starting a new pinyin composition, the app reads up to 80 characters before
+the current selection from the host's IMK text interface (bounded UTF-16 range).
+Thus candidate scoring can resume after cursor movement or document deletion,
+using the updated document rather than only locally committed text. Selected text,
+text after the cursor, and the new preedit are excluded. Hosts that do not expose
+surrounding text still fall back to local commit history; navigation clears that
+history, so restoration is unavailable there. This does not use Accessibility or
+read other applications. Legacy cached next-token mode still requires a ready
+prediction before composition; it does not wait for a new request at this point.
+
 The app immediately displays Rime's page, waits 120 ms after input, then requests
 scores. A response can reorder only the unchanged page and context within 700 ms
 of request start. Further input, navigation, selection, focus change, disabled
