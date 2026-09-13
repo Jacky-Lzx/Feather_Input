@@ -22,7 +22,12 @@ guard let result = TISCreateInputSourceList(filter, true) else {
 let sources = result.takeRetainedValue() as! [TISInputSource]
 let selectable = sources.filter { property($0, kTISPropertyInputSourceIsSelectCapable) as? Bool == true }
 guard !selectable.isEmpty else { fail("No selectable Feather Input mode registered") }
+var enableRequests = 0
 for source in selectable {
+    // Re-enabling an enabled third-party input source can request consent again.
+    // Updates keep the existing grant; first-time enablement still uses system UI.
+    if property(source, kTISPropertyInputSourceIsEnabled) as? Bool == true { continue }
+    enableRequests += 1
     let status = TISEnableInputSource(source)
     guard status == noErr else { fail("Unable to enable input source: \(status)") }
 }
@@ -30,4 +35,4 @@ guard let enabled = TISCreateInputSourceList(filter, false)?.takeRetainedValue()
       enabled.contains(where: { property($0, kTISPropertyInputSourceIsSelectCapable) as? Bool == true && property($0, kTISPropertyInputSourceIsEnabled) as? Bool == true }) else {
     fail("Input source enablement could not be verified")
 }
-print("Verified: Feather Input is registered, selectable and enabled.")
+print("Verified: Feather Input is registered, selectable and enabled. Enable requests: \(enableRequests).")
