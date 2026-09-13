@@ -7,23 +7,42 @@ final class InputController: IMKInputController {
     private var session: Session?
     private let candidatesPanel = CandidatePanel()
     private var ascii = false
+    private var rightControlTap = RightControlTap()
     private var activeScheme: InputScheme?
     private var scheme: InputScheme {
         InputScheme(rawValue: UserDefaults.standard.string(forKey: "scheme") ?? "") ?? .full
     }
     override func activateServer(_ sender: Any!) {
+        rightControlTap.reset()
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
         session?.select(scheme)
         activeScheme = scheme
         session?.setASCII(ascii)
     }
     override func deactivateServer(_ sender: Any!) {
+        rightControlTap.reset()
         commitComposition(sender)
         candidatesPanel.hide()
     }
-    override func recognizedEvents(_ sender: Any!) -> Int { Int(NSEvent.EventTypeMask.keyDown.rawValue) }
+    override func recognizedEvents(_ sender: Any!) -> Int {
+        Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown]).rawValue)
+    }
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
+        if event.type == .flagsChanged {
+            if rightControlTap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
+                toggleASCII([kIMKCommandClientName as String: client])
+                return true
+            }
+            return false
+        }
+        rightControlTap.cancel()
+        if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
+            // Adding flagsChanged opts out of IMK's keyDown-only default mouse handling.
+            if !candidatesPanel.contains(NSEvent.mouseLocation) { commitComposition(sender) }
+            return false
+        }
+        guard event.type == .keyDown else { return false }
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
         guard let session else { return false }
         if activeScheme != scheme {

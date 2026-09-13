@@ -11,6 +11,7 @@ final class CandidatePanel {
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
+    func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
     func hide() { panel.orderOut(nil) }
     func show(texts: [String], highlight: Int, caret: NSRect) {
         guard !texts.isEmpty else { hide(); return }
