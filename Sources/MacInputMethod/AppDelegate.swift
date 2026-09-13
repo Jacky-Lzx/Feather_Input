@@ -1,0 +1,41 @@
+import AppKit
+import InputMethodKit
+import InputCore
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static var engine: Engine?
+    private var server: IMKServer?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let resources = Bundle.main.resourcePath else { return }
+        let smokeTest = CommandLine.arguments.contains("--smoke-test")
+        let user = smokeTest ? NSTemporaryDirectory() + "FeatherInput-smoke-" + UUID().uuidString : FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/FeatherInput").path
+        do {
+            Self.engine = try Engine(library: Bundle.main.bundlePath + "/Contents/Frameworks/librime.dylib",
+                                     shared: resources + "/rime", user: user)
+            server = IMKServer(name: "FeatherInput_Connection", bundleIdentifier: Bundle.main.bundleIdentifier)
+            guard server != nil, NSClassFromString("FeatherInputController") != nil else {
+                throw Engine.Failure.schemaUnavailable
+            }
+            if smokeTest {
+                let session = try Self.engine!.session(.full)
+                for key in "nihao".utf8 { session.process(Int32(key)) }
+                guard session.candidates.texts.contains("你好") else { throw Engine.Failure.schemaUnavailable }
+                let panel = CandidatePanel()
+                panel.show(texts: session.candidates.texts, highlight: 0, caret: NSRect(x: 300, y: 300, width: 1, height: 20))
+                panel.hide()
+                print("PASS: app startup, IMKServer, controller class, bundled engine, native candidate panel")
+                session.clear()
+                try? FileManager.default.removeItem(atPath: user)
+                NSApp.terminate(nil)
+            }
+        } catch {
+            if smokeTest { fputs("FAIL: app smoke test: \(error)\n", stderr); exit(1) }
+            let alert = NSAlert()
+            alert.messageText = "Feather Input 无法启动"
+            alert.informativeText = "引擎或词库加载失败：\(error)。请重新运行打包脚本。"
+            alert.runModal()
+            NSApp.terminate(nil)
+        }
+    }
+}
