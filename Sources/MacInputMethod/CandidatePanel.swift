@@ -12,7 +12,7 @@ private final class CandidateButton: NSButton {
     override func draw(_ dirtyRect: NSRect) {
         if isCurrentCandidate || isHighlighted {
             NSColor.controlAccentColor.setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+            NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
         }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
@@ -28,7 +28,7 @@ private final class CandidateButton: NSButton {
 
 final class CandidatePanel {
     private let panel: CandidateWindow
-    private let background = NSVisualEffectView()
+    private let background: NSView
     private let scroll = NSScrollView()
     private var selection: ((Int) -> Void)?
     private var buttons: [CandidateButton] = []
@@ -40,15 +40,27 @@ final class CandidatePanel {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        background.material = .popover
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 9
-        background.layer?.masksToBounds = true
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.style = .regular
+            glass.cornerRadius = 16
+            // Content must be inside the glass so AppKit can adapt its appearance.
+            glass.contentView = scroll
+            background = glass
+        } else {
+            let material = NSVisualEffectView()
+            material.material = .popover
+            material.state = .active
+            material.blendingMode = .behindWindow
+            material.wantsLayer = true
+            material.layer?.cornerRadius = 16
+            material.layer?.masksToBounds = true
+            material.addSubview(scroll)
+            background = material
+        }
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         scroll.autohidesScrollers = true
-        background.addSubview(scroll)
         panel.contentView = background
     }
     func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
@@ -97,7 +109,9 @@ final class CandidatePanel {
         scroll.hasVerticalScroller = needsScroll
         scroll.documentView = document
         if buttons.indices.contains(highlight) { document.scrollToVisible(buttons[highlight].frame) }
+        background.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
+        panel.invalidateShadow()
     }
 
     static func verifyPresentation() throws {
@@ -114,6 +128,11 @@ final class CandidatePanel {
             var chosen: Int?
             candidatePanel.show(texts: ["你好", "拟好", "你", "呢", "泥"], highlight: 0,
                                 caret: NSRect(x: 300, y: 400, width: 1, height: 20)) { chosen = $0 }
+            if #available(macOS 26.0, *) {
+                guard let glass = candidatePanel.background as? NSGlassEffectView,
+                      glass.style == .regular, glass.contentView === candidatePanel.scroll,
+                      glass.cornerRadius == 16 else { throw Engine.Failure.schemaUnavailable }
+            }
             guard candidatePanel.verifyClick(on: 1), chosen == 1,
                   let bitmap = candidatePanel.background.bitmapImageRepForCachingDisplay(in: candidatePanel.background.bounds) else {
                 throw Engine.Failure.schemaUnavailable

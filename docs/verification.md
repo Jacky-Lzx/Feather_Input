@@ -79,3 +79,13 @@ The installed native-Caps version passed the independent system-route run: text 
 ## Both language-switch keys
 
 The user clarified that the keyboard itself sends right Control. Both existing handlers remain enabled; settings and README now explicitly describe both keys. The packaged smoke check alternates right Control and Caps Lock on the same controller, including normalized right-Control events while the Caps Lock flag is set. All 11 unit tests, both engine schema checks, and packaged smoke checks passed. Build 10 was installed and its signature and input-source registration verified. Physical keyboard behavior in the user's existing application sessions still requires user verification.
+
+## macOS 26 Liquid Glass candidate window
+
+The candidate panel uses one regular-style NSGlassEffectView on macOS 26, with the scroll view assigned to contentView so AppKit can adapt foreground appearance. The 16-point outer corners and 8-point selection corners share an 8-point inset. Selection keeps the system accent color; earlier macOS versions retain a popover material. Native glass handles the system's material preferences; accessibility preference combinations were not manually toggled during this check.
+
+Design references: [Apple HIG Materials](https://developer.apple.com/design/human-interface-guidelines/materials) recommends regular glass for text-heavy floating controls; [WWDC25 AppKit design guidance](https://developer.apple.com/videos/play/wwdc2025/310/) explains contentView placement and concentric geometry.
+
+All 11 unit tests, both engine schema checks, and packaged smoke checks passed. Native window captures of light vertical and dark horizontal layouts were visually inspected; view bitmap caching alone does not capture the glass compositor faithfully. The smoke check also asserts native regular glass and its content hierarchy. Tests ran in a temporary bundle with a separate bundle ID and IMK connection name, without restarting the installed input method. An attempted class-based IMK test initializer crashed and was discarded; production initialization is unchanged.
+
+The user confirmed that restarting existing client apps restored modifier-key switching after the prior input-method replacement. After installing build 11, existing clients may again require a complete restart. Prior temporary event tracing was removed from the source.
