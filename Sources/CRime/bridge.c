@@ -52,3 +52,7 @@ int feather_candidates(uintptr_t s,char **texts,int capacity,int *highlight) {
   api->free_context(&c); return n;
 }
 void feather_free(char *text) { free(text); }
+int feather_select_candidate(uintptr_t s, int index) {
+  if (index < 0 || !RIME_PROVIDED(api, select_candidate_on_current_page)) return 0;
+  return api->select_candidate_on_current_page(s, (size_t)index);
+}

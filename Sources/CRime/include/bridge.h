@@ -12,3 +12,4 @@ int feather_candidates(uintptr_t session, char **texts, int capacity, int *highl
 int feather_select(uintptr_t session, const char *schema);
 void feather_ascii(uintptr_t session, int enabled);
 void feather_free(char *text);
+int feather_select_candidate(uintptr_t session, int index);

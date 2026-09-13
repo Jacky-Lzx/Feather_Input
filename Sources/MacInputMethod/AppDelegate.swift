@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if smokeTest {
                 try InputController.verifyMenuCommands(server: server!)
+                try CandidatePanel.verifyPresentation()
+                try InputController.verifyKeyboardAndClick(server: server!)
                 let session = try Self.engine!.session(.full)
                 for key in "nihao".utf8 { session.process(Int32(key)) }
                 guard session.candidates.texts.contains("你好") else { throw Engine.Failure.schemaUnavailable }

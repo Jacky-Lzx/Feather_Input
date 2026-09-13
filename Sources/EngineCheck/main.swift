@@ -30,6 +30,13 @@ for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
     check(session.candidates.texts == firstPage, "Page Up restores candidates")
     session.process(50)
     check(session.takeCommit() == firstPage[1], "numeric candidate selection")
+    for c in "ni".utf8 { session.process(Int32(c)) }
+    session.process(0xff56)
+    let secondPage = session.candidates.texts
+    check(!session.selectCandidate(at: -1), "reject negative candidate index")
+    check(!session.selectCandidate(at: secondPage.count), "reject out-of-range candidate index")
+    check(session.selectCandidate(at: 1), "click candidate on second page")
+    check(session.takeCommit() == secondPage[1], "click commits current page candidate")
     session.process(44)
     check(session.takeCommit() == "，", "Chinese punctuation")
     let second = try engine.session(scheme)

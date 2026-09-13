@@ -1,0 +1,32 @@
+import AppKit
+import InputMethodKit
+
+/// In-process IMK client used only by --smoke-test; never edits another app.
+final class SmokeTextClient: NSObject, IMKTextInput {
+    var committed = ""
+    var marked = ""
+    func insertText(_ string: Any!, replacementRange: NSRange) { committed += string as? String ?? ""; marked = "" }
+    func setMarkedText(_ string: Any!, selectionRange: NSRange, replacementRange: NSRange) { marked = string as? String ?? "" }
+    func selectedRange() -> NSRange { NSRange(location: committed.utf16.count, length: 0) }
+    func markedRange() -> NSRange { NSRange(location: committed.utf16.count, length: marked.utf16.count) }
+    func attributedSubstring(from range: NSRange) -> NSAttributedString! { NSAttributedString(string: "") }
+    func length() -> Int { committed.utf16.count + marked.utf16.count }
+    func characterIndex(for point: NSPoint, tracking mappingMode: IMKLocationToOffsetMappingMode, inMarkedRange: UnsafeMutablePointer<ObjCBool>!) -> Int { 0 }
+    func attributes(forCharacterIndex index: Int, lineHeightRectangle rect: UnsafeMutablePointer<NSRect>!) -> [AnyHashable: Any]! {
+        rect.pointee = NSRect(x: 300, y: 400, width: 1, height: 20)
+        return [:]
+    }
+    func validAttributesForMarkedText() -> [Any]! { [] }
+    func overrideKeyboard(withKeyboardNamed name: String!) {}
+    func selectMode(_ modeIdentifier: String!) {}
+    func supportsUnicode() -> Bool { true }
+    func bundleIdentifier() -> String! { "im.feather.smoke-client" }
+    func windowLevel() -> CGWindowLevel { 0 }
+    func supportsProperty(_ property: TSMDocumentPropertyTag) -> Bool { false }
+    func uniqueClientIdentifierString() -> String! { "feather-smoke-client" }
+    func string(from range: NSRange, actualRange: NSRangePointer!) -> String! { actualRange?.pointee = NSRange(location: 0, length: 0); return "" }
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer!) -> NSRect {
+        actualRange?.pointee = range
+        return NSRect(x: 300, y: 400, width: 1, height: 20)
+    }
+}

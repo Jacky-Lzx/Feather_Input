@@ -29,6 +29,10 @@ public final class Session {
     @discardableResult public func process(_ key: Int32, modifiers: Int32 = 0) -> Bool {
         feather_key(id, key, modifiers) != 0
     }
+    @discardableResult public func selectCandidate(at index: Int) -> Bool {
+        guard index >= 0, index < candidates.texts.count else { return false }
+        return feather_select_candidate(id, Int32(index)) != 0
+    }
     public func clear() { feather_clear(id) }
     public func commit() { feather_commit(id) }
     public func setASCII(_ enabled: Bool) { feather_ascii(id, enabled ? 1 : 0) }

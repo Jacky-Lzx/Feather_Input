@@ -1,55 +1,138 @@
 import AppKit
+import InputCore
+
+private final class CandidateWindow: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+private final class CandidateButton: NSButton {
+    var isCurrentCandidate = false
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        if isCurrentCandidate || isHighlighted {
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+        }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let text = NSAttributedString(string: title, attributes: [
+            .font: font ?? NSFont.systemFont(ofSize: 17),
+            .foregroundColor: isCurrentCandidate || isHighlighted ? NSColor.selectedMenuItemTextColor : NSColor.labelColor,
+            .paragraphStyle: paragraph
+        ])
+        let height = text.size().height
+        text.draw(in: NSRect(x: 10, y: (bounds.height - height) / 2, width: max(0, bounds.width - 20), height: height))
+    }
+}
 
 final class CandidatePanel {
-    private let panel: NSPanel
+    private let panel: CandidateWindow
+    private let background = NSVisualEffectView()
+    private let scroll = NSScrollView()
+    private var selection: ((Int) -> Void)?
+    private var buttons: [CandidateButton] = []
     init() {
-        panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = CandidateWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = .popUpMenu
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.ignoresMouseEvents = true
+        panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-    }
-    func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
-    func hide() { panel.orderOut(nil) }
-    func show(texts: [String], highlight: Int, caret: NSRect) {
-        guard !texts.isEmpty else { hide(); return }
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 4
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-        for (index, text) in texts.enumerated() {
-            let label = NSTextField(labelWithString: "\(index + 1)  \(text)")
-            let configuredSize = UserDefaults.standard.double(forKey: "candidateFontSize")
-            label.font = .systemFont(ofSize: configuredSize == 0 ? 17 : min(24, max(14, configuredSize)), weight: index == highlight ? .semibold : .regular)
-            label.textColor = index == highlight ? .controlAccentColor : .labelColor
-            stack.addArrangedSubview(label)
-        }
-        let background = NSVisualEffectView()
         background.material = .popover
         background.state = .active
         background.wantsLayer = true
         background.layer?.cornerRadius = 9
         background.layer?.masksToBounds = true
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        background.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: background.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: background.bottomAnchor)
-        ])
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.autohidesScrollers = true
+        background.addSubview(scroll)
         panel.contentView = background
-        let size = stack.fittingSize
-        let screen = NSScreen.screens.first { $0.frame.intersects(caret) } ?? NSScreen.main
+    }
+    func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
+    func hide() { panel.orderOut(nil); selection = nil }
+    @objc private func choose(_ sender: NSButton) { selection?(sender.tag) }
+    func show(texts: [String], highlight: Int, caret: NSRect, onSelect: ((Int) -> Void)? = nil) {
+        guard !texts.isEmpty else { hide(); return }
+        selection = onSelect
+        let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
+        let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let x = min(max(caret.minX, visible.minX), max(visible.minX, visible.maxX - size.width))
-        var y = caret.minY - size.height - 6
-        if y < visible.minY { y = caret.maxY + 6 }
-        y = min(max(y, visible.minY), max(visible.minY, visible.maxY - size.height))
-        panel.setFrame(NSRect(origin: NSPoint(x: x, y: y), size: size), display: true)
+        let configuredSize = UserDefaults.standard.double(forKey: "candidateFontSize")
+        let fontSize = configuredSize == 0 ? 17 : min(24, max(14, configuredSize))
+        let font = NSFont.systemFont(ofSize: fontSize)
+        let labels = texts.enumerated().map { "\($0.offset + 1)  \($0.element)" }
+        let widths = labels.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 20 }
+        let pad: CGFloat = 8, gap: CGFloat = 4, rowHeight = ceil(fontSize * 1.4) + 12
+        let horizontalWidth = widths.reduce(0, +) + gap * CGFloat(texts.count - 1) + pad * 2
+        let horizontal = UserDefaults.standard.string(forKey: "candidateLayout") == "horizontal" && horizontalWidth <= visible.width
+        let needsScroll = !horizontal && rowHeight * CGFloat(texts.count) + gap * CGFloat(texts.count - 1) + pad * 2 > visible.height
+        let scrollerWidth: CGFloat = needsScroll ? 16 : 0
+        let itemWidth = min(widths.max() ?? 100, max(1, visible.width - pad * 2 - scrollerWidth))
+        let naturalSize = NSSize(width: horizontal ? horizontalWidth : itemWidth + pad * 2 + scrollerWidth,
+                                 height: horizontal ? rowHeight + pad * 2 : rowHeight * CGFloat(texts.count) + gap * CGFloat(texts.count - 1) + pad * 2)
+        let frame = CandidateGeometry.frame(size: naturalSize, caret: anchor, visible: visible)
+        let document = NSView(frame: NSRect(origin: .zero, size: NSSize(width: naturalSize.width - scrollerWidth, height: naturalSize.height)))
+        buttons.removeAll()
+        var x = pad
+        for (index, label) in labels.enumerated() {
+            let button = CandidateButton(title: label, target: self, action: #selector(choose(_:)))
+            button.isBordered = false
+            button.font = font
+            button.isCurrentCandidate = index == highlight
+            button.tag = index
+            button.toolTip = texts[index]
+            button.setAccessibilityLabel("候选 \(index + 1)：\(texts[index])")
+            button.frame = NSRect(x: horizontal ? x : pad,
+                                  y: naturalSize.height - pad - rowHeight - (horizontal ? 0 : CGFloat(index) * (rowHeight + gap)),
+                                  width: horizontal ? widths[index] : itemWidth, height: rowHeight)
+            x += widths[index] + gap
+            document.addSubview(button)
+            buttons.append(button)
+        }
+        panel.setFrame(frame, display: false)
+        scroll.frame = NSRect(origin: .zero, size: frame.size)
+        scroll.hasVerticalScroller = needsScroll
+        scroll.documentView = document
+        if buttons.indices.contains(highlight) { document.scrollToVisible(buttons[highlight].frame) }
         panel.orderFrontRegardless()
+    }
+
+    static func verifyPresentation() throws {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "candidateLayout")
+        defer {
+            if let previous { defaults.set(previous, forKey: "candidateLayout") }
+            else { defaults.removeObject(forKey: "candidateLayout") }
+        }
+        for layout in ["vertical", "horizontal"] {
+            defaults.set(layout, forKey: "candidateLayout")
+            let candidatePanel = CandidatePanel()
+            candidatePanel.panel.appearance = NSAppearance(named: layout == "vertical" ? .aqua : .darkAqua)
+            var chosen: Int?
+            candidatePanel.show(texts: ["你好", "拟好", "你", "呢", "泥"], highlight: 0,
+                                caret: NSRect(x: 300, y: 400, width: 1, height: 20)) { chosen = $0 }
+            guard candidatePanel.verifyClick(on: 1), chosen == 1,
+                  let bitmap = candidatePanel.background.bitmapImageRepForCachingDisplay(in: candidatePanel.background.bounds) else {
+                throw Engine.Failure.schemaUnavailable
+            }
+            candidatePanel.background.cacheDisplay(in: candidatePanel.background.bounds, to: bitmap)
+            if let data = bitmap.representation(using: .png, properties: [:]) {
+                try data.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("FeatherInput-candidates-\(layout).png"))
+            }
+            candidatePanel.hide()
+            chosen = nil
+            _ = candidatePanel.verifyClick(on: 0)
+            guard chosen == nil else { throw Engine.Failure.schemaUnavailable }
+        }
+        print("PASS: native candidate buttons, horizontal/vertical presentation, non-key window and hidden callback invalidation")
+    }
+
+    func verifyClick(on index: Int) -> Bool {
+        guard buttons.indices.contains(index), !panel.canBecomeKey, !panel.canBecomeMain else { return false }
+        buttons[index].performClick(nil)
+        return true
     }
 }

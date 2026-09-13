@@ -8,24 +8,29 @@ final class InputController: IMKInputController {
     private let candidatesPanel = CandidatePanel()
     private var ascii = false
     private var rightControlTap = RightControlTap()
+    private var isActive = false
+    private var lastCaret: NSRect?
     private var activeScheme: InputScheme?
     private var scheme: InputScheme {
         InputScheme(rawValue: UserDefaults.standard.string(forKey: "scheme") ?? "") ?? .full
     }
     override func activateServer(_ sender: Any!) {
         rightControlTap.reset()
+        isActive = true
+        lastCaret = nil
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
         session?.select(scheme)
         activeScheme = scheme
         session?.setASCII(ascii)
     }
     override func deactivateServer(_ sender: Any!) {
+        isActive = false
         rightControlTap.reset()
         commitComposition(sender)
         candidatesPanel.hide()
     }
     override func recognizedEvents(_ sender: Any!) -> Int {
-        Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown]).rawValue)
+        Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]).rawValue)
     }
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
@@ -91,7 +96,14 @@ final class InputController: IMKInputController {
         guard !preedit.text.isEmpty, !candidates.texts.isEmpty else { candidatesPanel.hide(); return }
         var caret = NSRect.zero
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
-        candidatesPanel.show(texts: candidates.texts, highlight: candidates.highlight, caret: caret)
+        if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0 { lastCaret = caret }
+        let anchor = lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
+        candidatesPanel.show(texts: candidates.texts, highlight: candidates.highlight, caret: anchor) { [weak self, weak client] index in
+            guard let self, self.isActive, let client, let session = self.session,
+                  session.preedit.text == preedit.text, session.candidates.texts == candidates.texts else { return }
+            self.rightControlTap.cancel()
+            if session.selectCandidate(at: index) { self.refresh(client) }
+        }
     }
     override func menu() -> NSMenu! {
         let menu = NSMenu()
@@ -130,6 +142,38 @@ final class InputController: IMKInputController {
     }
     @objc private func toggleASCII(_ sender: Any?) {
         commitComposition(commandClient(sender)); ascii.toggle(); session?.setASCII(ascii)
+    }
+
+    static func verifyKeyboardAndClick(server: IMKServer) throws {
+        let textClient = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        controller.activateServer(textClient)
+        guard let session = controller.session else { throw Engine.Failure.schemaUnavailable }
+        session.select(.full)
+        func flags(_ raw: UInt) -> Bool {
+            let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: NSEvent.ModifierFlags(rawValue: raw),
+                                        timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 62)!
+            return controller.handle(event, client: textClient)
+        }
+        for key in "nihao".utf8 { session.process(Int32(key)) }
+        controller.refresh(textClient)
+        guard controller.candidatesPanel.verifyClick(on: 0), textClient.committed == "你好", textClient.marked.isEmpty else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        for key in "nihao".utf8 { session.process(Int32(key)) }
+        controller.refresh(textClient)
+        guard !flags(RightControlTap.rightControl | (1 << 18)), flags(0), controller.ascii,
+              textClient.committed == "你好你好", textClient.marked.isEmpty else { throw Engine.Failure.schemaUnavailable }
+        _ = flags(RightControlTap.rightControl | (1 << 18))
+        let shortcut = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0,
+                                       windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+        guard !controller.handle(shortcut, client: textClient), !flags(0), controller.ascii else { throw Engine.Failure.schemaUnavailable }
+        _ = flags(RightControlTap.rightControl | (1 << 18))
+        guard flags(0), !controller.ascii else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(textClient)
+        print("PASS: NSEvent right-Control tap, shortcut pass-through, pending composition commit, candidate button to IMK client insertion")
     }
 
     // Exercise IMK's actual command dispatcher with its dictionary sender.
