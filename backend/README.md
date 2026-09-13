@@ -75,3 +75,8 @@ are ordered by original LLM rank; spaces are displayed as ␠. It follows the ma
 candidate panel, moves to the left if the right edge has insufficient room, and
 hides with the main panel. Long lists scroll without taking keyboard focus. No
 ready prediction means no companion window for that composition.
+
+The companion panel shows request round-trip delay in milliseconds. Timing uses a
+monotonic clock around the request and response parsing, includes local transport
+and inference, and is frozen with that prediction. It excludes the user's wait
+before typing the next composition and is not pure model compute time.

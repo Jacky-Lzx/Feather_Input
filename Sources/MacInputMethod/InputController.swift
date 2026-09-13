@@ -14,7 +14,11 @@ final class InputController: IMKInputController {
     private var rankingTask: Task<Void, Never>?
     private var rankingVersion = UUID()
     private var cachedPrediction: [LocalRecommendation.RankedToken] = []
-    private var frozenPrediction: [LocalRecommendation.RankedToken]?
+    private var cachedPredictionDelayMS: Int?
+    private var frozenPredictionDelayMS: Int?
+    private var frozenPrediction: [LocalRecommendation.RankedToken]? {
+        didSet { if frozenPrediction == nil { frozenPredictionDelayMS = nil } }
+    }
     private var displayedOrder: [Int] = []
     private var displayedOriginal: [String] = []
     private var displayedPreedit = ""
@@ -27,7 +31,7 @@ final class InputController: IMKInputController {
         rankingTask?.cancel()
         rankingTask = nil
         rankingVersion = UUID()
-        if clearCache { cachedPrediction = [] }
+        if clearCache { cachedPrediction = []; cachedPredictionDelayMS = nil }
     }
     private func scheduleRanking(_ client: IMKTextInput) {
         cancelRanking(clearCache: true)
@@ -40,7 +44,9 @@ final class InputController: IMKInputController {
         let request = requestRanking
         rankingTask = Task { @MainActor [weak self, weak client] in
             do {
+                let started = DispatchTime.now().uptimeNanoseconds
                 let tokens = try await request(context)
+                let delayMS = Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
                 try Task.checkCancellation()
                 guard let self, let client, self.isActive, !self.ascii, self.rankingEnabled,
                       self.rankingVersion == version, self.recentContext == context,
@@ -49,6 +55,7 @@ final class InputController: IMKInputController {
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
                       NSEqualRanges(client.selectedRange(), range) else { return }
                 self.cachedPrediction = tokens
+                self.cachedPredictionDelayMS = delayMS
             } catch { /* A missing prediction leaves Rime order unchanged. */ }
         }
     }
@@ -175,6 +182,7 @@ final class InputController: IMKInputController {
         else { return false }
         if !ascii, session.preedit.text.isEmpty, (97...122).contains(key) {
             frozenPrediction = rankingEnabled ? cachedPrediction : []
+            frozenPredictionDelayMS = rankingEnabled ? cachedPredictionDelayMS : nil
             cancelRanking(clearCache: true)
         }
         if !ascii, !session.preedit.text.isEmpty, !displayedOrder.isEmpty,
@@ -246,7 +254,7 @@ final class InputController: IMKInputController {
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
                              highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
                              llmRanks: order.map { index in frozenPrediction?.first(where: { $0.text == candidates.texts[index] })?.rank },
-                             llmTokens: frozenPrediction ?? []) { [weak self, weak client] index in
+                             llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS) { [weak self, weak client] index in
             guard let self, self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
                   self.displayedOrder == order else { return }
@@ -436,9 +444,9 @@ final class InputController: IMKInputController {
             controller.requestRanking = { _ in [.init(text: promoted, rank: 3)] }
             controller.scheduleRanking(client)
             RunLoop.current.run(until: Date().addingTimeInterval(0.08))
-            guard controller.cachedPrediction == [.init(text: promoted, rank: 3)], controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
+            guard controller.cachedPrediction == [.init(text: promoted, rank: 3)], controller.cachedPredictionDelayMS != nil, controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
             _ = key("n"); _ = key("i")
-            guard controller.displayedOrder.first == 2 else { throw Engine.Failure.schemaUnavailable }
+            guard controller.displayedOrder.first == 2, controller.frozenPredictionDelayMS != nil else { throw Engine.Failure.schemaUnavailable }
             let before = client.committed
             var expected = promoted
             switch method {

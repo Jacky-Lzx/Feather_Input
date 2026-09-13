@@ -76,7 +76,7 @@ final class CandidatePanel {
     func contains(_ point: NSPoint) -> Bool { (panel.isVisible && panel.frame.contains(point)) || predictions.contains(point) }
     func hide() { panel.orderOut(nil); predictions.hide(); selection = nil }
     @objc private func choose(_ sender: NSButton) { selection?(sender.tag) }
-    func show(texts: [String], highlight: Int, caret: NSRect, continuation: Bool = false, llmRanks: [Int?] = [], llmTokens: [LocalRecommendation.RankedToken] = [], onSelect: ((Int) -> Void)? = nil) {
+    func show(texts: [String], highlight: Int, caret: NSRect, continuation: Bool = false, llmRanks: [Int?] = [], llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, onSelect: ((Int) -> Void)? = nil) {
         guard !texts.isEmpty else { hide(); return }
         selection = onSelect
         let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
@@ -128,7 +128,7 @@ final class CandidatePanel {
         background.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
         panel.invalidateShadow()
-        predictions.show(llmTokens, beside: frame, visible: visible)
+        predictions.show(llmTokens, delayMS: llmDelayMS, beside: frame, visible: visible)
     }
 
     static func verifyPresentation() throws {
@@ -144,9 +144,9 @@ final class CandidatePanel {
             candidatePanel.panel.appearance = NSAppearance(named: layout == "vertical" ? .aqua : .darkAqua)
             var chosen: Int?
             candidatePanel.show(texts: ["你好", "拟好", "你", "呢", "泥"], highlight: 0,
-                                caret: NSRect(x: 300, y: 400, width: 1, height: 20), llmRanks: [3, nil, 8, nil, nil], llmTokens: [.init(text: "你", rank: 8), .init(text: "你好", rank: 3)]) { chosen = $0 }
+                                caret: NSRect(x: 300, y: 400, width: 1, height: 20), llmRanks: [3, nil, 8, nil, nil], llmTokens: [.init(text: "你", rank: 8), .init(text: "你好", rank: 3)], llmDelayMS: 42) { chosen = $0 }
             guard candidatePanel.predictions.isVisible,
-                  candidatePanel.predictions.text == "LLM top-k · 本轮预测\n\n#3  你好\n#8  你",
+                  candidatePanel.predictions.text == "LLM top-k · 本轮预测\n延迟 42 ms（请求往返）\n\n#3  你好\n#8  你",
                   candidatePanel.buttons[0].title == "1  你好 · LLM #3",
                   candidatePanel.buttons[1].title == "2  拟好" else { throw Engine.Failure.schemaUnavailable }
             if #available(macOS 26.0, *) {
