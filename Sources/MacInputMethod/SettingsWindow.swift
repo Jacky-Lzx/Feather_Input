@@ -64,12 +64,15 @@ private struct SettingsView: View {
                     }
                 }
                 SecureField("API Token", text: $token)
-                Text("Token 保存在 macOS 钥匙串，仅用于本机服务。")
+                Text("Token 明文保存在本机配置文件，仅用于本机服务。")
                     .font(.footnote).foregroundStyle(.secondary)
+                Button("打开 Token 文件所在文件夹") {
+                    NSWorkspace.shared.selectFile(ModelCredential.fileURL.path, inFileViewerRootedAtPath: ModelCredential.fileURL.deletingLastPathComponent().path)
+                }
                 HStack {
                     Button("保存 Token") {
-                        do { try ModelCredential.save(token); status = "Token 已保存到钥匙串。" }
-                        catch { status = "Token 保存失败，请检查钥匙串权限。" }
+                        do { try ModelCredential.save(token); status = "Token 已保存到本机配置文件。" }
+                        catch { status = "Token 保存失败，请检查文件权限，且不要包含换行。" }
                     }
                     Button(testing ? "测试中…" : "连接并测试模型") {
                         testing = true

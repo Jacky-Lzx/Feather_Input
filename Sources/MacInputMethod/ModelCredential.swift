@@ -1,40 +1,25 @@
 import Foundation
-import Security
-import LocalAuthentication
 
+/// Plaintext local configuration, explicitly requested instead of Keychain access.
 enum ModelCredential {
-    private static let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "im.feather.inputmethod.FeatherInput.LMStudio", kSecAttrAccount as String: "local-api-token"]
-    // Loaded only when AI is enabled; never written to preferences or diagnostic output.
-    private static var cached: String?
+    static let fileURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/FeatherInput/lm-studio-token.txt")
+
     static func read() -> String {
-        if let cached { return cached }
-        var q = query
-        let authentication = LAContext()
-        authentication.interactionNotAllowed = true
-        q[kSecUseAuthenticationContext as String] = authentication
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var value: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &value) == errSecSuccess, let data = value as? Data else { return "" }
-        let token = String(decoding: data, as: UTF8.self)
-        cached = token
-        return token
+        // Read the small local file afresh so manual edits take effect on the next request.
+        guard let data = try? Data(contentsOf: fileURL), data.count <= 8192,
+              let token = String(data: data, encoding: .utf8) else { return "" }
+        return token.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     static func save(_ token: String) throws {
-        if token.isEmpty {
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
-        } else {
-            let update = [kSecValueData as String: Data(token.utf8)]
-            var status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-            if status == errSecItemNotFound {
-                var item = query
-                item[kSecValueData as String] = Data(token.utf8)
-                status = SecItemAdd(item as CFDictionary, nil)
-            }
-            guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard token.utf8.count <= 8192, !token.contains("\n"), !token.contains("\r") else {
+            throw CocoaError(.fileWriteInapplicableStringEncoding)
         }
-        cached = token
+        let manager = FileManager.default
+        try manager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
+        try Data(token.utf8).write(to: fileURL, options: .atomic)
+        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 }

@@ -127,3 +127,9 @@ The floating, resizable debug panel can remain visible while typing elsewhere. I
 18 unit tests passed, including opt-in, disabling/re-enabling while requests complete, clearing, history bounds, truncation and quoted/slashed token redaction. A standalone preview using the real LocalRecommendation.models implementation made an unauthenticated request to the real loopback server; the debug window showed one HTTP 401 entry, body and 13 ms duration. Its layout bitmap was inspected (system-composited control surfaces do not fully render in such captures). No actual user prompts or credentials were used in the preview.
 
 Build 15 passed both engine schema checks and the full isolated smoke suite, including asynchronous recommendation cancellation. It was installed with a backup, signature verified, started, and the prior input-source selection restored. Debug mode remains off at startup.
+
+## Plaintext Token configuration (user-requested)
+
+The user reported a blocked Keychain authorization dialog. Token saving previously called SecItemUpdate/SecItemAdd synchronously from the settings UI, and token reading still depended on Keychain. Removed all Security/LocalAuthentication usage from the credential implementation. It now reads `~/Library/Application Support/FeatherInput/lm-studio-token.txt` afresh and saves atomically with owner-only 0600 permissions, trims surrounding whitespace, and rejects multiline or oversized tokens. Debug-token redaction and loopback-only requests are unchanged.
+
+No attempt is made to migrate the old secret by accessing Keychain again. The user must paste the token once in settings, or place it in the file. The existing Keychain item is left untouched. 18 unit tests, both engine checks and the isolated app smoke suite passed with the file-based implementation.

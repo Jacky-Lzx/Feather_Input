@@ -40,7 +40,7 @@ scripts/install.sh
 
 ### 本地 AI 候选推荐（实验功能）
 
-在 LM Studio 的 Developer 页面启动 `127.0.0.1:1234` 服务并加载 Qwen3-0.6B-MLX。打开 Feather 设置，填写 API Token，点击“连接并测试模型”，选择实际模型 ID，再开启“启用本地 AI 候选推荐”。Token 存入 macOS 钥匙串，不写入配置文件。
+在 LM Studio 的 Developer 页面启动 `127.0.0.1:1234` 服务并加载 Qwen3-0.6B-MLX。打开 Feather 设置，填写 API Token，点击“连接并测试模型”，选择实际模型 ID，再开启“启用本地 AI 候选推荐”。Token 按用户选择明文保存在 `~/Library/Application Support/FeatherInput/lm-studio-token.txt`，文件权限为 `0600`。也可直接编辑该文件，下次请求会重新读取。不再访问钥匙串；旧 Token 需在设置里重新粘贴并保存一次。
 
 停顿 250 ms 后，Feather 异步发送当前拼音、当前页候选，以及本次输入会话最近上屏的最多 80 个字符。不会读取应用文档、剪贴板或其他输入框；移动光标、切换应用或中英文时清空这段上下文。推荐项旁显示 `✦`，仍用原数字或鼠标选择；空格仍选择 Rime 当前高亮项。模型只返回候选编号，不生成或自动上屏新文字。
 
