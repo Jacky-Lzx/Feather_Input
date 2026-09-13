@@ -9,6 +9,7 @@ final class InputController: IMKInputController {
     private let modeIndicator = ModeIndicator()
     private var ascii = false
     private var rightControlTap = RightControlTap()
+    private var capsLockSwitch = CapsLockSwitch()
     private var isActive = false
     private var lastCaret: NSRect?
     private var activeScheme: InputScheme?
@@ -17,6 +18,7 @@ final class InputController: IMKInputController {
     }
     override func activateServer(_ sender: Any!) {
         rightControlTap.reset()
+        capsLockSwitch.reset(isLocked: CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift))
         isActive = true
         lastCaret = nil
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
@@ -38,6 +40,11 @@ final class InputController: IMKInputController {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
         if event.type == .flagsChanged {
+            if capsLockSwitch.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
+                rightControlTap.cancel()
+                toggleASCII([kIMKCommandClientName as String: client])
+                return true
+            }
             if rightControlTap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
                 toggleASCII([kIMKCommandClientName as String: client])
                 return true
@@ -72,13 +79,23 @@ final class InputController: IMKInputController {
         let special: [UInt16: Int32] = [36: 0xff0d, 76: 0xff0d, 48: 0xff09, 51: 0xff08,
             53: 0xff1b, 117: 0xffff, 123: 0xff51, 124: 0xff53, 125: 0xff54,
             126: 0xff52, 115: 0xff50, 119: 0xff57, 116: 0xff55, 121: 0xff56]
+        var characters = event.characters
+        if flags.contains(.capsLock), let chars = characters, chars.unicodeScalars.count == 1,
+           let scalar = chars.unicodeScalars.first, (65...90).contains(scalar.value) || (97...122).contains(scalar.value) {
+            // Caps Lock controls language in Feather; Shift still controls letter case.
+            characters = flags.contains(.shift) ? chars.uppercased() : chars.lowercased()
+        }
         let key: Int32
         if let value = special[event.keyCode] { key = value }
-        else if let chars = event.characters, chars.unicodeScalars.count == 1,
+        else if let chars = characters, chars.unicodeScalars.count == 1,
                 let scalar = chars.unicodeScalars.first, scalar.value < 128 { key = Int32(scalar.value) }
         else { return false }
         let handled = session.process(key, modifiers: flags.contains(.shift) ? 1 : 0)
         refresh(client)
+        if !handled, ascii, flags.contains(.capsLock), let characters, characters != event.characters {
+            client.insertText(characters, replacementRange: NSRange(location: NSNotFound, length: 0))
+            return true
+        }
         return handled
     }
     override func commitComposition(_ sender: Any!) {
@@ -195,6 +212,24 @@ final class InputController: IMKInputController {
         controller.deactivateServer(textClient)
         print("PASS: caret mode indicator labels and automatic dismissal")
         print("PASS: NSEvent right-Control tap, shortcut pass-through, pending composition commit, candidate button to IMK client insertion")
+    }
+
+    static func verifyCapsLock(server: IMKServer) throws {
+        let target = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(target)
+        controller.capsLockSwitch.reset(isLocked: false)
+        func caps(_ on: Bool) -> Bool {
+            let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: on ? .capsLock : [],
+                                        timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 57)!
+            return controller.handle(event, client: target)
+        }
+        guard caps(true), controller.ascii, !caps(true) else { throw Engine.Failure.schemaUnavailable }
+        let letter = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .capsLock, timestamp: 0,
+                                     windowNumber: 0, context: nil, characters: "A", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+        guard controller.handle(letter, client: target), target.committed == "a", caps(false), !controller.ascii else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(target)
+        print("PASS: native Caps Lock switch, duplicate suppression and lowercase English output")
     }
 
     // Exercise IMK's actual command dispatcher with its dictionary sender.

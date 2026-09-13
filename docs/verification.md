@@ -65,3 +65,13 @@ Release build, engine regression and packaged smoke checks passed. The new check
 ## Primary-display-only badge
 
 The persistent badge now targets CGMainDisplayID instead of every connected display. Existing secondary-display panels are removed on refresh, and display-configuration notifications relocate it when the primary display changes. It does not follow the focused window to another monitor. The packaged smoke check requires exactly one panel on the primary display.
+
+## Native Caps Lock switching
+
+The user reported a Karabiner simple modification mapping Caps Lock to right Control. The selected profile's single matching rule was removed after saving a timestamped backup beside karabiner.json; no other rules were changed. This changes the physical key's route rather than proving all prior failures were caused by that rule.
+
+Added native Caps Lock latch-change detection, seeded from the current hardware state on activation. Duplicate flagsChanged events do not toggle twice. Plain letter input is normalized to lowercase (Shift gives uppercase) inside Feather even when the system Caps Lock flag is set. Existing right-Control/menu shortcuts remain available; temporary input tracing was removed.
+
+All 11 unit tests and the installed-app smoke checks passed, including latch edges, duplicate suppression, pending input, mode labels and lowercase English output. The independent AppKit test window provides a separate test through CGEvent → system IMK routing; it is not a physical hardware-key test.
+
+The installed native-Caps version passed the independent system-route run: text progressed from `你` to `你ni ` to `你ni 你` across two Caps Lock switches. This confirms both language directions and lowercase English through a real system text-input session.
