@@ -310,7 +310,6 @@ final class InputController: IMKInputController {
         let reordered = order != Array(candidates.texts.indices)
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
                              highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
-                             llmRanks: order.map { index in frozenPrediction?.first(where: { $0.text == candidates.texts[index] })?.rank },
                              llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS, llmTitle: scoringEnabled ? "Rime + LLM · 融合排序" : "LLM top-k · 本轮预测") { [weak self, weak client] index in
             guard let self, self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,

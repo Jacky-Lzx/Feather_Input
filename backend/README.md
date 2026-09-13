@@ -65,9 +65,9 @@ new candidate insertion, or cross-page promotion. Space, digits and clicks map b
 to original Rime indices; up/down selects within the reordered page. Page Up/Down
 retains Rime paging. There is no inference wait in the keyboard handler.
 
-Matched Rime entries display `LLM #N`, where N is the one-based rank in the raw
-model token list (including filtered special tokens), not the displayed candidate
-number. The label is UI metadata and is never inserted into the client text.
+Rime candidate buttons display only their selection number and text. Model ranks
+are shown exclusively in the companion panel; ranking and selection mapping are
+unchanged. Rank metadata is never inserted into the client text.
 
 While Rime candidates are visible, a read-only companion panel shows the entire
 frozen prediction list used for ranking, including tokens with no Rime match. Rows
