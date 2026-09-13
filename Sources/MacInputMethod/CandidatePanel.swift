@@ -8,6 +8,7 @@ private final class CandidateWindow: NSPanel {
 
 private final class CandidateButton: NSButton {
     var isCurrentCandidate = false
+    var isRecommended = false
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         if isCurrentCandidate || isHighlighted {
@@ -16,7 +17,7 @@ private final class CandidateButton: NSButton {
         }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        let text = NSAttributedString(string: title, attributes: [
+        let text = NSAttributedString(string: title + (isRecommended ? " ✦" : ""), attributes: [
             .font: font ?? NSFont.systemFont(ofSize: 17),
             .foregroundColor: isCurrentCandidate || isHighlighted ? NSColor.selectedMenuItemTextColor : NSColor.labelColor,
             .paragraphStyle: paragraph
@@ -63,6 +64,14 @@ final class CandidatePanel {
         scroll.autohidesScrollers = true
         panel.contentView = background
     }
+    var recommendedIndex: Int? { buttons.firstIndex(where: { $0.isRecommended }) }
+    func markRecommendation(_ index: Int?) {
+        for (i, button) in buttons.enumerated() {
+            button.isRecommended = index == i
+            button.needsDisplay = true
+            button.setAccessibilityHelp(index == i ? "本地 AI 推荐，按原编号或点击选词" : nil)
+        }
+    }
     func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
     func hide() { panel.orderOut(nil); selection = nil }
     @objc private func choose(_ sender: NSButton) { selection?(sender.tag) }
@@ -76,7 +85,8 @@ final class CandidatePanel {
         let fontSize = configuredSize == 0 ? 17 : min(24, max(14, configuredSize))
         let font = NSFont.systemFont(ofSize: fontSize)
         let labels = texts.enumerated().map { "\($0.offset + 1)  \($0.element)" }
-        let widths = labels.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 20 }
+        let recommendationSpace: CGFloat = UserDefaults.standard.bool(forKey: "aiRecommendationEnabled") ? 26 : 0
+        let widths = labels.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 20 + recommendationSpace }
         let pad: CGFloat = 8, gap: CGFloat = 4, rowHeight = ceil(fontSize * 1.4) + 12
         let horizontalWidth = widths.reduce(0, +) + gap * CGFloat(texts.count - 1) + pad * 2
         let horizontal = UserDefaults.standard.string(forKey: "candidateLayout") == "horizontal" && horizontalWidth <= visible.width

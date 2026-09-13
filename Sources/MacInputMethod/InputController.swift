@@ -8,6 +8,20 @@ final class InputController: IMKInputController {
     private let candidatesPanel = CandidatePanel()
     private let modeIndicator = ModeIndicator()
     private var ascii = false
+    private var recommendationTask: Task<Void, Never>?
+    private var recommendationVersion = UUID()
+    private var recentContext = ""
+    private var requestRecommendation: (String, String, String, String, [String]) async throws -> Int = {
+        try await LocalRecommendation.recommend(model: $0, token: $1, context: $2, preedit: $3, candidates: $4)
+    }
+    private func invalidateRecommendation(clearContext: Bool = false) {
+        recommendationTask?.cancel()
+        recommendationTask = nil
+        recommendationVersion = UUID()
+        candidatesPanel.markRecommendation(nil)
+        if clearContext { recentContext = "" }
+    }
+    deinit { recommendationTask?.cancel() }
     private var rightControlTap = RightControlTap()
     private var capsLockSwitch = CapsLockSwitch()
     private var isActive = false
@@ -17,6 +31,7 @@ final class InputController: IMKInputController {
         InputScheme(rawValue: UserDefaults.standard.string(forKey: "scheme") ?? "") ?? .full
     }
     override func activateServer(_ sender: Any!) {
+        invalidateRecommendation(clearContext: true)
         rightControlTap.reset()
         capsLockSwitch.reset(isLocked: CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift))
         isActive = true
@@ -28,6 +43,7 @@ final class InputController: IMKInputController {
         PersistentModeIndicator.shared.update(ascii: ascii)
     }
     override func deactivateServer(_ sender: Any!) {
+        invalidateRecommendation(clearContext: true)
         isActive = false
         modeIndicator.hide()
         rightControlTap.reset()
@@ -39,6 +55,8 @@ final class InputController: IMKInputController {
     }
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
+        let changesPosition = event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode)
+        invalidateRecommendation(clearContext: changesPosition)
         if event.type == .flagsChanged {
             if capsLockSwitch.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
                 rightControlTap.cancel()
@@ -105,10 +123,13 @@ final class InputController: IMKInputController {
         refresh(client)
         session.clear()
         candidatesPanel.hide()
+        invalidateRecommendation(clearContext: true)
     }
     private func refresh(_ client: IMKTextInput) {
+        invalidateRecommendation()
         guard let session else { return }
         if let text = session.takeCommit() {
+            recentContext = String((recentContext + text).suffix(80))
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
         let preedit = session.preedit
@@ -125,6 +146,32 @@ final class InputController: IMKInputController {
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts else { return }
             self.rightControlTap.cancel()
             if session.selectCandidate(at: index) { self.refresh(client) }
+        }
+        scheduleRecommendation(preedit: preedit.text, texts: candidates.texts)
+    }
+    private func scheduleRecommendation(preedit: String, texts: [String]) {
+        let defaults = UserDefaults.standard
+        guard isActive, !ascii, defaults.bool(forKey: "aiRecommendationEnabled"), texts.count > 1,
+              let model = defaults.string(forKey: "aiModel"), !model.isEmpty else { return }
+        let version = recommendationVersion
+        let context = recentContext
+        let token = ModelCredential.read()
+        let request = requestRecommendation
+        recommendationTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 250_000_000)
+                try Task.checkCancellation()
+                guard self?.isActive == true, self?.recommendationVersion == version,
+                      UserDefaults.standard.bool(forKey: "aiRecommendationEnabled"),
+                      UserDefaults.standard.string(forKey: "aiModel") == model else { return }
+                let index = try await request(model, token, context, preedit, texts)
+                try Task.checkCancellation()
+                guard let self, self.isActive, !self.ascii, self.recommendationVersion == version,
+                      UserDefaults.standard.bool(forKey: "aiRecommendationEnabled"),
+                      UserDefaults.standard.string(forKey: "aiModel") == model,
+                      self.session?.preedit.text == preedit, self.session?.candidates.texts == texts else { return }
+                self.candidatesPanel.markRecommendation(index)
+            } catch { /* Ordinary candidates remain usable on cancellation, timeout or invalid output. */ }
         }
     }
     override func menu() -> NSMenu! {
@@ -155,6 +202,7 @@ final class InputController: IMKInputController {
     @objc private func selectFullPinyin(_ sender: Any?) { changeScheme(.full, sender: sender) }
     @objc private func selectFlypy(_ sender: Any?) { changeScheme(.flypy, sender: sender) }
     private func changeScheme(_ mode: InputScheme, sender: Any?) {
+        invalidateRecommendation(clearContext: true)
         commitComposition(commandClient(sender))
         // A command can arrive before the first key event creates a session.
         if session == nil { session = try? AppDelegate.engine?.session(mode) }
@@ -164,6 +212,7 @@ final class InputController: IMKInputController {
         session?.setASCII(ascii)
     }
     @objc private func toggleASCII(_ sender: Any?) {
+        invalidateRecommendation(clearContext: true)
         let target = commandClient(sender)
         commitComposition(target)
         ascii.toggle()
@@ -177,6 +226,43 @@ final class InputController: IMKInputController {
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
         modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
+    }
+
+    static func verifyRecommendationLifecycle(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let oldEnabled = defaults.object(forKey: "aiRecommendationEnabled")
+        let oldModel = defaults.object(forKey: "aiModel")
+        defer {
+            for (key, value) in [("aiRecommendationEnabled", oldEnabled), ("aiModel", oldModel)] {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(true, forKey: "aiRecommendationEnabled")
+        defaults.set("test-model", forKey: "aiModel")
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(client)
+        controller.requestRecommendation = { _, _, _, _, _ in
+            // Deliberately return even after cancellation to test stale response rejection.
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            return 1
+        }
+        for key in "ni".utf8 { controller.session?.process(Int32(key)) }
+        controller.refresh(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        guard controller.candidatesPanel.recommendedIndex == 1 else { throw Engine.Failure.schemaUnavailable }
+        let before = controller.session?.candidates.texts
+        controller.refresh(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.28))
+        controller.invalidateRecommendation(clearContext: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        guard controller.candidatesPanel.recommendedIndex == nil,
+              controller.session?.candidates.texts == before else { throw Engine.Failure.schemaUnavailable }
+        controller.refresh(client)
+        controller.deactivateServer(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        guard controller.candidatesPanel.recommendedIndex == nil else { throw Engine.Failure.schemaUnavailable }
+        print("PASS: async recommendation marker, stable candidate order, stale result cancellation and deactivation")
     }
 
     static func verifyKeyboardAndClick(server: IMKServer) throws {
