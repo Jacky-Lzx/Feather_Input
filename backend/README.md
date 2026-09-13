@@ -68,3 +68,10 @@ retains Rime paging. There is no inference wait in the keyboard handler.
 Matched Rime entries display `LLM #N`, where N is the one-based rank in the raw
 model token list (including filtered special tokens), not the displayed candidate
 number. The label is UI metadata and is never inserted into the client text.
+
+While Rime candidates are visible, a read-only companion panel shows the entire
+frozen prediction list used for ranking, including tokens with no Rime match. Rows
+are ordered by original LLM rank; spaces are displayed as ␠. It follows the main
+candidate panel, moves to the left if the right edge has insufficient room, and
+hides with the main panel. Long lists scroll without taking keyboard focus. No
+ready prediction means no companion window for that composition.

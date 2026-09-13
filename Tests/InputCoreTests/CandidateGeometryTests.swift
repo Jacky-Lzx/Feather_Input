@@ -16,4 +16,17 @@ final class CandidateGeometryTests: XCTestCase {
             }
         }
     }
+    func testCompanionUsesRightThenLeftAndStaysOnScreen() {
+        let screen = CGRect(x: -1000, y: 0, width: 1000, height: 700)
+        let size = CGSize(width: 200, height: 200)
+        let middle = CGRect(x: -600, y: 300, width: 200, height: 180)
+        let right = CandidateGeometry.companionFrame(size: size, anchor: middle, visible: screen)
+        XCTAssertEqual(right.minX, middle.maxX + 8)
+        let edge = CGRect(x: -210, y: 300, width: 200, height: 180)
+        let left = CandidateGeometry.companionFrame(size: size, anchor: edge, visible: screen)
+        XCTAssertEqual(left.maxX, edge.minX - 8)
+        XCTAssertTrue(screen.contains(left))
+        XCTAssertFalse(left.intersects(edge))
+        XCTAssertTrue(screen.contains(CandidateGeometry.companionFrame(size: CGSize(width: 2000, height: 2000), anchor: edge, visible: screen)))
+    }
 }

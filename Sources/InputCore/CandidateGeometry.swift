@@ -11,4 +11,21 @@ public enum CandidateGeometry {
         let y = min(max(preferredY, visible.minY), visible.maxY - height)
         return CGRect(x: x, y: y, width: width, height: height)
     }
+    public static func companionFrame(size: CGSize, anchor: CGRect, visible: CGRect) -> CGRect {
+        let width = min(size.width, visible.width)
+        let height = min(size.height, visible.height)
+        let gap: CGFloat = 8
+        var x = anchor.maxX + gap
+        var y = anchor.maxY - height
+        if x + width > visible.maxX {
+            x = anchor.minX - gap - width
+            if x < visible.minX {
+                x = anchor.minX
+                y = anchor.minY - gap - height
+                if y < visible.minY { y = anchor.maxY + gap }
+            }
+        }
+        return CGRect(x: min(max(x, visible.minX), visible.maxX - width),
+                      y: min(max(y, visible.minY), visible.maxY - height), width: width, height: height)
+    }
 }
