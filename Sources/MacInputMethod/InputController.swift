@@ -45,7 +45,8 @@ final class InputController: IMKInputController {
                 toggleASCII([kIMKCommandClientName as String: client])
                 return true
             }
-            if rightControlTap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
+            if rightControlTap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue,
+                                            timestamp: event.timestamp > 0 ? event.timestamp : nil) {
                 toggleASCII([kIMKCommandClientName as String: client])
                 return true
             }

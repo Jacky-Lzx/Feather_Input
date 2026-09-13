@@ -50,4 +50,42 @@ final class RightControlTapTests: XCTestCase {
         tap.reset()
         XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: 0))
     }
+    func testRecordedDuplicateTapBurstOnlyTogglesOnce() {
+        var tap = RightControlTap()
+        // Relative timing from the Codex IMK trace, including full repeated taps.
+        let events: [(Double, UInt)] = [
+            (0.000, 1 << 18), (0.001, 0),
+            (0.006, 1 << 18), (0.008, 0),
+            (0.035, 1 << 18), (0.037, 0)
+        ]
+        var toggles = 0
+        for (time, flags) in events {
+            if tap.flagsChanged(keyCode: 62, flags: flags, timestamp: 100 + time) { toggles += 1 }
+        }
+        XCTAssertEqual(toggles, 1)
+        XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: right, timestamp: 100.100))
+        XCTAssertTrue(tap.flagsChanged(keyCode: 62, flags: 0, timestamp: 100.150))
+    }
+    func testRejectedPressCannotToggleAfterBeingHeldAndResetPreservesQuietPeriod() {
+        var tap = RightControlTap()
+        _ = tap.flagsChanged(keyCode: 62, flags: right, timestamp: 10)
+        XCTAssertTrue(tap.flagsChanged(keyCode: 62, flags: 0, timestamp: 10.1))
+        tap.reset()
+        _ = tap.flagsChanged(keyCode: 62, flags: right, timestamp: 10.105)
+        XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: 0, timestamp: 10.3))
+        _ = tap.flagsChanged(keyCode: 62, flags: right, timestamp: 10.4)
+        tap.cancel()
+        XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: 0, timestamp: 10.5))
+    }
+
+    func testReplayedOriginalEventTimestampsDoNotToggleAgain() {
+        var tap = RightControlTap()
+        _ = tap.flagsChanged(keyCode: 62, flags: right, timestamp: 20)
+        XCTAssertTrue(tap.flagsChanged(keyCode: 62, flags: 0, timestamp: 20.1))
+        _ = tap.flagsChanged(keyCode: 62, flags: right, timestamp: 20)
+        XCTAssertFalse(tap.flagsChanged(keyCode: 62, flags: 0, timestamp: 20.1))
+        _ = tap.flagsChanged(keyCode: 62, flags: right, timestamp: 20.2)
+        XCTAssertTrue(tap.flagsChanged(keyCode: 62, flags: 0, timestamp: 20.3))
+    }
+
 }

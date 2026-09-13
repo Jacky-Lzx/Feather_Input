@@ -89,3 +89,13 @@ Design references: [Apple HIG Materials](https://developer.apple.com/design/huma
 All 11 unit tests, both engine schema checks, and packaged smoke checks passed. Native window captures of light vertical and dark horizontal layouts were visually inspected; view bitmap caching alone does not capture the glass compositor faithfully. The smoke check also asserts native regular glass and its content hierarchy. Tests ran in a temporary bundle with a separate bundle ID and IMK connection name, without restarting the installed input method. An attempted class-based IMK test initializer crashed and was discarded; production initialization is unchanged.
 
 The user confirmed that restarting existing client apps restored modifier-key switching after the prior input-method replacement. After installing build 11, existing clients may again require a complete restart. Prior temporary event tracing was removed from the source.
+
+## Repeated right-Control taps
+
+The retained diagnostic trace `/tmp/FeatherInput-live-route.log` contains right-Control events (key code 62, normalized Control flag 262144, release flag 0) in one Codex controller. At Unix times 1789313499.184970 and 1789313499.192268, it toggled to English and back to Chinese only 7.3 ms apart. Each toggle followed a complete down/up pair; duplicate releases alone were already ignored. This is historical evidence of duplicate complete taps, not proof of whether firmware, a remapper, or system routing produced them.
+
+RightControlTap now rejects a press starting within 40 ms of the previous release, including replayed older timestamps. Rejected taps extend the quiet period; a rejected press cannot later toggle just by being held longer. The first accepted release still toggles immediately. Session reset clears held state while preserving the short quiet period. This deliberately treats two intended taps separated by less than 40 ms as one burst. Caps Lock behavior is unchanged.
+
+Regression tests replay the trace ordering, a burst, preserved timestamps, reset, held rejected presses, and shortcut cancellation. The controller supplies NSEvent's monotonic timestamp; synthetic events with no usable timestamp retain their untimed behavior. Physical keyboard confirmation remains necessary after installation.
+
+Build 12 passed all 14 unit tests, both schema engine checks and the isolated packaged smoke checks. It was installed, signature-verified, started, and the prior input-source selection restored.

@@ -6,10 +6,14 @@ public struct RightControlTap {
     private var leftHeld = false
     private var held = false
     private var eligible = false
+    private var lastRelease: Double?
+    // Reject a second press beginning within 40 ms of a release. IMK traces
+    // contain duplicated complete taps ~7 ms apart, not just repeated downs.
+    private static let debounceInterval = 0.040
     public init() {}
     public mutating func cancel() { eligible = false }
     public mutating func reset() { leftHeld = false; held = false; eligible = false }
-    public mutating func flagsChanged(keyCode: UInt16, flags: UInt) -> Bool {
+    public mutating func flagsChanged(keyCode: UInt16, flags: UInt, timestamp: Double? = nil) -> Bool {
         let controlDown = flags & ((1 << 18) | Self.rightControl | 0x1) != 0
         let sideBits = flags & (Self.rightControl | 0x1)
         if keyCode == 59 {
@@ -28,12 +32,20 @@ public struct RightControlTap {
             return false
         }
         if rightDown {
-            if !held { eligible = clean }
+            if !held {
+                let repeated: Bool
+                if let timestamp, let lastRelease {
+                    repeated = timestamp - lastRelease < Self.debounceInterval
+                } else { repeated = false }
+                eligible = clean && !repeated
+            }
             else if !clean { cancel() }
             held = true
             return false
         }
         let toggle = held && eligible && clean
+        // Include rejected taps in the quiet period, so a burst cannot retrigger.
+        if held, let timestamp { lastRelease = max(lastRelease ?? timestamp, timestamp) }
         held = false
         eligible = false
         return toggle
