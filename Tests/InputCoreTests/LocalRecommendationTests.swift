@@ -52,4 +52,10 @@ final class LocalRecommendationTests: XCTestCase {
         let data = try JSONSerialization.data(withJSONObject: ["candidates": texts.map { ["text": $0, "score": -1.0] as [String: Any] }])
         XCTAssertEqual(try LocalRecommendation.parseMLXContinuations(data, context: "你好"), texts)
     }
+    func testConfigurableMLXCountBounds() throws {
+        let data = try JSONSerialization.data(withJSONObject: ["candidates": (0..<25).map { ["text": "词\($0)", "score": -1.0] as [String: Any] }])
+        for (requested, expected) in [(1, 1), (9, 9), (20, 20), (100, 20), (0, 1)] {
+            XCTAssertEqual(try LocalRecommendation.parseMLXContinuations(data, context: "", count: requested).count, expected)
+        }
+    }
 }

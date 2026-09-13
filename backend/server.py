@@ -7,7 +7,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
-def token_candidates(top, special_ids):
+def token_candidates(top, special_ids, count=5):
     candidates = []
     for token in top:
         text = token['text']
@@ -19,7 +19,7 @@ def token_candidates(top, special_ids):
                            'token_logprobs': [token['logprob']],
                            'logprob': token['logprob'], 'score': token['logprob'],
                            'probability': token['probability']})
-        if len(candidates) == 5:
+        if len(candidates) == count:
             break
     return candidates
 
@@ -32,7 +32,7 @@ class Predictor:
         self.mx, self.generate = mx, generate_step
         self.model, self.tokenizer = load(path)
 
-    def predict(self, context):
+    def predict(self, context, count=5):
         mx, tokenizer = self.mx, self.tokenizer
         # Raw continuation: no chat template, reasoning, or JSON grammar tokens.
         prompt = tokenizer.encode(context, add_special_tokens=False)
@@ -40,12 +40,12 @@ class Predictor:
         step = self.generate(mx.array(prompt), self.model, max_tokens=1)
         _, probs = next(step)
         mx.eval(probs)
-        ids = mx.argsort(probs)[-10:][::-1].tolist()
+        ids = mx.argsort(probs)[-max(40, count * 4):][::-1].tolist()
         top = [{'id': i, 'text': tokenizer.decode([i]), 'logprob': probs[i].item(),
                 'probability': math.exp(probs[i].item())} for i in ids]
         step.close()
         special_ids = set(tokenizer.eos_token_ids) | set(getattr(tokenizer, 'all_special_ids', []))
-        candidates = token_candidates(top, special_ids)
+        candidates = token_candidates(top, special_ids, count)
         return {'candidates': candidates, 'top_tokens': top,
                 'score_kind': 'single next-token logprob (unmodified model distribution)',
                 'elapsed_ms': round((time.monotonic() - started) * 1000)}
@@ -87,7 +87,11 @@ def serve(model_path, port):
                 size = int(self.headers.get('Content-Length', '0'))
                 if not 0 < size <= 4096:
                     raise ValueError()
-                context = json.loads(self.rfile.read(size))['context']
+                payload = json.loads(self.rfile.read(size))
+                context = payload['context']
+                count = payload.get('count', 5)
+                if type(count) is not int or not 1 <= count <= 20:
+                    raise ValueError()
                 if not isinstance(context, str) or not context.strip() or len(context) > 80:
                     raise ValueError()
             except (ValueError, KeyError, TypeError):
@@ -97,7 +101,7 @@ def serve(model_path, port):
                 self.reply(503, {'error': 'busy'})
                 return
             try:
-                self.reply(200, predictor.predict(context))
+                self.reply(200, predictor.predict(context, count))
             except Exception:
                 self.reply(500, {'error': 'inference failed'})
             finally:

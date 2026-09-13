@@ -14,5 +14,10 @@ class TokenTests(unittest.TestCase):
                   for i, t in enumerate(['<eos>', '\n', '\ufffd', '，', '，', '。'])]
         self.assertEqual([r['text'] for r in token_candidates(tokens, {0})], ['，', '。'])
 
+    def test_configured_candidate_count(self):
+        tokens = [{'id': i, 'text': str(i), 'logprob': -float(i+1), 'probability': 0.01} for i in range(30)]
+        for count in [1, 9, 20]:
+            self.assertEqual(len(token_candidates(tokens, set(), count)), count)
+
 if __name__ == '__main__':
     unittest.main()

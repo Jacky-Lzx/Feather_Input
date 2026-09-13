@@ -118,7 +118,8 @@ final class CandidatePanel {
         scroll.frame = NSRect(origin: .zero, size: frame.size)
         scroll.hasVerticalScroller = needsScroll
         scroll.documentView = document
-        if buttons.indices.contains(highlight) { document.scrollToVisible(buttons[highlight].frame) }
+        let visibleIndex = buttons.indices.contains(highlight) ? highlight : 0
+        document.scrollToVisible(buttons[visibleIndex].frame)
         background.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
         panel.invalidateShadow()

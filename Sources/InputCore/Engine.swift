@@ -18,13 +18,24 @@ public final class Engine {
     public func session(_ scheme: InputScheme) throws -> Session {
         let id = feather_session(scheme.rawValue)
         guard id != 0 else { throw Failure.schemaUnavailable }
-        return Session(id: id, engine: self)
+        return Session(id: id, engine: self, scheme: scheme)
     }
 }
 public final class Session {
     private let id: UInt
     private let engine: Engine
-    fileprivate init(id: UInt, engine: Engine) { self.id = id; self.engine = engine }
+    private var scheme: InputScheme
+    private var candidateCount = 5
+    fileprivate init(id: UInt, engine: Engine, scheme: InputScheme) { self.id = id; self.engine = engine; self.scheme = scheme }
+    @discardableResult public func setCandidateCount(_ count: Int) -> Bool {
+        let count = min(9, max(1, count))
+        guard preedit.text.isEmpty else { return false }
+        guard count != candidateCount else { return true }
+        guard feather_page_size(scheme.rawValue, Int32(count)) != 0,
+              feather_select(id, scheme.rawValue) != 0 else { return false }
+        candidateCount = count
+        return true
+    }
     deinit { feather_destroy(id) }
     @discardableResult public func process(_ key: Int32, modifiers: Int32 = 0) -> Bool {
         feather_key(id, key, modifiers) != 0
@@ -36,7 +47,12 @@ public final class Session {
     public func clear() { feather_clear(id) }
     public func commit() { feather_commit(id) }
     public func setASCII(_ enabled: Bool) { feather_ascii(id, enabled ? 1 : 0) }
-    @discardableResult public func select(_ scheme: InputScheme) -> Bool { feather_select(id, scheme.rawValue) != 0 }
+    @discardableResult public func select(_ scheme: InputScheme) -> Bool {
+        _ = feather_page_size(scheme.rawValue, Int32(candidateCount))
+        guard feather_select(id, scheme.rawValue) != 0 else { return false }
+        self.scheme = scheme
+        return true
+    }
     public func takeCommit() -> String? {
         guard let p = feather_take_commit(id) else { return nil }
         defer { feather_free(p) }; return String(cString: p)

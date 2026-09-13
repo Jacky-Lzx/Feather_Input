@@ -23,6 +23,8 @@ final class SettingsWindow {
 private struct SettingsView: View {
     @AppStorage("scheme") private var scheme = InputScheme.full.rawValue
     @AppStorage("candidateFontSize") private var fontSize = 17.0
+    @AppStorage("candidateCount") private var candidateCount = 5
+    @AppStorage("aiCandidateCount") private var aiCandidateCount = 5
     @AppStorage("candidateLayout") private var layout = "vertical"
     @AppStorage("showPersistentMode") private var showPersistentMode = true
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
@@ -47,6 +49,8 @@ private struct SettingsView: View {
                     Text("竖排").tag("vertical")
                     Text("横排").tag("horizontal")
                 }
+                Stepper("拼音每页候选：\(candidateCount)", value: $candidateCount, in: 1...9)
+                Text("完成当前拼音后生效，无需重启。").font(.footnote).foregroundStyle(.secondary)
                 HStack {
                     Text("候选字号")
                     Slider(value: $fontSize, in: 14...24, step: 1)
@@ -61,6 +65,7 @@ private struct SettingsView: View {
                     Text("LM Studio").tag("lmstudio")
                     Text("MLX 下一 token · 本机 1235").tag("mlx")
                 }
+                Stepper("MLX 候选数量：\(aiCandidateCount)", value: $aiCandidateCount, in: 1...20)
                 Button("测试 MLX 概率候选") {
                     testing = true
                     Task { @MainActor in
@@ -71,7 +76,7 @@ private struct SettingsView: View {
                         } catch { status = "MLX 请求失败，请检查 1235 端口后端；详细响应见调试窗口。" }
                     }
                 }.disabled(testing)
-                Text("上屏后停顿 400 ms。MLX 显示下一 token 的最多 5 个高概率候选（含标点）；LM Studio 生成短语。点击插入，继续输入取消。")
+                Text("上屏后停顿 400 ms。MLX 显示下一 token 的所设数量的高概率候选（含标点）；LM Studio 生成短语。点击插入，继续输入取消。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Text("LM Studio · 127.0.0.1:1234\n发送本次输入位置最近上屏的最多 80 个字符、拼音及候选。✦ 标记推荐项，原编号和空格行为不变。")
                     .font(.footnote).foregroundStyle(.secondary)

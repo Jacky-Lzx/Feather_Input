@@ -56,3 +56,12 @@ int feather_select_candidate(uintptr_t s, int index) {
   if (index < 0 || !RIME_PROVIDED(api, select_candidate_on_current_page)) return 0;
   return api->select_candidate_on_current_page(s, (size_t)index);
 }
+
+int feather_page_size(const char *schema, int count) {
+  if (!api || count < 1 || count > 9 || !RIME_PROVIDED(api, config_set_int)) return 0;
+  RimeConfig config = {0};
+  if (!api->schema_open(schema, &config)) return 0;
+  int ok = api->config_set_int(&config, "menu/page_size", count);
+  api->config_close(&config);
+  return ok;
+}

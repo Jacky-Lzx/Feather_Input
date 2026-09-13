@@ -43,6 +43,18 @@ for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
     session.process(110)
     check(second.preedit.text.isEmpty, "independent client sessions")
     session.clear()
+    for count in [9, 3, 5] {
+        check(session.setCandidateCount(count), "set page size")
+        for c in "ni".utf8 { session.process(Int32(c)) }
+        let page = session.candidates.texts
+        check(page.count == count, "configured page size \(count)")
+        session.process(0xff56)
+        check(session.candidates.texts.count == count, "configured next page size")
+        session.process(0xff55)
+        check(session.candidates.texts == page, "configured previous page")
+        session.process(Int32(48 + count))
+        check(session.takeCommit() == page[count - 1], "configured last numeric selection")
+    }
     session.setASCII(true)
     let handled = session.process(97)
     check(!handled || session.takeCommit() == "a", "ASCII pass-through")

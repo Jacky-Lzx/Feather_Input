@@ -13,3 +13,5 @@ int feather_select(uintptr_t session, const char *schema);
 void feather_ascii(uintptr_t session, int enabled);
 void feather_free(char *text);
 int feather_select_candidate(uintptr_t session, int index);
+
+int feather_page_size(const char *schema, int count);

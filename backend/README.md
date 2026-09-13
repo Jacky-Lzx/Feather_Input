@@ -24,17 +24,17 @@ remove `~/Library/LaunchAgents/im.feather.mlx-worker.plist`.
 Select **MLX 下一 token** as the continuation backend in Feather settings and enable
 **上屏后 AI 预测**. Candidate recommendation remains a separate LM Studio option.
 The MLX test button uses synthetic text. Enable debug mode before a request to
-inspect context, the top 10 next tokens and their log probabilities/probabilities,
-and up to five continuation candidates. Clicking a candidate inserts that text;
+inspect context, the top next tokens and their log probabilities/probabilities,
+and the configured number of token candidates. Clicking a candidate inserts that text;
 new input cancels the UI request and stale responses are discarded.
 
 The algorithm reads the unmodified next-token distribution from one
 `generate_step(..., max_tokens=1)` call. It does not extend branches, generate
-phrases, trim whitespace, or remove repeated context. Up to five unique displayable
-tokens from the raw top ten are shown in probability order, including punctuation
+phrases, trim whitespace, or remove repeated context. The configured 1–20 unique displayable
+tokens from a larger raw probability pool are shown in probability order, including punctuation
 and spaces. Space is displayed as ␠ in the candidate label but inserted unchanged.
 Special tokens, control characters and incomplete Unicode fragments are excluded
-from selectable candidates; raw top-ten values remain visible in debug output.
+from selectable candidates; raw probability values remain visible in debug output.
 
 Each candidate has exactly one token ID and its real log probability. Probabilities
 are approximate due to quantization/numerical precision; top ten need not sum to
@@ -47,5 +47,5 @@ responses. No persistent KV cache reuse between requests yet. Cold model load
 happens before listening. Backend loss never blocks Rime keyboard handling.
 
 Health: `GET /health`. Prediction: `POST /continuations` with a JSON `context`
-string of 1–80 characters. Browser-origin requests are rejected. The loopback
+string of 1–80 characters and optional integer `count` (1–20, default 5). Browser-origin requests are rejected. The loopback
 endpoint is available to other local processes; it is not an authentication boundary.

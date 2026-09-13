@@ -111,14 +111,14 @@ public enum LocalRecommendation {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await traced(request: request, token: token) { try parseContinuation($0, context: context) }
     }
-    public static func parseMLXContinuations(_ data: Data, context: String) throws -> [String] {
+    public static func parseMLXContinuations(_ data: Data, context: String, count: Int = 5) throws -> [String] {
         struct Reply: Decodable {
             struct Candidate: Decodable { let text: String; let score: Double }
             let candidates: [Candidate]
         }
         let reply = try JSONDecoder().decode(Reply.self, from: data)
         var texts: [String] = []
-        for candidate in reply.candidates.prefix(5) {
+        for candidate in reply.candidates.prefix(min(20, max(1, count))) {
             let text = candidate.text
             guard candidate.score.isFinite, candidate.score <= 0,
                   !text.isEmpty, !texts.contains(text),
@@ -130,12 +130,13 @@ public enum LocalRecommendation {
         return texts
     }
     public static func mlxContinuations(context: String) async throws -> [String] {
+        let count = min(20, max(1, UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5))
         var request = URLRequest(url: URL(string: "http://127.0.0.1:1235/continuations")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 3
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80))])
-        return try await traced(request: request, token: "") { try parseMLXContinuations($0, context: context) }
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "count": count])
+        return try await traced(request: request, token: "") { try parseMLXContinuations($0, context: context, count: count) }
     }
     private static func traced<T>(request: URLRequest, token: String, parse: (Data) throws -> T) async throws -> T {
         let id = await LLMDebugLog.shared.begin(request: request, token: token)

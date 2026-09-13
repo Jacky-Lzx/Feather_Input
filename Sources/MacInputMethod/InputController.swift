@@ -45,6 +45,7 @@ final class InputController: IMKInputController {
         isActive = true
         lastCaret = nil
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
+        session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
         session?.select(scheme)
         activeScheme = scheme
         session?.setASCII(ascii)
@@ -64,6 +65,7 @@ final class InputController: IMKInputController {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
+        session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
         let changesPosition = event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode)
         invalidateRecommendation(clearContext: changesPosition)
         if event.type == .flagsChanged {
@@ -190,6 +192,7 @@ final class InputController: IMKInputController {
     }
     private func scheduleContinuation(_ client: IMKTextInput) {
         let defaults = UserDefaults.standard
+        let candidateCount = defaults.object(forKey: "aiCandidateCount") as? Int ?? 5
         let backend = defaults.string(forKey: "aiContinuationBackend")
         let savedModel = defaults.string(forKey: "aiModel")
         let model = savedModel ?? ""
@@ -209,7 +212,8 @@ final class InputController: IMKInputController {
                 guard self?.isActive == true, self?.recommendationVersion == version,
                       UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
                       UserDefaults.standard.string(forKey: "aiModel") == savedModel,
-                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend else { return }
+                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
+                      (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount else { return }
                 let texts = try await request(model, token, context)
                 guard let text = texts.first else { return }
                 try Task.checkCancellation()
@@ -219,6 +223,7 @@ final class InputController: IMKInputController {
                       UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
                       UserDefaults.standard.string(forKey: "aiModel") == savedModel,
                       UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
+                      (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
                       NSEqualRanges(client.selectedRange(), range) else { return }
                 var caret = NSRect.zero
@@ -232,6 +237,7 @@ final class InputController: IMKInputController {
                           UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
                           UserDefaults.standard.string(forKey: "aiModel") == savedModel,
                       UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
+                      (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount,
                           NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
                           NSEqualRanges(client.selectedRange(), range) else { return }
                     guard texts.indices.contains(index) else { return }
