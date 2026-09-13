@@ -64,3 +64,7 @@ unmatched entries and equal matches retain Rime order. No prefix/substring match
 new candidate insertion, or cross-page promotion. Space, digits and clicks map back
 to original Rime indices; up/down selects within the reordered page. Page Up/Down
 retains Rime paging. There is no inference wait in the keyboard handler.
+
+Matched Rime entries display `LLM #N`, where N is the one-based rank in the raw
+model token list (including filtered special tokens), not the displayed candidate
+number. The label is UI metadata and is never inserted into the client text.

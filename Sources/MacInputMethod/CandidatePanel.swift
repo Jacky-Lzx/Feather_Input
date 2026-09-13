@@ -75,7 +75,7 @@ final class CandidatePanel {
     func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
     func hide() { panel.orderOut(nil); selection = nil }
     @objc private func choose(_ sender: NSButton) { selection?(sender.tag) }
-    func show(texts: [String], highlight: Int, caret: NSRect, continuation: Bool = false, onSelect: ((Int) -> Void)? = nil) {
+    func show(texts: [String], highlight: Int, caret: NSRect, continuation: Bool = false, llmRanks: [Int?] = [], onSelect: ((Int) -> Void)? = nil) {
         guard !texts.isEmpty else { hide(); return }
         selection = onSelect
         let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
@@ -84,7 +84,11 @@ final class CandidatePanel {
         let configuredSize = UserDefaults.standard.double(forKey: "candidateFontSize")
         let fontSize = configuredSize == 0 ? 17 : min(24, max(14, configuredSize))
         let font = NSFont.systemFont(ofSize: fontSize)
-        let labels = texts.enumerated().map { continuation ? "AI · " + $0.element.replacingOccurrences(of: " ", with: "␠") : "\($0.offset + 1)  \($0.element)" }
+        let labels = texts.enumerated().map { index, text in
+            let base = continuation ? "AI · " + text.replacingOccurrences(of: " ", with: "␠") : "\(index + 1)  \(text)"
+            let rank = llmRanks.indices.contains(index) ? llmRanks[index] : nil
+            return base + (rank.map { " · LLM #\($0)" } ?? "")
+        }
         let recommendationSpace: CGFloat = UserDefaults.standard.bool(forKey: "aiRecommendationEnabled") ? 26 : 0
         let widths = labels.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 20 + recommendationSpace }
         let pad: CGFloat = 8, gap: CGFloat = 4, rowHeight = ceil(fontSize * 1.4) + 12
@@ -105,8 +109,8 @@ final class CandidatePanel {
             button.font = font
             button.isCurrentCandidate = index == highlight
             button.tag = index
-            button.toolTip = texts[index]
-            button.setAccessibilityLabel(continuation ? "AI 续写：" + texts[index] + "，点击插入" : "候选 \(index + 1)：\(texts[index])")
+            button.toolTip = label
+            button.setAccessibilityLabel(continuation ? "AI 续写：" + texts[index] + "，点击插入" : "候选 \(index + 1)：\(label)")
             button.frame = NSRect(x: horizontal ? x : pad,
                                   y: naturalSize.height - pad - rowHeight - (horizontal ? 0 : CGFloat(index) * (rowHeight + gap)),
                                   width: horizontal ? widths[index] : itemWidth, height: rowHeight)
@@ -138,7 +142,9 @@ final class CandidatePanel {
             candidatePanel.panel.appearance = NSAppearance(named: layout == "vertical" ? .aqua : .darkAqua)
             var chosen: Int?
             candidatePanel.show(texts: ["你好", "拟好", "你", "呢", "泥"], highlight: 0,
-                                caret: NSRect(x: 300, y: 400, width: 1, height: 20)) { chosen = $0 }
+                                caret: NSRect(x: 300, y: 400, width: 1, height: 20), llmRanks: [3, nil, 8, nil, nil]) { chosen = $0 }
+            guard candidatePanel.buttons[0].title == "1  你好 · LLM #3",
+                  candidatePanel.buttons[1].title == "2  拟好" else { throw Engine.Failure.schemaUnavailable }
             if #available(macOS 26.0, *) {
                 guard let glass = candidatePanel.background as? NSGlassEffectView,
                       glass.style == .regular, glass.contentView === candidatePanel.scroll,

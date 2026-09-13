@@ -58,4 +58,12 @@ final class LocalRecommendationTests: XCTestCase {
             XCTAssertEqual(try LocalRecommendation.parseMLXContinuations(data, context: "", count: requested).count, expected)
         }
     }
+    func testLLMRankRetainsPositionsOfFilteredTokens() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "top_tokens": [["text": "<eos>"], ["text": "\n"], ["text": "环境"], ["text": "，"]],
+            "candidates": [["text": "环境", "score": -1.0], ["text": "，", "score": -2.0]]
+        ])
+        XCTAssertEqual(try LocalRecommendation.parseMLXRankedTokens(data, context: ""),
+                       [.init(text: "环境", rank: 3), .init(text: "，", rank: 4)])
+    }
 }

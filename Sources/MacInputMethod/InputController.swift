@@ -13,15 +13,15 @@ final class InputController: IMKInputController {
     private var recentContext = ""
     private var rankingTask: Task<Void, Never>?
     private var rankingVersion = UUID()
-    private var cachedPrediction: [String] = []
-    private var frozenPrediction: [String]?
+    private var cachedPrediction: [LocalRecommendation.RankedToken] = []
+    private var frozenPrediction: [LocalRecommendation.RankedToken]?
     private var displayedOrder: [Int] = []
     private var displayedOriginal: [String] = []
     private var displayedPreedit = ""
     private var displayedHighlight = 0
     private var rankingEnabled: Bool { UserDefaults.standard.bool(forKey: "aiRerankingEnabled") }
-    private var requestRanking: (String) async throws -> [String] = {
-        try await LocalRecommendation.mlxContinuations(context: $0)
+    private var requestRanking: (String) async throws -> [LocalRecommendation.RankedToken] = {
+        try await LocalRecommendation.mlxRankedTokens(context: $0)
     }
     private func cancelRanking(clearCache: Bool) {
         rankingTask?.cancel()
@@ -237,14 +237,15 @@ final class InputController: IMKInputController {
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
         if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0 { lastCaret = caret }
         let anchor = lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
-        let order = CandidateRanking.order(candidates.texts, predictions: frozenPrediction ?? [])
+        let order = CandidateRanking.order(candidates.texts, predictions: (frozenPrediction ?? []).map(\.text))
         if displayedOriginal != candidates.texts || displayedPreedit != preedit.text { displayedHighlight = 0 }
         displayedOriginal = candidates.texts
         displayedPreedit = preedit.text
         displayedOrder = order
         let reordered = order != Array(candidates.texts.indices)
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
-                             highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor) { [weak self, weak client] index in
+                             highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
+                             llmRanks: order.map { index in frozenPrediction?.first(where: { $0.text == candidates.texts[index] })?.rank }) { [weak self, weak client] index in
             guard let self, self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
                   self.displayedOrder == order else { return }
@@ -431,10 +432,10 @@ final class InputController: IMKInputController {
             session.clear()
             controller.frozenPrediction = nil
             controller.recentContext = "我们"
-            controller.requestRanking = { _ in [promoted] }
+            controller.requestRanking = { _ in [.init(text: promoted, rank: 3)] }
             controller.scheduleRanking(client)
             RunLoop.current.run(until: Date().addingTimeInterval(0.08))
-            guard controller.cachedPrediction == [promoted], controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
+            guard controller.cachedPrediction == [.init(text: promoted, rank: 3)], controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
             _ = key("n"); _ = key("i")
             guard controller.displayedOrder.first == 2 else { throw Engine.Failure.schemaUnavailable }
             let before = client.committed
@@ -455,7 +456,7 @@ final class InputController: IMKInputController {
         controller.recentContext = "我们"
         controller.requestRanking = { _ in
             try? await Task.sleep(nanoseconds: 180_000_000)
-            return ["你"]
+            return [.init(text: "你", rank: 1)]
         }
         controller.scheduleRanking(client)
         _ = key("n"); _ = key("i")
