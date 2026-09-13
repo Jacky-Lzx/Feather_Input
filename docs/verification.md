@@ -27,3 +27,11 @@ The generated bundle is a local development preview. The build script derives it
 The original bundle returned success from TISRegisterInputSource, but TISCreateInputSourceList could not enumerate it. Adding a visible ComponentInputModeDict alone did not resolve this. Changing the bundle identifier from `im.feather.inputmethod` to `im.feather.inputmethod.FeatherInput` (including the complete `.inputmethod.` segment) resolved enumeration. The server connection now uses the bundle-prefixed name declared in Info.plist.
 
 After rebuilding and replacing the installed app, the registration helper verified a selectable, enabled input source. Installed-app startup smoke testing also passed. The installer now checks enumeration and enabled state instead of treating the registration return code alone as success. It enables the input source without selecting it or modifying other input sources.
+
+## Input-source menu fix
+
+The system menu calls `IMKInputController.doCommand(by:command:)`, which forwards a dictionary containing `kIMKCommandMenuItemName` and `kIMKCommandClientName`. The original scheme callback incorrectly required an NSMenuItem sender. Scheme menu entries now use distinct full-pinyin/Flypy selectors accepting the command context, obtain the supplied client for committing composition, and create the engine session when the menu is used before the first key event.
+
+The installed-app smoke check exercises IMK's actual command dispatcher with dictionary senders for Flypy → full pinyin → Flypy, verifies preference/active-scheme/checkmark agreement, and commits `你好` with each scheme's spelling. It restores the previous scheme preference afterward. The final installed-app check ran with the old input-method process stopped to avoid a duplicate server connection. Both engine integration and signature verification passed.
+
+Added English and Simplified Chinese InfoPlist.strings for the application title and mode ID. After replacement, TISGetInputSourceProperty reports localized name `Feather Input` and enabled state `1`. Visual inspection of a physical system-menu click remains a separate check; the regression test validates the same IMK dispatch route programmatically.

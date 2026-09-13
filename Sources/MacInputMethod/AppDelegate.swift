@@ -13,11 +13,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             Self.engine = try Engine(library: Bundle.main.bundlePath + "/Contents/Frameworks/librime.dylib",
                                      shared: resources + "/rime", user: user)
-            server = IMKServer(name: Bundle.main.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String, bundleIdentifier: Bundle.main.bundleIdentifier)
+            let connection = Bundle.main.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String
+            server = IMKServer(name: connection, bundleIdentifier: Bundle.main.bundleIdentifier)
             guard server != nil, NSClassFromString("FeatherInputController") != nil else {
                 throw Engine.Failure.schemaUnavailable
             }
             if smokeTest {
+                try InputController.verifyMenuCommands(server: server!)
                 let session = try Self.engine!.session(.full)
                 for key in "nihao".utf8 { session.process(Int32(key)) }
                 guard session.candidates.texts.contains("你好") else { throw Engine.Failure.schemaUnavailable }

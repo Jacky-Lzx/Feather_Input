@@ -10,6 +10,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Framewor
 cp .build/release/FeatherInput "$app/Contents/MacOS/"
 swiftc -O scripts/register-input-source.swift -o "$app/Contents/MacOS/register-input-source"
 cp Resources/Info.plist "$app/Contents/"
+cp -R Resources/*.lproj "$app/Contents/Resources/"
 cp -R dist/rime "$app/Contents/Resources/"
 cp -R dist/licenses "$app/Contents/Resources/"
 cp THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"

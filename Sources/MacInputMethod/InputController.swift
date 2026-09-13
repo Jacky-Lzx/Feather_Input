@@ -77,7 +77,7 @@ final class InputController: IMKInputController {
     override func menu() -> NSMenu! {
         let menu = NSMenu()
         for mode in InputScheme.allCases {
-            let item = NSMenuItem(title: mode.title, action: #selector(changeScheme(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: mode.title, action: mode == .full ? #selector(selectFullPinyin(_:)) : #selector(selectFlypy(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
             item.state = scheme == mode ? .on : .off
@@ -91,17 +91,50 @@ final class InputController: IMKInputController {
         settings.target = self; menu.addItem(settings)
         return menu
     }
+    private func commandClient(_ sender: Any?) -> Any? {
+        (sender as? NSDictionary)?[kIMKCommandClientName as String] ?? client()
+    }
     @objc private func showSettings(_ sender: Any?) {
-        commitComposition(client())
+        commitComposition(commandClient(sender))
         SettingsWindow.shared.show()
     }
-    @objc private func changeScheme(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let mode = InputScheme(rawValue: raw) else { return }
-        commitComposition(client())
-        if session?.select(mode) == true { UserDefaults.standard.set(raw, forKey: "scheme"); activeScheme = mode }
+    @objc private func selectFullPinyin(_ sender: Any?) { changeScheme(.full, sender: sender) }
+    @objc private func selectFlypy(_ sender: Any?) { changeScheme(.flypy, sender: sender) }
+    private func changeScheme(_ mode: InputScheme, sender: Any?) {
+        commitComposition(commandClient(sender))
+        // A command can arrive before the first key event creates a session.
+        if session == nil { session = try? AppDelegate.engine?.session(mode) }
+        guard session?.select(mode) == true else { NSSound.beep(); return }
+        UserDefaults.standard.set(mode.rawValue, forKey: "scheme")
+        activeScheme = mode
         session?.setASCII(ascii)
     }
     @objc private func toggleASCII(_ sender: Any?) {
-        commitComposition(client()); ascii.toggle(); session?.setASCII(ascii)
+        commitComposition(commandClient(sender)); ascii.toggle(); session?.setASCII(ascii)
+    }
+
+    // Exercise IMK's actual command dispatcher with its dictionary sender.
+    static func verifyMenuCommands(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "scheme")
+        defer {
+            if let previous { defaults.set(previous, forKey: "scheme") }
+            else { defaults.removeObject(forKey: "scheme") }
+        }
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        for mode in [InputScheme.flypy, .full, .flypy] {
+            guard let item = controller.menu().items.first(where: { $0.title == mode.title }),
+                  let action = item.action else { throw Engine.Failure.schemaUnavailable }
+            controller.doCommand(by: action, command: [kIMKCommandMenuItemName as String: item])
+            guard controller.scheme == mode, controller.activeScheme == mode,
+                  controller.menu().items.first(where: { $0.title == mode.title })?.state == .on,
+                  let session = controller.session else { throw Engine.Failure.schemaUnavailable }
+            for key in (mode == .full ? "nihao" : "nihc").utf8 { session.process(Int32(key)) }
+            session.process(32)
+            guard session.takeCommit() == "你好" else { throw Engine.Failure.schemaUnavailable }
+        }
+        print("PASS: IMK menu dictionary dispatch, session creation, full/flypy switching, checkmarks and engine output")
     }
 }
