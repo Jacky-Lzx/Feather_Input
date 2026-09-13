@@ -11,6 +11,54 @@ final class InputController: IMKInputController {
     private var recommendationTask: Task<Void, Never>?
     private var recommendationVersion = UUID()
     private var recentContext = ""
+    private var rankingTask: Task<Void, Never>?
+    private var rankingVersion = UUID()
+    private var cachedPrediction: [String] = []
+    private var frozenPrediction: [String]?
+    private var displayedOrder: [Int] = []
+    private var displayedOriginal: [String] = []
+    private var displayedPreedit = ""
+    private var displayedHighlight = 0
+    private var rankingEnabled: Bool { UserDefaults.standard.bool(forKey: "aiRerankingEnabled") }
+    private var requestRanking: (String) async throws -> [String] = {
+        try await LocalRecommendation.mlxContinuations(context: $0)
+    }
+    private func cancelRanking(clearCache: Bool) {
+        rankingTask?.cancel()
+        rankingTask = nil
+        rankingVersion = UUID()
+        if clearCache { cachedPrediction = [] }
+    }
+    private func scheduleRanking(_ client: IMKTextInput) {
+        cancelRanking(clearCache: true)
+        guard rankingEnabled, isActive, !ascii, !recentContext.isEmpty else { return }
+        let version = rankingVersion
+        let context = recentContext
+        let range = client.selectedRange()
+        let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let count = UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5
+        let request = requestRanking
+        rankingTask = Task { @MainActor [weak self, weak client] in
+            do {
+                let tokens = try await request(context)
+                try Task.checkCancellation()
+                guard let self, let client, self.isActive, !self.ascii, self.rankingEnabled,
+                      self.rankingVersion == version, self.recentContext == context,
+                      self.session?.preedit.text.isEmpty == true, self.frozenPrediction == nil,
+                      (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == count,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+                      NSEqualRanges(client.selectedRange(), range) else { return }
+                self.cachedPrediction = tokens
+            } catch { /* A missing prediction leaves Rime order unchanged. */ }
+        }
+    }
+    private func selectDisplayed(_ index: Int, client: IMKTextInput) -> Bool {
+        guard let session, session.preedit.text == displayedPreedit,
+              session.candidates.texts == displayedOriginal, displayedOrder.indices.contains(index) else { return false }
+        guard session.selectCandidate(at: displayedOrder[index]) else { return false }
+        refresh(client)
+        return true
+    }
     private var continuationText: String?
     private var requestContinuation: (String, String, String) async throws -> [String] = {
         if UserDefaults.standard.string(forKey: "aiContinuationBackend") == "mlx" {
@@ -27,9 +75,13 @@ final class InputController: IMKInputController {
         if continuationText != nil { candidatesPanel.hide(); continuationText = nil }
         recommendationVersion = UUID()
         candidatesPanel.markRecommendation(nil)
-        if clearContext { recentContext = "" }
+        if clearContext {
+            recentContext = ""
+            cancelRanking(clearCache: true)
+            if session?.preedit.text.isEmpty != false { frozenPrediction = nil }
+        }
     }
-    deinit { recommendationTask?.cancel() }
+    deinit { recommendationTask?.cancel(); rankingTask?.cancel() }
     private var rightControlTap = RightControlTap()
     private var capsLockSwitch = CapsLockSwitch()
     private var isActive = false
@@ -43,6 +95,7 @@ final class InputController: IMKInputController {
         rightControlTap.reset()
         capsLockSwitch.reset(isLocked: CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift))
         isActive = true
+        frozenPrediction = nil
         lastCaret = nil
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
@@ -120,6 +173,24 @@ final class InputController: IMKInputController {
         else if let chars = characters, chars.unicodeScalars.count == 1,
                 let scalar = chars.unicodeScalars.first, scalar.value < 128 { key = Int32(scalar.value) }
         else { return false }
+        if !ascii, session.preedit.text.isEmpty, (97...122).contains(key) {
+            frozenPrediction = rankingEnabled ? cachedPrediction : []
+            cancelRanking(clearCache: true)
+        }
+        if !ascii, !session.preedit.text.isEmpty, !displayedOrder.isEmpty,
+           displayedOrder != Array(displayedOriginal.indices),
+           session.preedit.text == displayedPreedit, session.candidates.texts == displayedOriginal {
+            if key == 32 { return selectDisplayed(displayedHighlight, client: client) }
+            if (49...57).contains(key), !flags.contains(.shift) {
+                let index = Int(key - 49)
+                if displayedOrder.indices.contains(index) { return selectDisplayed(index, client: client) }
+            }
+            if key == 0xff52 || key == 0xff54 {
+                displayedHighlight = min(displayedOrder.count - 1, max(0, displayedHighlight + (key == 0xff54 ? 1 : -1)))
+                refresh(client)
+                return true
+            }
+        }
         let handled = session.process(key, modifiers: flags.contains(.shift) ? 1 : 0)
         refresh(client)
         if !handled, ascii, flags.contains(.capsLock), let characters, characters != event.characters {
@@ -141,6 +212,8 @@ final class InputController: IMKInputController {
         guard let session else { return }
         let committed = session.takeCommit()
         if let text = committed {
+            frozenPrediction = nil
+            cancelRanking(clearCache: true)
             recentContext = String((recentContext + text).suffix(80))
             client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         }
@@ -150,21 +223,39 @@ final class InputController: IMKInputController {
         let candidates = session.candidates
         guard !preedit.text.isEmpty, !candidates.texts.isEmpty else {
             candidatesPanel.hide()
-            if preedit.text.isEmpty, let committed, !committed.isEmpty { scheduleContinuation(client) }
+            displayedOrder = []
+            if preedit.text.isEmpty {
+                frozenPrediction = nil
+                if let committed, !committed.isEmpty {
+                    if rankingEnabled { scheduleRanking(client) }
+                    else { scheduleContinuation(client) }
+                }
+            }
             return
         }
         var caret = NSRect.zero
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
         if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0 { lastCaret = caret }
         let anchor = lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
-        candidatesPanel.show(texts: candidates.texts, highlight: candidates.highlight, caret: anchor) { [weak self, weak client] index in
+        let order = CandidateRanking.order(candidates.texts, predictions: frozenPrediction ?? [])
+        if displayedOriginal != candidates.texts || displayedPreedit != preedit.text { displayedHighlight = 0 }
+        displayedOriginal = candidates.texts
+        displayedPreedit = preedit.text
+        displayedOrder = order
+        let reordered = order != Array(candidates.texts.indices)
+        candidatesPanel.show(texts: order.map { candidates.texts[$0] },
+                             highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor) { [weak self, weak client] index in
             guard let self, self.isActive, let client, let session = self.session,
-                  session.preedit.text == preedit.text, session.candidates.texts == candidates.texts else { return }
+                  session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
+                  self.displayedOrder == order else { return }
             self.rightControlTap.cancel()
-            if session.selectCandidate(at: index) { self.refresh(client) }
+            _ = self.selectDisplayed(index, client: client)
         }
-        scheduleRecommendation(preedit: preedit.text, texts: candidates.texts)
+        if !rankingEnabled && frozenPrediction?.isEmpty != false {
+            scheduleRecommendation(preedit: preedit.text, texts: candidates.texts)
+        }
     }
+
     private func scheduleRecommendation(preedit: String, texts: [String]) {
         let defaults = UserDefaults.standard
         guard isActive, !ascii, defaults.bool(forKey: "aiRecommendationEnabled"), texts.count > 1,
@@ -307,6 +398,73 @@ final class InputController: IMKInputController {
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
         modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
+    }
+
+    static func verifyRankingLifecycle(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let saved = ["aiRerankingEnabled", "scheme"].map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in saved {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(true, forKey: "aiRerankingEnabled")
+        defaults.set(InputScheme.full.rawValue, forKey: "scheme")
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil),
+              let engine = AppDelegate.engine else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(client)
+        controller.session = try engine.session(.full)
+        guard let session = controller.session else { throw Engine.Failure.schemaUnavailable }
+        func key(_ text: String, code: UInt16 = 0) -> Bool {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                        windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
+                                        isARepeat: false, keyCode: code)!
+            return controller.handle(event, client: client)
+        }
+        for method in 0..<4 {
+            session.clear()
+            for c in "ni".utf8 { session.process(Int32(c)) }
+            let original = session.candidates.texts
+            guard original.count >= 3 else { throw Engine.Failure.schemaUnavailable }
+            let promoted = original[2]
+            session.clear()
+            controller.frozenPrediction = nil
+            controller.recentContext = "我们"
+            controller.requestRanking = { _ in [promoted] }
+            controller.scheduleRanking(client)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.08))
+            guard controller.cachedPrediction == [promoted], controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
+            _ = key("n"); _ = key("i")
+            guard controller.displayedOrder.first == 2 else { throw Engine.Failure.schemaUnavailable }
+            let before = client.committed
+            var expected = promoted
+            switch method {
+            case 0: guard key(" ", code: 49) else { throw Engine.Failure.schemaUnavailable }
+            case 1: guard key("1", code: 18) else { throw Engine.Failure.schemaUnavailable }
+            case 2: guard controller.candidatesPanel.verifyClick(on: 0) else { throw Engine.Failure.schemaUnavailable }
+            default:
+                _ = key("", code: 125)
+                expected = original[controller.displayedOrder[1]]
+                guard key(" ", code: 49) else { throw Engine.Failure.schemaUnavailable }
+            }
+            guard client.committed == before + expected else { throw Engine.Failure.schemaUnavailable }
+        }
+        session.clear()
+        controller.frozenPrediction = nil
+        controller.recentContext = "我们"
+        controller.requestRanking = { _ in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            return ["你"]
+        }
+        controller.scheduleRanking(client)
+        _ = key("n"); _ = key("i")
+        let order = controller.displayedOrder
+        RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        guard controller.displayedOrder == order, controller.frozenPrediction == [],
+              controller.cachedPrediction.isEmpty else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: cached exact ranking, mapped space/digit/click/arrows, frozen order and late prediction rejection")
     }
 
     static func verifyContinuationLifecycle(server: IMKServer) throws {

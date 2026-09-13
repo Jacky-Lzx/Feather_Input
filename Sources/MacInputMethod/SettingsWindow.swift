@@ -27,6 +27,7 @@ private struct SettingsView: View {
     @AppStorage("aiCandidateCount") private var aiCandidateCount = 5
     @AppStorage("candidateLayout") private var layout = "vertical"
     @AppStorage("showPersistentMode") private var showPersistentMode = true
+    @AppStorage("aiRerankingEnabled") private var rerankingEnabled = false
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
     @AppStorage("aiContinuationEnabled") private var continuationEnabled = false
     @AppStorage("aiContinuationBackend") private var continuationBackend = "lmstudio"
@@ -59,13 +60,16 @@ private struct SettingsView: View {
                 Text("Caps Lock 或单按右 Control 切换中英文\n点击或数字键选词 · 空格上屏 · Page Up / Down 翻页")
                     .font(.footnote).foregroundStyle(.secondary)
                 Divider()
+                Toggle("用 MLX 下一 token 给拼音候选排序", isOn: $rerankingEnabled)
+                Text("上屏后后台预测；下一轮拼音固定使用已缓存结果。当前页精确匹配的候选优先，未匹配项保持原顺序；无结果时沿用 Rime。开启后不显示独立预测窗口。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("启用本地 AI 候选推荐", isOn: $aiEnabled)
                 Toggle("上屏后 AI 预测", isOn: $continuationEnabled)
                 Picker("续写后端", selection: $continuationBackend) {
                     Text("LM Studio").tag("lmstudio")
                     Text("MLX 下一 token · 本机 1235").tag("mlx")
                 }
-                Stepper("MLX 候选数量：\(aiCandidateCount)", value: $aiCandidateCount, in: 1...20)
+                Stepper("MLX top-k 数量：\(aiCandidateCount)", value: $aiCandidateCount, in: 1...20)
                 Button("测试 MLX 概率候选") {
                     testing = true
                     Task { @MainActor in

@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try InputController.verifyCapsLock(server: server!)
                 try InputController.verifyRecommendationLifecycle(server: server!)
                 try InputController.verifyContinuationLifecycle(server: server!)
+                try InputController.verifyRankingLifecycle(server: server!)
                 let session = try Self.engine!.session(.full)
                 for key in "nihao".utf8 { session.process(Int32(key)) }
                 guard session.candidates.texts.contains("你好") else { throw Engine.Failure.schemaUnavailable }

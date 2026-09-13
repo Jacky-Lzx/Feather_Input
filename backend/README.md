@@ -49,3 +49,18 @@ happens before listening. Backend loss never blocks Rime keyboard handling.
 Health: `GET /health`. Prediction: `POST /continuations` with a JSON `context`
 string of 1–80 characters and optional integer `count` (1–20, default 5). Browser-origin requests are rejected. The loopback
 endpoint is available to other local processes; it is not an authentication boundary.
+
+## Rime candidate ranking
+
+Enable **用 MLX 下一 token 给拼音候选排序** in Feather settings. This takes
+precedence over the separate prediction popup and legacy LM Studio recommendation.
+After a commit the app immediately requests top-k tokens in the background. At the
+start of the next lowercase-pinyin composition it freezes the ready cache (or an
+empty cache). Later replies cannot move the current candidates. Predictions are
+scoped to the active input context; input source/focus changes invalidate them.
+
+Within each Rime page, exact token matches move first in model probability order;
+unmatched entries and equal matches retain Rime order. No prefix/substring match,
+new candidate insertion, or cross-page promotion. Space, digits and clicks map back
+to original Rime indices; up/down selects within the reordered page. Page Up/Down
+retains Rime paging. There is no inference wait in the keyboard handler.
