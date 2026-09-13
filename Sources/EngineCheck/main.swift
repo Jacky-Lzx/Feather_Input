@@ -2,10 +2,24 @@ import Foundation
 import InputCore
 
 let args = CommandLine.arguments
- guard args.count == 4 else { fatalError("Usage: EngineCheck LIBRARY SHARED_DATA USER_DATA") }
+guard args.count == 4 || args.count == 5 else { fatalError("Usage: EngineCheck LIBRARY SHARED_DATA USER_DATA [EVALUATION_FIXTURES]") }
 let engine = try Engine(library: args[1], shared: args[2], user: args[3])
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     guard condition() else { fputs("FAIL: \(message)\n", stderr); exit(1) }
+}
+// Evaluation uses an isolated user directory and never commits or learns samples.
+if args.count == 5 {
+    var fixtures = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[4]))) as! [[String: Any]]
+    for index in fixtures.indices {
+        let session = try engine.session(.full)
+        check(session.setCandidateCount(9), "evaluation page size")
+        for c in (fixtures[index]["pinyin"] as! String).utf8 { session.process(Int32(c)) }
+        fixtures[index]["candidates"] = session.candidates.texts
+        session.clear()
+    }
+    let data = try JSONSerialization.data(withJSONObject: fixtures, options: [.prettyPrinted, .sortedKeys])
+    FileHandle.standardOutput.write(data)
+    exit(0)
 }
 for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
     let session = try engine.session(scheme)

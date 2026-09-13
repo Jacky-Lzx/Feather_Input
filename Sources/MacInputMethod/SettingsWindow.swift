@@ -27,6 +27,8 @@ private struct SettingsView: View {
     @AppStorage("aiCandidateCount") private var aiCandidateCount = 5
     @AppStorage("candidateLayout") private var layout = "vertical"
     @AppStorage("showPersistentMode") private var showPersistentMode = true
+    @AppStorage("aiFusionWeight") private var fusionWeight = 0.35
+    @AppStorage("aiScoreNormalization") private var scoreNormalization = "character"
     @AppStorage("aiCandidateScoringEnabled") private var scoringEnabled = false
     @AppStorage("aiRerankingEnabled") private var rerankingEnabled = false
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
@@ -62,6 +64,17 @@ private struct SettingsView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 Divider()
                 Toggle("用 MLX 给当前拼音候选打分", isOn: $scoringEnabled)
+                HStack {
+                    Text("LLM 排序权重")
+                    Slider(value: $fusionWeight, in: 0...1, step: 0.05)
+                    Text("\(Int((fusionWeight * 100).rounded()))%")
+                }
+                Text("0% 保留 Rime 顺序，100% 只看模型评分；默认 35%。").font(.footnote).foregroundStyle(.secondary)
+                Picker("候选长度处理", selection: $scoreNormalization) {
+                    Text("按字符平均").tag("character")
+                    Text("按 token 平均").tag("token")
+                    Text("不归一化").tag("none")
+                }
                 Text("优先使用此模式：停顿 120 ms 后给当前页 Rime 候选评分，支持多 token 词。700 ms 内返回才更新；继续输入或选择会取消旧请求。侧窗名次是候选评分排名。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Toggle("用 MLX 下一 token 给拼音候选排序", isOn: $rerankingEnabled)

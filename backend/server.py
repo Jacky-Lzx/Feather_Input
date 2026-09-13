@@ -1,5 +1,6 @@
 """Loopback-only MLX continuation worker; no user text is logged or persisted."""
 import argparse
+import copy
 import json
 import math
 import threading
@@ -50,33 +51,55 @@ class Predictor:
                 'score_kind': 'single next-token logprob (unmodified model distribution)',
                 'elapsed_ms': round((time.monotonic() - started) * 1000)}
 
-    def score(self, context, candidates):
+    def score(self, context, candidates, weight=0.35, normalization="character", reuse_context=True):
+        from mlx_lm.models.cache import make_prompt_cache
         mx, tokenizer = self.mx, self.tokenizer
         prefix = tokenizer.encode(context, add_special_tokens=False)
         if not prefix:
             raise ValueError('empty prefix')
         started = time.monotonic()
         results = []
+        prefix_probs = None
+        if reuse_context:
+            prefix_cache = make_prompt_cache(self.model)
+            logits = self.model(mx.array([prefix]), cache=prefix_cache)[:, -1, :].astype(mx.float32)
+            prefix_probs = (logits - mx.logsumexp(logits, axis=-1, keepdims=True)).reshape(-1)
+            mx.eval(prefix_probs)
         for index, text in enumerate(candidates):
             if time.monotonic() - started > 2.4:
                 raise TimeoutError('scoring budget exceeded')
             tokens = tokenizer.encode(text, add_special_tokens=False)
             if not tokens or len(tokens) > 64:
                 raise ValueError('invalid candidate tokens')
-            # Score only candidate positions; context tokens never enter the score.
-            # Explicit token boundary: encode(context) + encode(candidate).
-            inputs = mx.array([prefix + tokens[:-1]])
-            logits = self.model(inputs)[:, len(prefix) - 1:, :].astype(mx.float32)
-            logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
-            scores = mx.take_along_axis(logprobs, mx.array(tokens)[None, :, None], axis=-1).reshape(-1)
-            mx.eval(scores)
-            values = scores.tolist()
+            if reuse_context:
+                values = [prefix_probs[tokens[0]].item()]
+                if len(tokens) > 1:
+                    # Each branch has an independent cache; no previous candidate leaks into it.
+                    cache = copy.deepcopy(prefix_cache)
+                    logits = self.model(mx.array([tokens[:-1]]), cache=cache).astype(mx.float32)
+                    logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+                    scores = mx.take_along_axis(logprobs, mx.array(tokens[1:])[None, :, None], axis=-1).reshape(-1)
+                    mx.eval(scores)
+                    values.extend(scores.tolist())
+            else:
+                inputs = mx.array([prefix + tokens[:-1]])
+                logits = self.model(inputs)[:, len(prefix) - 1:, :].astype(mx.float32)
+                logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+                scores = mx.take_along_axis(logprobs, mx.array(tokens)[None, :, None], axis=-1).reshape(-1)
+                mx.eval(scores)
+                values = scores.tolist()
             total = sum(values)
+            divisor = len(text) if normalization == "character" else len(tokens) if normalization == "token" else 1
+            lm_score = total / divisor
+            prior = -math.log(index + 1)
+            score = (1 - weight) * prior + weight * lm_score
             results.append({'id': index, 'text': text, 'token_ids': tokens,
                             'token_logprobs': values, 'logprob': total,
-                            'score': total / len(tokens)})
+                            'lm_score': lm_score, 'rime_rank_score': prior, 'score': score})
         results.sort(key=lambda c: (-c['score'], c['id']))
-        return {'candidates': results, 'score_kind': 'mean candidate token logprob',
+        return {'candidates': results, 'score_kind': 'Rime rank prior + LLM normalized logprob',
+                'weight': weight, 'normalization': normalization,
+                'context_prefills': 1 if reuse_context else len(candidates),
                 'elapsed_ms': round((time.monotonic() - started) * 1000)}
 
 
@@ -119,6 +142,10 @@ def serve(model_path, port):
                 payload = json.loads(self.rfile.read(size))
                 context = payload['context']
                 candidates = payload.get('candidates')
+                weight = payload.get('weight', 0.35)
+                normalization = payload.get('normalization', 'character')
+                if type(weight) not in (float, int) or not math.isfinite(weight) or not 0 <= weight <= 1 or normalization not in ('character', 'token', 'none'):
+                    raise ValueError()
                 if self.path == '/score':
                     if (not isinstance(candidates, list) or not 1 <= len(candidates) <= 9
                             or any(not isinstance(t, str) or not t or len(t) > 64 for t in candidates)):
@@ -135,7 +162,7 @@ def serve(model_path, port):
                 self.reply(503, {'error': 'busy'})
                 return
             try:
-                self.reply(200, predictor.score(context, candidates) if self.path == "/score" else predictor.predict(context, count))
+                self.reply(200, predictor.score(context, candidates, weight, normalization) if self.path == "/score" else predictor.predict(context, count))
             except Exception:
                 self.reply(500, {'error': 'inference failed'})
             finally:

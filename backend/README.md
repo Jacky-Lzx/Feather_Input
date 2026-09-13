@@ -92,11 +92,23 @@ and 1–9 candidate strings (up to 64 characters/tokens each).
 For each candidate the worker evaluates `encode(context) + encode(candidate)`
 with an explicit token boundary and teacher-forced causal logits. Only candidate
 positions contribute. Responses include original candidate ID, token IDs, each
-conditional log probability, their sum, and their mean. Ranking uses mean token log
-probability to mitigate the raw sum's short-sequence bias; it is a heuristic that
-can favor longer predictable strings, not a calibrated probability of an intended
-word. Ties retain Rime order. No EOS probability is included. Context is limited to
-80 characters. Each candidate currently recomputes its context without KV sharing.
+conditional log probability, their sum, normalized LLM score, Rime rank prior,
+and final fusion score. Settings expose LLM weight (0–100%, default 35%) and
+normalization (character average, token average, or raw sum; default character).
+
+`score = (1 - weight) * -log(original_rank) + weight * normalized_logprob`
+
+The Rime term is a rank proxy, **not** Rime's actual probability. Weight 0 preserves
+Rime order; weight 1 uses only LLM scores. The default is an initial heuristic,
+not a fitted/calibrated optimum. Normalization may favor longer predictable strings;
+no EOS probability is included. Ties retain original order. The exposed Rime API
+does not provide consumed pinyin spans, so candidates are not claimed to cover an
+equal span. Strict span grouping and cross-page retrieval remain future work.
+
+Context is limited to 80 characters. Each request prefills it once, reuses the
+first-token distribution, and deep-copies its KV cache for each multi-token
+candidate. Candidate branches cannot modify each other's prefix. There is no
+persistent cache or reuse across requests.
 
 The app immediately displays Rime's page, waits 120 ms after input, then requests
 scores. A response can reorder only the unchanged page and context within 700 ms
@@ -104,7 +116,7 @@ of request start. Further input, navigation, selection, focus change, disabled
 settings, or cancellation invalidates the response. Hovering either candidate
 window also prevents a pending reorder. Up/down selection locks scoring for that
 page. This differs from frozen next-token mode: a stationary page may update once
-when scoring arrives. The side window is titled **LLM · 候选评分**; its ranks are
+when scoring arrives. The side window is titled **Rime + LLM · 融合排序**; its ranks are
 among the supplied candidates, not full-vocabulary token ranks. Request delay
 remains visible; all per-token scores are available in the opt-in debug window.
 
@@ -112,3 +124,36 @@ Timeouts, busy service, invalid responses, and missing context leave Rime usable
 The 2.4 s worker budget is checked between candidates; one Metal call cannot be
 interrupted. No cross-page ranking or automatic insertion is performed. Disable
 this option to return to the previous cached top-k mode.
+
+## Reproducible diagnostic evaluation
+
+`evaluation_cases.json` contains 20 hand-written context/pinyin/target cases,
+including homophone pairs. Export actual first-page Rime candidates (9 each)
+using an isolated user directory, then evaluate the installed model:
+
+```sh
+scratch=$(mktemp -d /tmp/feather-eval.XXXXXX)
+.build/release/EngineCheck "$PWD/dist/FeatherInput.app/Contents/Frameworks/librime.dylib" \
+  "$PWD/dist/FeatherInput.app/Contents/Resources/rime" "$scratch" \
+  backend/evaluation_cases.json > /tmp/feather-evaluation-candidates.json
+.venv-mlx/bin/python backend/evaluate.py \
+  --model "$HOME/Library/Application Support/FeatherInput/models/Qwen3-1.7B-Base-MLX-8bit" \
+  --fixtures /tmp/feather-evaluation-candidates.json --output /tmp/feather-evaluation-results.json
+```
+
+Reports Top-1/Top-5 counts for original Rime, pure token/character scores, and
+35% fusion, with all cases in the denominator (missing targets count as misses).
+Also reports target coverage, per-request cached/uncached median and nearest-rank
+P95 after a warm-up, and maximum per-token score difference. Timings exclude HTTP
+and UI, run cached before uncached for each case, and are only diagnostic samples.
+The set is synthetic, full-pinyin only, without personal learning; it is not a
+held-out benchmark or evidence of production accuracy. No weights are tuned on it.
+
+Recorded run: [2026-09-14 results](evaluations/2026-09-14-qwen17-fusion.json).
+On these 20 cases, Rime hit 11/20 Top-1 and 18/20 Top-5; pure LLM token and
+character means both hit 20/20; 35% fusion hit 19/20 and 20/20. This set therefore
+does **not** demonstrate fusion outperforming pure LLM scoring. Cached median/P95
+was 41.5/88 ms versus 85/109 ms without caching. BF16 computation changed some
+scores (maximum absolute token log-probability difference 0.13455): first choices
+agreed in 20/20 cases, full orders in 18/20. A single FP32 control case reduced the
+maximum difference to 0.00000763; caching is not claimed to be bitwise equivalent.

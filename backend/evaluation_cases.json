@@ -1,0 +1,22 @@
+[
+  {"context":"我们需要保护", "pinyin":"huanjing", "target":"环境"},
+  {"context":"魔法师制造了一个", "pinyin":"huanjing", "target":"幻境"},
+  {"context":"请填写您的", "pinyin":"xingming", "target":"姓名"},
+  {"context":"医生挽救了他的", "pinyin":"xingming", "target":"性命"},
+  {"context":"这件事情需要认真", "pinyin":"yanjiu", "target":"研究"},
+  {"context":"为了健康，请远离", "pinyin":"yanjiu", "target":"烟酒"},
+  {"context":"我坐在教室里学习", "pinyin":"zhishi", "target":"知识"},
+  {"context":"做披萨时撒上一些", "pinyin":"zhishi", "target":"芝士"},
+  {"context":"收到礼物后，我说了一声", "pinyin":"xiexie", "target":"谢谢"},
+  {"context":"我喜欢这个美丽的", "pinyin":"shijie", "target":"世界"},
+  {"context":"做人应该实事求", "pinyin":"shi", "target":"是"},
+  {"context":"桌子上摆着一块", "pinyin":"shi", "target":"石"},
+  {"context":"今天是星期", "pinyin":"san", "target":"三"},
+  {"context":"下雨了，记得带", "pinyin":"san", "target":"伞"},
+  {"context":"这本书非常", "pinyin":"youqu", "target":"有趣"},
+  {"context":"太晚了，我要回家", "pinyin":"shuijiao", "target":"睡觉"},
+  {"context":"春节全家一起包", "pinyin":"shuijiao", "target":"水饺"},
+  {"context":"请检查程序中的", "pinyin":"cuowu", "target":"错误"},
+  {"context":"我们要按时完成", "pinyin":"renwu", "target":"任务"},
+  {"context":"小说里的主要", "pinyin":"renwu", "target":"人物"}
+]

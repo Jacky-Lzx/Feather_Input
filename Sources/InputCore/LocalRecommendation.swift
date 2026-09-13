@@ -176,7 +176,11 @@ public enum LocalRecommendation {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:1235/score")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "preedit": preedit, "candidates": candidates])
+        let configured = UserDefaults.standard.object(forKey: "aiFusionWeight") as? Double ?? 0.35
+        let weight = configured.isFinite ? min(1, max(0, configured)) : 0.35
+        let configuredNormalization = UserDefaults.standard.string(forKey: "aiScoreNormalization") ?? "character"
+        let normalization = ["character", "token", "none"].contains(configuredNormalization) ? configuredNormalization : "character"
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "preedit": preedit, "candidates": candidates, "weight": weight, "normalization": normalization])
         return try await traced(request: request, token: "") { try parseCandidateScores($0, candidates: candidates) }
     }
     private static func traced<T>(request: URLRequest, token: String, parse: (Data) throws -> T) async throws -> T {

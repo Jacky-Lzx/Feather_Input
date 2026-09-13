@@ -27,6 +27,8 @@ final class InputController: IMKInputController {
     private var scoredPreedit = ""
     private var scoredOriginal: [String] = []
     private var scoredContext = ""
+    private var scoredSettings = ""
+    private var scoringSettings: String { "\(UserDefaults.standard.object(forKey: "aiFusionWeight") as? Double ?? 0.35)|\(UserDefaults.standard.string(forKey: "aiScoreNormalization") ?? "character")" }
     private var scoringLockedPreedit = ""
     private var scoringLockedOriginal: [String] = []
     private var requestScoring: (String, String, [String]) async throws -> [LocalRecommendation.RankedToken] = {
@@ -34,8 +36,9 @@ final class InputController: IMKInputController {
     }
     private func scheduleScoring(_ client: IMKTextInput, preedit: String, candidates: [String]) {
         guard scoringEnabled, isActive, !ascii, !recentContext.isEmpty, candidates.count > 1,
-              scoredPreedit != preedit || scoredOriginal != candidates || scoredContext != recentContext else { return }
+              scoredPreedit != preedit || scoredOriginal != candidates || scoredContext != recentContext || scoredSettings != scoringSettings else { return }
         guard scoringLockedPreedit != preedit || scoringLockedOriginal != candidates else { return }
+        let settings = scoringSettings
         let version = recommendationVersion
         let context = recentContext
         let range = client.selectedRange()
@@ -50,7 +53,7 @@ final class InputController: IMKInputController {
                 let delay = Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
                 try Task.checkCancellation()
                 guard let self, let client, self.isActive, !self.ascii, self.scoringEnabled,
-                      self.recommendationVersion == version, self.recentContext == context,
+                      self.recommendationVersion == version, self.recentContext == context, self.scoringSettings == settings,
                       self.session?.preedit.text == preedit, self.session?.candidates.texts == candidates,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
                       NSEqualRanges(client.selectedRange(), range), delay <= 700,
@@ -58,6 +61,7 @@ final class InputController: IMKInputController {
                 self.scoredPreedit = preedit
                 self.scoredOriginal = candidates
                 self.scoredContext = context
+                self.scoredSettings = settings
                 self.frozenPrediction = result
                 self.frozenPredictionDelayMS = delay
                 self.refresh(client, allowScoring: false)
@@ -295,7 +299,7 @@ final class InputController: IMKInputController {
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
         if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0 { lastCaret = caret }
         let anchor = lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
-        if scoringEnabled && (scoredPreedit != preedit.text || scoredOriginal != candidates.texts || scoredContext != recentContext) {
+        if scoringEnabled && (scoredPreedit != preedit.text || scoredOriginal != candidates.texts || scoredContext != recentContext || scoredSettings != scoringSettings) {
             frozenPrediction = nil
         }
         let order = CandidateRanking.order(candidates.texts, predictions: (frozenPrediction ?? []).map(\.text))
@@ -307,7 +311,7 @@ final class InputController: IMKInputController {
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
                              highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
                              llmRanks: order.map { index in frozenPrediction?.first(where: { $0.text == candidates.texts[index] })?.rank },
-                             llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS, llmTitle: scoringEnabled ? "LLM · 候选评分" : "LLM top-k · 本轮预测") { [weak self, weak client] index in
+                             llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS, llmTitle: scoringEnabled ? "Rime + LLM · 融合排序" : "LLM top-k · 本轮预测") { [weak self, weak client] index in
             guard let self, self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
                   self.displayedOrder == order else { return }
