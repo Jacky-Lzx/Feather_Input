@@ -228,8 +228,21 @@ final class InputController: IMKInputController {
         let letter = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .capsLock, timestamp: 0,
                                      windowNumber: 0, context: nil, characters: "A", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
         guard controller.handle(letter, client: target), target.committed == "a", caps(false), !controller.ascii else { throw Engine.Failure.schemaUnavailable }
+        func rightControl(_ down: Bool, capsLocked: Bool) -> Bool {
+            var flags: NSEvent.ModifierFlags = capsLocked ? .capsLock : []
+            if down { flags.insert(.control) }
+            let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
+                                        timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 62)!
+            return controller.handle(event, client: target)
+        }
+        // Alternate both keys, including right Control while Caps Lock is latched.
+        guard !rightControl(true, capsLocked: false), rightControl(false, capsLocked: false), controller.ascii,
+              caps(true), !controller.ascii,
+              !rightControl(true, capsLocked: true), rightControl(false, capsLocked: true), controller.ascii,
+              caps(false), !controller.ascii else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(target)
         print("PASS: native Caps Lock switch, duplicate suppression and lowercase English output")
+        print("PASS: alternating Caps Lock and right Control toggles with Caps Lock on and off")
     }
 
     // Exercise IMK's actual command dispatcher with its dictionary sender.

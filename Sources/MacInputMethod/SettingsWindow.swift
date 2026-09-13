@@ -42,7 +42,7 @@ private struct SettingsView: View {
                 Slider(value: $fontSize, in: 14...24, step: 1)
                 Text("\(Int(fontSize))").monospacedDigit()
             }
-            Text("Caps Lock 切换中英文\n点击或数字键选词 · 空格上屏 · Page Up / Down 翻页")
+            Text("Caps Lock 或单按右 Control 切换中英文\n点击或数字键选词 · 空格上屏 · Page Up / Down 翻页")
                 .font(.footnote).foregroundStyle(.secondary)
             Text("词库和学习记录保存在本机。")
                 .font(.footnote).foregroundStyle(.secondary)

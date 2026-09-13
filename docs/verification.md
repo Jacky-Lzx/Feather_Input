@@ -75,3 +75,7 @@ Added native Caps Lock latch-change detection, seeded from the current hardware 
 All 11 unit tests and the installed-app smoke checks passed, including latch edges, duplicate suppression, pending input, mode labels and lowercase English output. The independent AppKit test window provides a separate test through CGEvent → system IMK routing; it is not a physical hardware-key test.
 
 The installed native-Caps version passed the independent system-route run: text progressed from `你` to `你ni ` to `你ni 你` across two Caps Lock switches. This confirms both language directions and lowercase English through a real system text-input session.
+
+## Both language-switch keys
+
+The user clarified that the keyboard itself sends right Control. Both existing handlers remain enabled; settings and README now explicitly describe both keys. The packaged smoke check alternates right Control and Caps Lock on the same controller, including normalized right-Control events while the Caps Lock flag is set. All 11 unit tests, both engine schema checks, and packaged smoke checks passed. Build 10 was installed and its signature and input-source registration verified. Physical keyboard behavior in the user's existing application sessions still requires user verification.
