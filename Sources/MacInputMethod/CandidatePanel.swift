@@ -9,6 +9,9 @@ private final class CandidateWindow: NSPanel {
 private final class CandidateButton: NSButton {
     var isCurrentCandidate = false
     var isRecommended = false
+    var columnText: String?
+    var columnNumber: String?
+    var textInset: CGFloat { columnText == nil ? 10 : 32 }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         if isCurrentCandidate || isHighlighted {
@@ -17,13 +20,20 @@ private final class CandidateButton: NSButton {
         }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        let text = NSAttributedString(string: title + (isRecommended ? " ✦" : ""), attributes: [
+        let text = NSAttributedString(string: (columnText ?? title) + (isRecommended ? " ✦" : ""), attributes: [
             .font: font ?? NSFont.systemFont(ofSize: 17),
             .foregroundColor: isCurrentCandidate || isHighlighted ? NSColor.selectedMenuItemTextColor : NSColor.labelColor,
             .paragraphStyle: paragraph
         ])
         let height = text.size().height
-        text.draw(in: NSRect(x: 10, y: (bounds.height - height) / 2, width: max(0, bounds.width - 20), height: height))
+        text.draw(in: NSRect(x: textInset, y: (bounds.height - height) / 2, width: max(0, bounds.width - textInset - 10), height: height))
+        if let columnNumber {
+            let number = NSAttributedString(string: columnNumber, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: font?.pointSize ?? 17, weight: .regular),
+                .foregroundColor: isCurrentCandidate || isHighlighted ? NSColor.selectedMenuItemTextColor : NSColor.labelColor
+            ])
+            number.draw(in: NSRect(x: 10, y: (bounds.height - number.size().height) / 2, width: 18, height: number.size().height))
+        }
     }
 }
 
@@ -86,7 +96,7 @@ final class CandidatePanel {
         let range = CandidateGrid.pageRange(index: highlight, count: texts.count, rows: rows)
         let page = range.lowerBound / (rows * 5) + 1
         let pages = (texts.count + rows * 5 - 1) / (rows * 5)
-        let measuredWidth = labels[range].map { ($0 as NSString).size(withAttributes: [.font: font]).width + 20 }.max() ?? 84
+        let measuredWidth = texts[range].map { ($0 as NSString).size(withAttributes: [.font: font]).width + 42 }.max() ?? 84
         let width = min((visible.width - 16) / CGFloat(min(5, (texts.count + rows - 1) / rows)), min(128, max(84, measuredWidth)))
         let rowHeight: CGFloat = min(34, max(18, (visible.height - 60) / CGFloat(rows)))
         let height = CGFloat(rows) * rowHeight + 44
@@ -114,6 +124,8 @@ final class CandidatePanel {
             let local = i - range.lowerBound
             let button = CandidateButton(frame: NSRect(x: 8 + CGFloat(local / rows) * width, y: height - 40 - CGFloat(local % rows + 1) * rowHeight, width: width - 4, height: rowHeight - 2))
             button.title = label; button.toolTip = texts[i]; button.font = font; button.isBordered = false
+            button.columnText = texts[i]
+            button.columnNumber = i / rows == highlight / rows ? String(i % rows + 1) : nil
             button.tag = i; button.target = self; button.action = #selector(choose(_:))
             button.isCurrentCandidate = i == highlight
             buttons.append(button); document.addSubview(button)
@@ -219,6 +231,8 @@ final class CandidatePanel {
                   candidatePanel.buttons[8].frame.minY > candidatePanel.buttons[9].frame.minY,
                   candidatePanel.buttons[0].title == "候选0", candidatePanel.buttons[8].title == "1  候选8",
                   candidatePanel.buttons[9].title == "2  候选9", candidatePanel.buttons[16].title == "候选16",
+                  candidatePanel.buttons[0].textInset == candidatePanel.buttons[8].textInset,
+                  candidatePanel.buttons[0].columnNumber == nil, candidatePanel.buttons[8].columnNumber == "1",
                   !candidatePanel.panel.canBecomeKey, candidatePanel.verifyClick(on: 18), chosen == 18 else { throw Engine.Failure.schemaUnavailable }
             let many = (0..<83).map { "候选\($0)" }
             candidatePanel.showExpanded(texts: many, highlight: 43, caret: NSRect(x: 300, y: 400, width: 1, height: 20), rows: 8, loading: false) { chosen = $0 }
