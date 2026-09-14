@@ -137,7 +137,7 @@ def serve(model_path, port):
                 return
             try:
                 size = int(self.headers.get('Content-Length', '0'))
-                if not 0 < size <= 4096:
+                if not 0 < size <= (65536 if self.path == "/score" else 4096):
                     raise ValueError()
                 payload = json.loads(self.rfile.read(size))
                 context = payload['context']
@@ -147,7 +147,7 @@ def serve(model_path, port):
                 if type(weight) not in (float, int) or not math.isfinite(weight) or not 0 <= weight <= 1 or normalization not in ('character', 'token', 'none'):
                     raise ValueError()
                 if self.path == '/score':
-                    if (not isinstance(candidates, list) or not 1 <= len(candidates) <= 9
+                    if (not isinstance(candidates, list) or not 1 <= len(candidates) <= 64
                             or any(not isinstance(t, str) or not t or len(t) > 64 for t in candidates)):
                         raise ValueError()
                 count = payload.get('count', 5)

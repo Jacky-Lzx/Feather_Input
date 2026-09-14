@@ -36,6 +36,7 @@ final class CandidateDebugWindow: ObservableObject {
         }
         let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         detail = "\(time) · 最近一次快照 · " + (scoring ? "LLM 列为候选纯模型分数；最终列为融合结果" : "LLM 列为冻结的 next-token top-k")
+        detail += " · Rime \(rime.count) / LLM \(self.llm.count) / 显示 \(final.count)"
         if let delay { detail += " · \(delay) ms" }
         if predictions.isEmpty { detail += " · 暂无已采用的模型结果，保留 Rime 顺序" }
     }
@@ -76,6 +77,8 @@ final class CandidateDebugWindow: ObservableObject {
 
 private struct CandidateDebugView: View {
     @ObservedObject var log: CandidateDebugWindow
+    @AppStorage("debugScoringCandidateLimitEnabled") private var candidateLimitEnabled = false
+    @AppStorage("debugScoringCandidateLimit") private var candidateLimit = 20
     @AppStorage("debugScoringTimingEnabled") private var timingEnabled = false
     @AppStorage("debugScoringDebounceMS") private var debounceMS = 120
     @AppStorage("debugScoringResponseLimitMS") private var responseLimitMS = 700
@@ -100,6 +103,12 @@ private struct CandidateDebugView: View {
                 Spacer()
                 Button("清空") { log.clear() }
             }
+            HStack {
+                Toggle("自定义发送候选数", isOn: $candidateLimitEnabled)
+                Stepper("发送给 LLM：\(candidateLimit) 个", value: $candidateLimit, in: 1...64).disabled(!candidateLimitEnabled)
+            }
+            Text("关闭时跟随显示数量；开启后从当前页起取指定数量。主窗口只重排当前页，Rime 和 LLM 调试列显示送评列表；实际数量受剩余候选数限制。")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("自定义评分时序", isOn: $timingEnabled)
             HStack(spacing: 24) {
                 Stepper("请求前停顿：\(debounceMS) ms", value: $debounceMS, in: 0...2000, step: 10)

@@ -100,9 +100,10 @@ final class InputController: IMKInputController {
     private var rankingVersion = UUID()
     private var cachedPrediction: [LocalRecommendation.RankedToken] = []
     private var cachedPredictionDelayMS: Int?
+    private var frozenScoringCandidates: [String]?
     private var frozenPredictionDelayMS: Int?
     private var frozenPrediction: [LocalRecommendation.RankedToken]? {
-        didSet { if frozenPrediction == nil { frozenPredictionDelayMS = nil } }
+        didSet { if frozenPrediction == nil { frozenPredictionDelayMS = nil; frozenScoringCandidates = nil } }
     }
     private var displayedOrder: [Int] = []
     private var displayedOriginal: [String] = []
@@ -113,19 +114,22 @@ final class InputController: IMKInputController {
     private var scoredOriginal: [String] = []
     private var scoredContext = ""
     private var scoredSettings = ""
+    private var scoringCandidateCount: Int { ScoringCandidateLimit.count(pageCount: session?.candidateCount ?? 5) }
     private var scoringTiming: ScoringTiming { ScoringTiming() }
-    private var scoringSettings: String { "\(UserDefaults.standard.object(forKey: "aiFusionWeight") as? Double ?? 0.35)|\(UserDefaults.standard.string(forKey: "aiScoreNormalization") ?? "character")|\(scoringTiming.debounceMS)|\(scoringTiming.responseLimitMS)" }
+    private var scoringSettings: String { "\(UserDefaults.standard.object(forKey: "aiFusionWeight") as? Double ?? 0.35)|\(UserDefaults.standard.string(forKey: "aiScoreNormalization") ?? "character")|\(scoringTiming.debounceMS)|\(scoringTiming.responseLimitMS)|\(scoringCandidateCount)" }
     private var scoringLockedPreedit = ""
     private var scoringLockedOriginal: [String] = []
     private var requestScoring: (String, String, [String]) async throws -> [LocalRecommendation.RankedToken] = {
         try await LocalRecommendation.scoreCandidates(context: $0, preedit: $1, candidates: $2)
     }
     private func scheduleScoring(_ client: IMKTextInput, preedit: String, candidates: [String]) {
-        guard scoringEnabled, isActive, !ascii, !recentContext.isEmpty, candidates.count > 1,
+        guard scoringEnabled, isActive, !ascii, !recentContext.isEmpty, !candidates.isEmpty,
               scoredPreedit != preedit || scoredOriginal != candidates || scoredContext != recentContext || scoredSettings != scoringSettings else { return }
         guard scoringLockedPreedit != preedit || scoringLockedOriginal != candidates else { return }
         let settings = scoringSettings
         let timing = scoringTiming
+        let candidateLimit = scoringCandidateCount
+        let pageOffset = session?.candidatePageOffset ?? 0
         let version = recommendationVersion
         let context = recentContext
         let range = client.selectedRange()
@@ -136,8 +140,12 @@ final class InputController: IMKInputController {
                 try await Task.sleep(nanoseconds: UInt64(timing.debounceMS) * 1_000_000)
                 try Task.checkCancellation()
                 let started = DispatchTime.now().uptimeNanoseconds
-                guard self?.secureInputEnabled() == false else { return }
-                let result = try await request(context, preedit, candidates)
+                guard let live = self, !live.bypassSecureInput(), live.recommendationVersion == version,
+                      live.scoringSettings == settings, live.session?.preedit.text == preedit,
+                      live.session?.candidates.texts == candidates else { return }
+                let submitted = live.session?.candidateSlice(offset: pageOffset, count: candidateLimit) ?? []
+                guard !submitted.isEmpty else { return }
+                let result = try await request(context, preedit, submitted)
                 let delay = Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
                 try Task.checkCancellation()
                 guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii, self.scoringEnabled,
@@ -151,6 +159,7 @@ final class InputController: IMKInputController {
                 self.scoredContext = context
                 self.scoredSettings = settings
                 self.frozenPrediction = result
+                self.frozenScoringCandidates = submitted
                 self.frozenPredictionDelayMS = delay
                 self.refresh(client, allowScoring: false)
             } catch { /* Rime's current page remains usable if scoring fails. */ }
@@ -459,8 +468,8 @@ final class InputController: IMKInputController {
         displayedOriginal = candidates.texts
         displayedPreedit = preedit.text
         displayedOrder = order
-        Task { @MainActor [predictions = frozenPrediction ?? [], scoring = scoringEnabled, delay = frozenPredictionDelayMS] in
-            CandidateDebugWindow.shared.update(preedit: preedit.text, rime: candidates.texts,
+        Task { @MainActor [predictions = frozenPrediction ?? [], scoring = scoringEnabled, delay = frozenPredictionDelayMS, submitted = frozenScoringCandidates] in
+            CandidateDebugWindow.shared.update(preedit: preedit.text, rime: submitted ?? candidates.texts,
                 predictions: predictions, final: order.map { candidates.texts[$0] }, scoring: scoring, delay: delay)
         }
         let reordered = order != Array(candidates.texts.indices)
@@ -707,12 +716,13 @@ final class InputController: IMKInputController {
 
     static func verifyScoringLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard
-        let saved = ["aiCandidateScoringEnabled", "scheme", "debugScoringTimingEnabled"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["aiCandidateScoringEnabled", "scheme", "debugScoringTimingEnabled", "debugScoringCandidateLimitEnabled", "debugScoringCandidateLimit"].map { ($0, defaults.object(forKey: $0)) }
         defer {
             for (key, value) in saved {
                 if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
             }
         }
+        defaults.set(false, forKey: "debugScoringCandidateLimitEnabled")
         defaults.set(false, forKey: "debugScoringTimingEnabled")
         defaults.set(true, forKey: "aiCandidateScoringEnabled")
         defaults.set(InputScheme.full.rawValue, forKey: "scheme")
@@ -780,7 +790,22 @@ final class InputController: IMKInputController {
         _ = key("n")
         guard controller.recentContext.isEmpty else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(client)
-        print("PASS: candidate scoring, navigation/delete context recovery, UTF-16 caret, document start and stale rejection")
+        defaults.set(true, forKey: "debugScoringCandidateLimitEnabled")
+        defaults.set(20, forKey: "debugScoringCandidateLimit")
+        client.exposesDocument = false
+        client.documentSelection = nil
+        controller.activateServer(client)
+        controller.recentContext = "我们"
+        controller.requestScoring = { _, _, texts in
+            guard texts.count == 20 else { throw Engine.Failure.schemaUnavailable }
+            return texts.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1) }
+        }
+        _ = key("n"); _ = key("i")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        guard controller.frozenScoringCandidates?.count == 20,
+              controller.displayedOrder.count == controller.session?.candidateCount else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: candidate scoring, independent 20-candidate request, context recovery and stale rejection")
     }
 
     static func verifyRankingLifecycle(server: IMKServer) throws {
