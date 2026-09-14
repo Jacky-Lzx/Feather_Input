@@ -67,6 +67,7 @@ public final class Session {
     public static func utf16Cursor(_ text: String, byteOffset: Int) -> Int {
         String(decoding: text.utf8.prefix(max(0, byteOffset)), as: UTF8.self).utf16.count
     }
+    public var candidatePageOffset: Int { Int(feather_candidate_page_offset(id)) }
     public func candidateSlice(offset: Int, count: Int = 128) -> [String] {
         guard offset >= 0, offset <= Int(Int32.max) else { return [] }
         let capacity = min(128, max(1, count))

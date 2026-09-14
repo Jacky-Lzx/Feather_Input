@@ -18,6 +18,9 @@ final class InputController: IMKInputController {
         return true
     }
     private var expandedTexts: [String]?
+    private var expandedCandidateIDs: [Int] = []
+    private var expandedLoadedCount = 0
+    private var expandedPinnedIDs: Set<Int> = []
     private var expandedIndex = 0
     private var expandedRows = 5
     private var expansionTask: Task<Void, Never>?
@@ -25,6 +28,7 @@ final class InputController: IMKInputController {
     private func closeExpanded() {
         expansionTask?.cancel(); expansionTask = nil
         expansionID = UUID(); expandedTexts = nil
+        expandedCandidateIDs = []; expandedPinnedIDs = []; expandedLoadedCount = 0
     }
     private func renderExpanded(_ client: IMKTextInput, loading: Bool = false) {
         guard let texts = expandedTexts, !texts.isEmpty else { return }
@@ -38,29 +42,48 @@ final class InputController: IMKInputController {
     }
     private func selectExpanded(_ index: Int, client: IMKTextInput) {
         guard let texts = expandedTexts, texts.indices.contains(index), let session else { return }
-        if session.selectGlobalCandidate(at: index) {
+        guard expandedCandidateIDs.indices.contains(index) else { return }
+        if session.selectGlobalCandidate(at: expandedCandidateIDs[index]) {
             closeExpanded()
             refresh(client)
         }
+    }
+    private func appendExpanded(_ batch: [String]) {
+        for (offset, text) in batch.enumerated() {
+            let id = expandedLoadedCount + offset
+            if !expandedPinnedIDs.contains(id) {
+                expandedCandidateIDs.append(id)
+                expandedTexts?.append(text)
+            }
+        }
+        expandedLoadedCount += batch.count
     }
     private func openExpanded(_ client: IMKTextInput) {
         guard let session else { return }
         expandedRows = session.candidateCount
         invalidateRecommendation()
         closeExpanded()
-        expandedTexts = session.candidateSlice(offset: 0)
+        let original = session.candidates.texts
+        let order = displayedOriginal == original && displayedPreedit == session.preedit.text
+            ? displayedOrder : Array(original.indices)
+        let pageOffset = session.candidatePageOffset
+        expandedCandidateIDs = order.map { pageOffset + $0 }
+        expandedPinnedIDs = Set(expandedCandidateIDs)
+        expandedTexts = order.map { original[$0] }
+        let firstBatch = session.candidateSlice(offset: 0)
+        appendExpanded(firstBatch)
         guard expandedTexts?.isEmpty == false else { closeExpanded(); return }
         expandedIndex = 0
         let preedit = session.preedit.text
         let version = expansionID
-        renderExpanded(client, loading: expandedTexts?.count == 128)
+        renderExpanded(client, loading: firstBatch.count == 128)
         expansionTask = Task { @MainActor [weak self, weak client] in
-            while let self, let client, self.expansionID == version, let texts = self.expandedTexts,
+            while let self, let client, self.expansionID == version, self.expandedTexts != nil,
                   self.isActive, !self.bypassSecureInput(), session.preedit.text == preedit {
                 do { try await Task.sleep(nanoseconds: 10_000_000) } catch { return }
                 guard self.expansionID == version, !Task.isCancelled else { return }
-                let more = session.candidateSlice(offset: texts.count)
-                self.expandedTexts?.append(contentsOf: more)
+                let more = session.candidateSlice(offset: self.expandedLoadedCount)
+                self.appendExpanded(more)
                 self.renderExpanded(client, loading: more.count == 128)
                 if more.count < 128 { return }
             }
@@ -636,17 +659,21 @@ final class InputController: IMKInputController {
             }
             for _ in 0..<3 { key(previous, code: 126, flags: [.function]) }
             guard controller.displayedOriginal == first else { throw Engine.Failure.schemaUnavailable }
+            controller.frozenPrediction = first.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1) }
+            controller.refresh(client, allowScoring: false)
             key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
             RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-            guard let all = controller.expandedTexts, all.count > 16, all.first == first.first else { throw Engine.Failure.schemaUnavailable }
+            guard let all = controller.expandedTexts, all.count > 16,
+                  Array(all.prefix(7)) == Array(first.reversed()),
+                  Array(controller.expandedCandidateIDs.prefix(7)) == Array((0..<7).reversed()),
+                  Set(controller.expandedCandidateIDs).count == controller.expandedCandidateIDs.count else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
             guard controller.expandedRows == 7, controller.expandedIndex == 7 else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSDownArrowFunctionKey)!), code: 125)
             guard controller.expandedIndex == 8 else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSLeftArrowFunctionKey)!), code: 123)
             guard controller.expandedIndex == 1 else { throw Engine.Failure.schemaUnavailable }
-            key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
-            let expected = all[9]
+            let expected = all[2]
             key("3", code: 20)
             guard controller.expandedTexts == nil else { throw Engine.Failure.schemaUnavailable }
             if client.committed.isEmpty { key(" ", code: 49) }

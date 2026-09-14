@@ -81,3 +81,10 @@ int feather_select_global(uintptr_t s, int index) {
   if (index < 0 || !RIME_PROVIDED(api, select_candidate)) return 0;
   return api->select_candidate(s, (size_t)index);
 }
+int feather_candidate_page_offset(uintptr_t s) {
+  RIME_STRUCT(RimeContext, context);
+  if (!api->get_context(s, &context)) return 0;
+  int offset = context.menu.page_no * context.menu.page_size;
+  api->free_context(&context);
+  return offset;
+}
