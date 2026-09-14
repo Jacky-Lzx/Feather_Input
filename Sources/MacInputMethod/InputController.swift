@@ -67,9 +67,22 @@ final class InputController: IMKInputController {
         let order = displayedOriginal == original && displayedPreedit == session.preedit.text
             ? displayedOrder : Array(original.indices)
         let pageOffset = session.candidatePageOffset
-        expandedCandidateIDs = order.map { pageOffset + $0 }
+        if scoringEnabled, let submitted = frozenScoringCandidates, let scores = frozenPrediction,
+           scoredPreedit == session.preedit.text, scoredOriginal == original,
+           scoredContext == recentContext, scoredSettings == scoringSettings,
+           scores.count == submitted.count,
+           Set(scores.compactMap(\.sourceIndex)) == Set(submitted.indices),
+           scores.allSatisfy({ row in row.sourceIndex.map { submitted.indices.contains($0) && submitted[$0] == row.text } ?? false }),
+           session.candidateSlice(offset: pageOffset, count: submitted.count) == submitted {
+            // The parsed rank is the fusion-score order; preserve IDs even for identical text.
+            let ranked = scores.sorted { $0.rank < $1.rank }
+            expandedCandidateIDs = ranked.map { pageOffset + $0.sourceIndex! }
+            expandedTexts = ranked.map(\.text)
+        } else {
+            expandedCandidateIDs = order.map { pageOffset + $0 }
+            expandedTexts = order.map { original[$0] }
+        }
         expandedPinnedIDs = Set(expandedCandidateIDs)
-        expandedTexts = order.map { original[$0] }
         let firstBatch = session.candidateSlice(offset: 0)
         appendExpanded(firstBatch)
         guard expandedTexts?.isEmpty == false else { closeExpanded(); return }
@@ -798,14 +811,22 @@ final class InputController: IMKInputController {
         controller.recentContext = "我们"
         controller.requestScoring = { _, _, texts in
             guard texts.count == 20 else { throw Engine.Failure.schemaUnavailable }
-            return texts.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1) }
+            return texts.reversed().enumerated().map { .init(text: $0.element, rank: $0.offset + 1, fusionScore: -Double($0.offset + 1), sourceIndex: texts.count - $0.offset - 1) }
         }
         _ = key("n"); _ = key("i")
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         guard controller.frozenScoringCandidates?.count == 20,
               controller.displayedOrder.count == controller.session?.candidateCount else { throw Engine.Failure.schemaUnavailable }
+        let submitted = controller.frozenScoringCandidates!
+        let beforeExpandedCommit = client.committed
+        _ = key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
+        guard Array((controller.expandedTexts ?? []).prefix(20)) == Array(submitted.reversed()),
+              Array(controller.expandedCandidateIDs.prefix(20)) == Array((0..<20).reversed()),
+              Set(controller.expandedCandidateIDs).count == controller.expandedCandidateIDs.count else { throw Engine.Failure.schemaUnavailable }
+        _ = key("1", code: 18)
+        guard client.committed == beforeExpandedCommit + submitted.last! else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(client)
-        print("PASS: candidate scoring, independent 20-candidate request, context recovery and stale rejection")
+        print("PASS: candidate scoring, expanded 20-candidate fusion order and original-index numeric selection")
     }
 
     static func verifyRankingLifecycle(server: IMKServer) throws {
