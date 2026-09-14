@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             PersistentModeIndicator.shared.refresh()
             if smokeTest {
+                UserDefaults.standard.set(false, forKey: "aiPinyinGenerationEnabled")
                 try PersistentModeIndicator.verify()
                 try InputController.verifyMenuCommands(server: server!)
                 try CandidatePanel.verifyPresentation()
@@ -32,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try InputController.verifyContinuationLifecycle(server: server!)
                 try InputController.verifyRankingLifecycle(server: server!)
                 try InputController.verifyScoringLifecycle(server: server!)
+                try InputController.verifyGenerationLifecycle(server: server!)
                 let session = try Self.engine!.session(.full)
                 for key in "nihao".utf8 { session.process(Int32(key)) }
                 guard session.candidates.texts.contains("你好") else { throw Engine.Failure.schemaUnavailable }

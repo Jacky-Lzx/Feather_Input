@@ -57,6 +57,10 @@ public final class Session {
         guard let p = feather_take_commit(id) else { return nil }
         defer { feather_free(p) }; return String(cString: p)
     }
+    public var rawInput: String {
+        guard let p = feather_input(id) else { return "" }
+        defer { feather_free(p) }; return String(cString: p)
+    }
     public var preedit: (text: String, cursor: Int) {
         var cursor: Int32 = 0
         guard let p = feather_preedit(id, &cursor) else { return ("", 0) }

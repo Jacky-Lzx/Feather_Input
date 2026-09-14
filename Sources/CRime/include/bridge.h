@@ -7,6 +7,7 @@ int feather_key(uintptr_t session, int key, int modifiers);
 void feather_clear(uintptr_t session);
 void feather_commit(uintptr_t session);
 char *feather_take_commit(uintptr_t session);
+char *feather_input(uintptr_t session);
 char *feather_preedit(uintptr_t session, int *cursor);
 int feather_candidates(uintptr_t session, char **texts, int capacity, int *highlight);
 int feather_select(uintptr_t session, const char *schema);

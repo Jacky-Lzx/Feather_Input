@@ -80,6 +80,9 @@ final class CandidatePanel {
         let boundedClient = min(maximum - 1, max(0, clientLevel))
         panel.level = NSWindow.Level(rawValue: max(NSWindow.Level.popUpMenu.rawValue, boundedClient + 1))
     }
+    var isVisible: Bool { panel.isVisible }
+    var frame: NSRect { panel.frame }
+    var companionAnchor: NSRect { predictions.isVisible ? panel.frame.union(predictions.frame) : panel.frame }
     var recommendedIndex: Int? { buttons.firstIndex(where: { $0.isRecommended }) }
     func markRecommendation(_ index: Int?) {
         for (i, button) in buttons.enumerated() {
@@ -140,7 +143,7 @@ final class CandidatePanel {
         scroll.contentView.scroll(to: .zero)
         panel.orderFrontRegardless()
     }
-    func show(texts: [String], highlight: Int, caret: NSRect, clientLevel: Int = 0, continuation: Bool = false, llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, llmTitle: String = "LLM top-k · 本轮预测", onSelect: ((Int) -> Void)? = nil) {
+    func show(texts: [String], highlight: Int, caret: NSRect, clientLevel: Int = 0, beside: NSRect? = nil, continuation: Bool = false, llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, llmTitle: String = "LLM top-k · 本轮预测", onSelect: ((Int) -> Void)? = nil) {
         scroll.hasHorizontalScroller = false
         updateWindowLevel(clientLevel)
         guard !texts.isEmpty else { hide(); return }
@@ -164,7 +167,7 @@ final class CandidatePanel {
         let itemWidth = min(widths.max() ?? 100, max(1, visible.width - pad * 2 - scrollerWidth))
         let naturalSize = NSSize(width: horizontal ? horizontalWidth : itemWidth + pad * 2 + scrollerWidth,
                                  height: horizontal ? rowHeight + pad * 2 : rowHeight * CGFloat(texts.count) + gap * CGFloat(texts.count - 1) + pad * 2)
-        let frame = CandidateGeometry.frame(size: naturalSize, caret: anchor, visible: visible)
+        let frame = beside.map { CandidateGeometry.companionFrame(size: naturalSize, anchor: $0, visible: visible) } ?? CandidateGeometry.frame(size: naturalSize, caret: anchor, visible: visible)
         let document = NSView(frame: NSRect(origin: .zero, size: NSSize(width: naturalSize.width - scrollerWidth, height: naturalSize.height)))
         buttons.removeAll()
         var x = pad

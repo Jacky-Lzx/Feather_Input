@@ -188,6 +188,36 @@ public enum LocalRecommendation {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "preedit": preedit, "candidates": candidates, "weight": weight, "normalization": normalization])
         return try await traced(request: request, token: "") { try parseCandidateScores($0, candidates: candidates) }
     }
+    public struct GeneratedCandidates: Decodable {
+        public struct Candidate: Decodable {
+            public let text: String
+            public let score: Double
+        }
+        public let candidates: [Candidate]
+        public let syllables: [[String]]
+        public let elapsed_ms: Int
+        public let truncated: Bool
+    }
+    public static func parseGenerated(_ data: Data) throws -> GeneratedCandidates {
+        let reply = try JSONDecoder().decode(GeneratedCandidates.self, from: data)
+        let han: (Unicode.Scalar) -> Bool = { (0x3400...0x9FFF).contains($0.value) || (0x20000...0x323AF).contains($0.value) }
+        guard reply.candidates.count <= 3, reply.syllables.count <= 4,
+              reply.elapsed_ms >= 0, reply.elapsed_ms <= 10000,
+              reply.syllables.allSatisfy({ (2...6).contains($0.count) && $0.allSatisfy { !$0.isEmpty && $0.utf8.allSatisfy { (97...122).contains($0) } } }),
+              Set(reply.candidates.map(\.text)).count == reply.candidates.count,
+              reply.candidates.allSatisfy({ row in row.score.isFinite && row.score <= 0 &&
+                  (2...6).contains(row.text.unicodeScalars.count) && row.text.unicodeScalars.allSatisfy(han) &&
+                  reply.syllables.contains { $0.count == row.text.unicodeScalars.count } }) else { throw Failure.invalidResponse }
+        return reply
+    }
+    public static func generateCandidates(context: String, input: String, scheme: String) async throws -> GeneratedCandidates {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:1235/generate")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 2.5
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "input": input, "scheme": scheme, "count": 3])
+        return try await traced(request: request, token: "", parse: parseGenerated)
+    }
     private static func traced<T>(request: URLRequest, token: String, parse: (Data) throws -> T) async throws -> T {
         let id = await LLMDebugLog.shared.begin(request: request, token: token)
         var body: Data?

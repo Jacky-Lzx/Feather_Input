@@ -38,6 +38,11 @@ char *feather_take_commit(uintptr_t s) {
   RIME_STRUCT(RimeCommit, c); if (!api->get_commit(s,&c)) return NULL;
   char *v=c.text ? strdup(c.text) : NULL; api->free_commit(&c); return v;
 }
+char *feather_input(uintptr_t s) {
+  if (!RIME_PROVIDED(api, get_input)) return NULL;
+  const char *input = api->get_input(s);
+  return input ? strdup(input) : NULL;
+}
 char *feather_preedit(uintptr_t s,int *cursor) {
   RIME_STRUCT(RimeContext,c); if(!api->get_context(s,&c)) return NULL;
   *cursor=c.composition.cursor_pos;

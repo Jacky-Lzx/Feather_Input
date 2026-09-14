@@ -78,4 +78,16 @@ final class LocalRecommendationTests: XCTestCase {
         }
         XCTAssertThrowsError(try LocalRecommendation.parseCandidateScores(data([]), candidates: texts))
     }
+    func testGeneratedCandidatesRequireCompleteHanTextAndBoundedResults() throws {
+        func reply(_ text: String, score: Double = -1) throws -> Data {
+            try JSONSerialization.data(withJSONObject: ["candidates": [["text": text, "score": score]],
+                "syllables": [["gu", "wu"]], "elapsed_ms": 42, "truncated": false])
+        }
+        XCTAssertEqual(try LocalRecommendation.parseGenerated(reply("孤鹜")).candidates.first?.text, "孤鹜")
+        for text in ["孤", "孤鹜，", "孤鹜齐飞", "guwu", "孤�"] {
+            XCTAssertThrowsError(try LocalRecommendation.parseGenerated(reply(text)))
+        }
+        XCTAssertThrowsError(try LocalRecommendation.parseGenerated(reply("孤鹜", score: 1)))
+    }
+
 }

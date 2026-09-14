@@ -29,6 +29,7 @@ private struct SettingsView: View {
     @AppStorage("showPersistentMode") private var showPersistentMode = true
     @AppStorage("aiFusionWeight") private var fusionWeight = 0.35
     @AppStorage("aiScoreNormalization") private var scoreNormalization = "character"
+    @AppStorage("aiPinyinGenerationEnabled") private var pinyinGenerationEnabled = true
     @AppStorage("aiCandidateScoringEnabled") private var scoringEnabled = false
     @AppStorage("aiRerankingEnabled") private var rerankingEnabled = false
     @AppStorage("aiRecommendationEnabled") private var aiEnabled = false
@@ -63,6 +64,9 @@ private struct SettingsView: View {
                 Text("Caps Lock 或单按右 Control 切换中英文\n点击或数字键选词 · 空格上屏 · Page Up / Down 翻页")
                     .font(.footnote).foregroundStyle(.secondary)
                 Divider()
+                Toggle("根据上下文和拼音生成新词（实验）", isOn: $pinyinGenerationEnabled)
+                Text("完整输入 2–6 个音节后，侧边显示最多 3 个 AI 建议，点击上屏。支持全拼、小鹤双拼；不占用原候选数字键。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("用 MLX 给当前拼音候选打分", isOn: $scoringEnabled)
                 HStack {
                     Text("LLM 排序权重")

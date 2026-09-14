@@ -11,6 +11,7 @@ final class PredictionPanel {
     private let panel = PredictionWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     private let scroll = NSScrollView()
     private let label = NSTextField(labelWithString: "")
+    var frame: NSRect { panel.frame }
     var windowLevel: NSWindow.Level { panel.level }
     var isVisible: Bool { panel.isVisible }
     var text: String { label.stringValue }

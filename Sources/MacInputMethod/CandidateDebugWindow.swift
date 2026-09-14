@@ -11,10 +11,13 @@ final class CandidateDebugWindow: ObservableObject {
     @Published private(set) var rime: [String] = []
     @Published private(set) var llm: [String] = []
     @Published private(set) var final: [String] = []
+    @Published private(set) var generation: [String] = []
+    @Published private(set) var generationDetail = ""
     @Published private(set) var detail = "等待新的拼音候选"
     private var panel: NSPanel?
 
     func clear() {
+        generation = []; generationDetail = ""
         preedit = ""; rime = []; llm = []; final = []; detail = "等待新的拼音候选"
     }
     func update(preedit: String, rime: [String], predictions: [LocalRecommendation.RankedToken], final: [String], scoring: Bool, delay: Int?) {
@@ -39,6 +42,16 @@ final class CandidateDebugWindow: ObservableObject {
         detail += " · Rime \(rime.count) / LLM \(self.llm.count) / 显示 \(final.count)"
         if let delay { detail += " · \(delay) ms" }
         if predictions.isEmpty { detail += " · 暂无已采用的模型结果，保留 Rime 顺序" }
+    }
+    func clearGeneration() {
+        guard enabled, !paused else { return }
+        generation = []; generationDetail = ""
+    }
+    func updateGeneration(input: String, result: LocalRecommendation.GeneratedCandidates, delay: Int) {
+        guard enabled, !paused else { return }
+        generation = result.candidates.enumerated().map { "#\($0.offset + 1)  \($0.element.text)  · " + String(format: "%.4f", $0.element.score) }
+        generationDetail = "\(input) → " + result.syllables.map { $0.joined(separator: " ") }.joined(separator: " / ")
+        generationDetail += " · 往返 \(delay) ms / 推理 \(result.elapsed_ms) ms" + (result.truncated ? " · 已达搜索时限" : "")
     }
     static func verify() throws {
         let log = CandidateDebugWindow()
@@ -125,7 +138,10 @@ private struct CandidateDebugView: View {
                 column("LLM · 模型排名", rows: log.llm)
                 Divider()
                 column("最终候选 · 显示顺序", rows: log.final)
+                Divider()
+                column("AI · 拼音生成", rows: log.generation)
             }
+            Text(log.generationDetail).font(.caption).foregroundStyle(.secondary)
             Text("仅保留内存中的最近快照；关闭记录会清空，关闭窗口仍继续记录。只显示当前模式已采用的结果，不额外调用后端。")
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(16)

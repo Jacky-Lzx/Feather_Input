@@ -7,3 +7,10 @@
 Downloaded Rime data source remains available under `.deps`. The app carries the YAML/text data, OpenCC data, and precompiled dictionaries. Build scripts retain the exact data revisions so their upstream source can be retrieved. Runtime dylibs are copied from Homebrew and relocated; they are not modified at source level. Runtime dependency versions depend on the local Homebrew installation.
 
 The vendored `rime_api.h` was fetched from upstream master on 2026-09-13. The application does not bundle or derive its UI code from Squirrel.
+
+## Optional local backend: pypinyin 0.55.0
+
+The pinyin-constrained generation backend uses the single-character pronunciation data from
+[pypinyin](https://github.com/mozillazg/python-pinyin), licensed under MIT.
+The license text is retained in `backend/licenses/pypinyin-MIT.txt` and in the installed package.
+This Python dependency is installed in the local worker environment, not bundled into the input-method executable.

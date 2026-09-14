@@ -32,3 +32,4 @@ tqdm==4.70.1
 transformers==5.17.0
 typer==0.27.2
 typing-extensions==4.16.0
+pypinyin==0.55.0

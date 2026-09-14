@@ -32,6 +32,9 @@ class Predictor:
         from mlx_lm.generate import generate_step
         self.mx, self.generate = mx, generate_step
         self.model, self.tokenizer = load(path)
+        from pinyin_generation import Pronunciations, TokenGrammar
+        self.pronunciations = Pronunciations()
+        self.token_grammar = TokenGrammar(self.tokenizer)
 
     def predict(self, context, count=5):
         mx, tokenizer = self.mx, self.tokenizer
@@ -132,7 +135,7 @@ def serve(model_path, port):
 
         def do_POST(self):
             # Reject browser-origin requests and never expose a network listener.
-            if self.path not in ('/continuations', '/score') or self.headers.get('Origin'):
+            if self.path not in ('/continuations', '/score', '/generate') or self.headers.get('Origin'):
                 self.reply(403, {'error': 'unsupported request'})
                 return
             try:
@@ -150,6 +153,11 @@ def serve(model_path, port):
                     if (not isinstance(candidates, list) or not 1 <= len(candidates) <= 64
                             or any(not isinstance(t, str) or not t or len(t) > 64 for t in candidates)):
                         raise ValueError()
+                if self.path == '/generate':
+                    raw = payload['input']
+                    scheme = payload['scheme']
+                    if not isinstance(raw, str) or len(raw) > 36 or scheme not in ('luna_pinyin_simp', 'double_pinyin_flypy'):
+                        raise ValueError()
                 count = payload.get('count', 5)
                 if type(count) is not int or not 1 <= count <= 20:
                     raise ValueError()
@@ -162,7 +170,11 @@ def serve(model_path, port):
                 self.reply(503, {'error': 'busy'})
                 return
             try:
-                self.reply(200, predictor.score(context, candidates, weight, normalization) if self.path == "/score" else predictor.predict(context, count))
+                if self.path == "/generate":
+                    from pinyin_generation import generate
+                    self.reply(200, generate(predictor, context, raw, scheme, min(3, count)))
+                else:
+                    self.reply(200, predictor.score(context, candidates, weight, normalization) if self.path == "/score" else predictor.predict(context, count))
             except Exception:
                 self.reply(500, {'error': 'inference failed'})
             finally:
