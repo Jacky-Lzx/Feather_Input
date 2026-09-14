@@ -75,6 +75,11 @@ final class CandidatePanel {
         scroll.autohidesScrollers = true
         panel.contentView = background
     }
+    private func updateWindowLevel(_ clientLevel: Int) {
+        let maximum = Int(CGWindowLevelForKey(.maximumWindow))
+        let boundedClient = min(maximum - 1, max(0, clientLevel))
+        panel.level = NSWindow.Level(rawValue: max(NSWindow.Level.popUpMenu.rawValue, boundedClient + 1))
+    }
     var recommendedIndex: Int? { buttons.firstIndex(where: { $0.isRecommended }) }
     func markRecommendation(_ index: Int?) {
         for (i, button) in buttons.enumerated() {
@@ -86,8 +91,9 @@ final class CandidatePanel {
     func contains(_ point: NSPoint) -> Bool { (panel.isVisible && panel.frame.contains(point)) || predictions.contains(point) }
     func hide() { panel.orderOut(nil); predictions.hide(); selection = nil }
     @objc private func choose(_ sender: NSButton) { selection?(sender.tag) }
-    func showExpanded(texts: [String], highlight: Int, caret: NSRect, rows: Int, loading: Bool, onSelect: @escaping (Int) -> Void) {
+    func showExpanded(texts: [String], highlight: Int, caret: NSRect, rows: Int, loading: Bool, clientLevel: Int = 0, onSelect: @escaping (Int) -> Void) {
         guard !texts.isEmpty else { return }
+        updateWindowLevel(clientLevel)
         predictions.hide()
         selection = onSelect
         let visible = (NSScreen.screens.first { $0.frame.intersects(caret) } ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1000, height: 700)
@@ -134,8 +140,9 @@ final class CandidatePanel {
         scroll.contentView.scroll(to: .zero)
         panel.orderFrontRegardless()
     }
-    func show(texts: [String], highlight: Int, caret: NSRect, continuation: Bool = false, llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, llmTitle: String = "LLM top-k · 本轮预测", onSelect: ((Int) -> Void)? = nil) {
+    func show(texts: [String], highlight: Int, caret: NSRect, clientLevel: Int = 0, continuation: Bool = false, llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, llmTitle: String = "LLM top-k · 本轮预测", onSelect: ((Int) -> Void)? = nil) {
         scroll.hasHorizontalScroller = false
+        updateWindowLevel(clientLevel)
         guard !texts.isEmpty else { hide(); return }
         selection = onSelect
         let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
@@ -185,7 +192,7 @@ final class CandidatePanel {
         background.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
         panel.invalidateShadow()
-        predictions.show(llmTokens, delayMS: llmDelayMS, title: llmTitle, beside: frame, visible: visible)
+        predictions.show(llmTokens, delayMS: llmDelayMS, title: llmTitle, beside: frame, visible: visible, level: panel.level)
     }
 
     static func verifyPresentation() throws {
@@ -201,8 +208,10 @@ final class CandidatePanel {
             candidatePanel.panel.appearance = NSAppearance(named: layout == "vertical" ? .aqua : .darkAqua)
             var chosen: Int?
             candidatePanel.show(texts: ["你好", "拟好", "你", "呢", "泥"], highlight: 0,
-                                caret: NSRect(x: 300, y: 400, width: 1, height: 20), llmTokens: [.init(text: "你", rank: 8), .init(text: "你好", rank: 3)], llmDelayMS: 42) { chosen = $0 }
-            guard candidatePanel.predictions.isVisible,
+                                caret: NSRect(x: 300, y: 400, width: 1, height: 20), clientLevel: NSWindow.Level.popUpMenu.rawValue + 40, llmTokens: [.init(text: "你", rank: 8), .init(text: "你好", rank: 3)], llmDelayMS: 42) { chosen = $0 }
+            guard candidatePanel.panel.level.rawValue == NSWindow.Level.popUpMenu.rawValue + 41,
+                  candidatePanel.predictions.windowLevel == candidatePanel.panel.level,
+                  candidatePanel.predictions.isVisible,
                   candidatePanel.predictions.text == "LLM top-k · 本轮预测\n延迟 42 ms（请求往返）\n\n#3  你好\n#8  你",
                   candidatePanel.buttons[0].title == "1  你好",
                   candidatePanel.buttons[1].title == "2  拟好" else { throw Engine.Failure.schemaUnavailable }
@@ -225,8 +234,9 @@ final class CandidatePanel {
             _ = candidatePanel.verifyClick(on: 0)
             guard chosen == nil else { throw Engine.Failure.schemaUnavailable }
             let all = (0..<19).map { "候选\($0)" }
-            candidatePanel.showExpanded(texts: all, highlight: 9, caret: NSRect(x: 300, y: 400, width: 1, height: 20), rows: 8, loading: false) { chosen = $0 }
-            guard candidatePanel.buttons.count == 19, candidatePanel.buttons[9].isCurrentCandidate,
+            candidatePanel.showExpanded(texts: all, highlight: 9, caret: NSRect(x: 300, y: 400, width: 1, height: 20), rows: 8, loading: false, clientLevel: NSWindow.Level.popUpMenu.rawValue + 40) { chosen = $0 }
+            guard candidatePanel.panel.level.rawValue == NSWindow.Level.popUpMenu.rawValue + 41,
+                  candidatePanel.buttons.count == 19, candidatePanel.buttons[9].isCurrentCandidate,
                   candidatePanel.buttons[0].frame.minX < candidatePanel.buttons[8].frame.minX,
                   candidatePanel.buttons[8].frame.minY > candidatePanel.buttons[9].frame.minY,
                   candidatePanel.buttons[0].title == "候选0", candidatePanel.buttons[8].title == "1  候选8",
@@ -236,7 +246,8 @@ final class CandidatePanel {
                   !candidatePanel.panel.canBecomeKey, candidatePanel.verifyClick(on: 18), chosen == 18 else { throw Engine.Failure.schemaUnavailable }
             let many = (0..<83).map { "候选\($0)" }
             candidatePanel.showExpanded(texts: many, highlight: 43, caret: NSRect(x: 300, y: 400, width: 1, height: 20), rows: 8, loading: false) { chosen = $0 }
-            guard candidatePanel.buttons.count == 40, candidatePanel.buttons.first?.tag == 40,
+            guard candidatePanel.panel.level == .popUpMenu,
+                  candidatePanel.buttons.count == 40, candidatePanel.buttons.first?.tag == 40,
                   candidatePanel.buttons.last?.tag == 79, candidatePanel.buttons[3].isCurrentCandidate,
                   candidatePanel.buttons[0].title == "1  候选40", candidatePanel.buttons[8].title == "候选48",
                   candidatePanel.verifyClick(on: 0), chosen == 40 else { throw Engine.Failure.schemaUnavailable }

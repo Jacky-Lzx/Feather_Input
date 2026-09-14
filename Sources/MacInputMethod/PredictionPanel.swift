@@ -11,6 +11,7 @@ final class PredictionPanel {
     private let panel = PredictionWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     private let scroll = NSScrollView()
     private let label = NSTextField(labelWithString: "")
+    var windowLevel: NSWindow.Level { panel.level }
     var isVisible: Bool { panel.isVisible }
     var text: String { label.stringValue }
     init() {
@@ -44,7 +45,8 @@ final class PredictionPanel {
     }
     func contains(_ point: NSPoint) -> Bool { panel.isVisible && panel.frame.contains(point) }
     func hide() { panel.orderOut(nil) }
-    func show(_ tokens: [LocalRecommendation.RankedToken], delayMS: Int? = nil, title: String = "LLM top-k · 本轮预测", beside anchor: NSRect, visible: NSRect) {
+    func show(_ tokens: [LocalRecommendation.RankedToken], delayMS: Int? = nil, title: String = "LLM top-k · 本轮预测", beside anchor: NSRect, visible: NSRect, level: NSWindow.Level = .popUpMenu) {
+        panel.level = level
         guard !tokens.isEmpty else { hide(); return }
         let rows = tokens.sorted { $0.rank < $1.rank }.map {
             "#\($0.rank)  " + $0.text.replacingOccurrences(of: " ", with: "␠")

@@ -35,7 +35,7 @@ final class InputController: IMKInputController {
         let version = expansionID
         candidatesPanel.showExpanded(texts: texts, highlight: expandedIndex,
             caret: lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20)),
-            rows: expandedRows, loading: loading) { [weak self, weak client] index in
+            rows: expandedRows, loading: loading, clientLevel: Int(client.windowLevel())) { [weak self, weak client] index in
                 guard let self, let client, self.expansionID == version, !self.bypassSecureInput() else { return }
                 self.selectExpanded(index, client: client)
             }
@@ -465,7 +465,7 @@ final class InputController: IMKInputController {
         }
         let reordered = order != Array(candidates.texts.indices)
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
-                             highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
+                             highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor, clientLevel: Int(client.windowLevel()),
                              llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS, llmTitle: scoringEnabled ? "Rime + LLM · 融合排序" : "LLM top-k · 本轮预测") { [weak self, weak client] index in
             guard let self, !self.bypassSecureInput(), self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
@@ -546,7 +546,7 @@ final class InputController: IMKInputController {
                 let anchor = caret.height > 0 && caret.origin.x.isFinite && caret.origin.y.isFinite ? caret : self.lastCaret
                 guard let anchor else { return }
                 self.continuationText = text
-                self.candidatesPanel.show(texts: texts, highlight: -1, caret: anchor, continuation: true) { [weak self, weak client] index in
+                self.candidatesPanel.show(texts: texts, highlight: -1, caret: anchor, clientLevel: Int(client.windowLevel()), continuation: true) { [weak self, weak client] index in
                     guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii, self.recommendationVersion == version,
                           self.continuationText == text, self.session?.preedit.text.isEmpty == true,
                           UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
