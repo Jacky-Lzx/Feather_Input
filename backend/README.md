@@ -1,9 +1,10 @@
-# Feather MLX worker (prototype)
+# Feather MLX 后端（原型）
 
-Apple Silicon only. Model stays in a separate process; HTTP listens only on
-127.0.0.1:1235. No API key is required. No input text is logged or persisted.
+仅支持 Apple Silicon。模型在独立进程中运行，HTTP 服务只监听 `127.0.0.1:1235`，无需 API key。后端不会记录输入文本，也不会将其持久化到磁盘。
 
-Setup from the repository root:
+## 安装与启动
+
+在仓库根目录执行：
 
 ```sh
 uv venv .venv-mlx
@@ -11,135 +12,88 @@ uv pip install --python .venv-mlx/bin/python -r backend/requirements.txt
 scripts/start-mlx.sh /absolute/path/to/MLX-model
 ```
 
-For login startup instead of a foreground process:
+将 `/absolute/path/to/MLX-model` 替换为模型的绝对路径。若需登录后自动启动，而不是在前台运行：
 
 ```sh
 python3 scripts/install-mlx-agent.py /absolute/path/to/MLX-model
 ```
 
-The launch agent points to this checkout and virtual environment. Keep both in
-place. Uninstall with `launchctl bootout gui/$(id -u)/im.feather.mlx-worker`, then
-remove `~/Library/LaunchAgents/im.feather.mlx-worker.plist`.
+LaunchAgent 指向当前仓库和虚拟环境，请保留两者的位置。卸载时先执行 `launchctl bootout gui/$(id -u)/im.feather.mlx-worker`，再删除 `~/Library/LaunchAgents/im.feather.mlx-worker.plist`。
 
-Select **MLX 下一 token** as the continuation backend in Feather settings and enable
-**上屏后 AI 预测**. Candidate recommendation remains a separate LM Studio option.
-The MLX test button uses synthetic text. Enable debug mode before a request to
-inspect context, the top next tokens and their log probabilities/probabilities,
-and the configured number of token candidates. Clicking a candidate inserts that text;
-new input cancels the UI request and stale responses are discarded.
+## 上屏后预测下一个 token
 
-The algorithm reads the unmodified next-token distribution from one
-`generate_step(..., max_tokens=1)` call. It does not extend branches, generate
-phrases, trim whitespace, or remove repeated context. The configured 1–20 unique displayable
-tokens from a larger raw probability pool are shown in probability order, including punctuation
-and spaces. Space is displayed as ␠ in the candidate label but inserted unchanged.
-Special tokens, control characters and incomplete Unicode fragments are excluded
-from selectable candidates; raw probability values remain visible in debug output.
+在 Feather 设置中将补全后端选为 **MLX 下一 token**，并开启 **上屏后 AI 预测**。候选推荐仍有独立的 LM Studio 选项。MLX 测试按钮使用合成文本；在请求前开启调试模式，可以查看上下文、下一 token 的排名及其对数概率、概率，以及按配置数量筛选出的候选。点击候选会插入对应文本；继续输入会取消界面请求，过期响应会被丢弃。
 
-Each candidate has exactly one token ID and its real log probability. Probabilities
-are approximate due to quantization/numerical precision; top ten need not sum to
-one. No pinyin constraint or MLX Swift migration is implemented. Raw continuation
-can be imperfect with chat models; the output is not forced to be a comma.
+算法调用一次 `generate_step(..., max_tokens=1)`，读取未经修改的下一 token 概率分布。它不展开后续分支、不生成词组、不裁剪空白，也不移除重复上下文。从较大的原始概率候选池中筛选出配置数量的、互不重复且可显示的 token（1–20 个），按概率排列，保留标点和空格。候选标签中的空格显示为 `␠`，插入时仍是原始空格。
 
-In-flight Metal work cannot be interrupted mid-step. A busy worker rejects requests
-instead of queuing them. The app times out after 3 seconds and discards stale
-responses. No persistent KV cache reuse between requests yet. Cold model load
-happens before listening. Backend loss never blocks Rime keyboard handling.
+特殊 token、控制字符和不完整的 Unicode 片段不会成为可选候选；原始概率值仍可在调试输出中查看。每个候选恰好对应一个 token ID 及其模型对数概率。概率受量化和数值精度影响，前十个 token 的概率之和不一定为 1。此预测模式没有拼音约束，也尚未迁移到 MLX Swift。聊天模型的直接续写效果可能不理想；程序不会强制输出逗号。
 
-Health: `GET /health`. Prediction: `POST /continuations` with a JSON `context`
-string of 1–80 characters and optional integer `count` (1–20, default 5). Browser-origin requests are rejected. The loopback
-endpoint is available to other local processes; it is not an authentication boundary.
+正在执行的 Metal 运算不能在单步中途终止。后端忙碌时直接拒绝新请求，不排队；应用请求超时为 3 秒，并丢弃过期响应。目前没有跨请求的持久 KV 缓存。模型在服务开始监听前完成加载。后端不可用不会阻塞 Rime 的按键处理。
 
-## Rime candidate ranking
+接口如下：
 
-Enable **用 MLX 下一 token 给拼音候选排序** in Feather settings. This takes
-precedence over the separate prediction popup and legacy LM Studio recommendation.
-After a commit the app immediately requests top-k tokens in the background. At the
-start of the next lowercase-pinyin composition it freezes the ready cache (or an
-empty cache). Later replies cannot move the current candidates. Predictions are
-scoped to the active input context; input source/focus changes invalidate them.
+- 健康检查：`GET /health`。
+- 预测：`POST /continuations`，JSON 包含 `context`（1–80 个字符），以及可选整数 `count`（1–20，默认 5）。
 
-Within each Rime page, exact token matches move first in model probability order;
-unmatched entries and equal matches retain Rime order. No prefix/substring match,
-new candidate insertion, or cross-page promotion. Space, digits and clicks map back
-to original Rime indices; up/down selects within the reordered page. Page Up/Down
-retains Rime paging. There is no inference wait in the keyboard handler.
+服务拒绝带浏览器 Origin 的请求。本机其他进程仍可访问这个回环地址，因此它不构成身份认证边界。
 
-Rime candidate buttons display only their selection number and text. Model ranks
-are shown exclusively in the companion panel; ranking and selection mapping are
-unchanged. Rank metadata is never inserted into the client text.
+## 用下一 token 的 top-k 结果重排 Rime 候选
 
-While Rime candidates are visible, a read-only companion panel shows the entire
-frozen prediction list used for ranking, including tokens with no Rime match. Rows
-are ordered by original LLM rank; spaces are displayed as ␠. It follows the main
-candidate panel, moves to the left if the right edge has insufficient room, and
-hides with the main panel. Long lists scroll without taking keyboard focus. No
-ready prediction means no companion window for that composition.
+开启 **用 MLX 下一 token 给拼音候选排序**。此模式的优先级高于独立预测弹窗和旧版 LM Studio 推荐。文字上屏后，应用立即在后台请求 top-k token；开始下一段小写拼音时，冻结已经就绪的预测缓存，没有结果则冻结为空。后续返回的结果不能移动本轮候选。预测仅属于当前输入上下文，切换输入源或焦点会使其失效。
 
-The companion panel shows request round-trip delay in milliseconds. Timing uses a
-monotonic clock around the request and response parsing, includes local transport
-and inference, and is frozen with that prediction. It excludes the user's wait
-before typing the next composition and is not pure model compute time.
+在每一页 Rime 候选中，与预测 token **文本完全相同**的候选按模型概率顺序提前；未匹配项和同等匹配项保持 Rime 原顺序。不做前缀或子串匹配，不新增候选，也不跨页提升候选。空格、数字键和鼠标点击会映射回 Rime 原候选索引；上下键在重排后的页面中选词，Page Up/Down 保留 Rime 翻页行为。按键处理不会等待模型推理。
 
-## Candidate probability scoring (experimental)
+主候选窗口只显示选词序号和文本，模型排名只在侧窗显示；排序和选词映射不受影响。排名信息不会插入正文。
 
-Enable **用 MLX 给当前拼音候选打分**. It takes precedence over cached top-k ranking,
-independent continuation, and legacy recommendation. Rime supplies the current
-page of pinyin-compatible candidates (both full pinyin and Flypy); the model does
-not interpret raw pinyin. `POST /score` accepts `context`, `preedit` (debug metadata),
-and 1–9 candidate strings (up to 64 characters/tokens each).
+Rime 候选显示期间，只读侧窗展示本轮排序使用的完整冻结预测列表，包括未匹配到 Rime 候选的 token。列表按原始 LLM 名次排列，空格显示为 `␠`。侧窗跟随主候选窗口，右侧空间不足时移到左侧，并随主窗口一起隐藏。长列表可滚动，不抢占键盘焦点。本轮没有就绪预测时，不显示侧窗。
 
-For each candidate the worker evaluates `encode(context) + encode(candidate)`
-with an explicit token boundary and teacher-forced causal logits. Only candidate
-positions contribute. Responses include original candidate ID, token IDs, each
-conditional log probability, their sum, normalized LLM score, Rime rank prior,
-and final fusion score. Settings expose LLM weight (0–100%, default 35%) and
-normalization (character average, token average, or raw sum; default character).
+侧窗还显示以毫秒计的请求往返延迟。计时使用单调时钟，覆盖请求及响应解析，包括本机传输和推理，并与预测结果一起冻结。它不包含用户开始下一段输入前的等待时间，也不是纯模型计算耗时。
 
-`score = (1 - weight) * -log(original_rank) + weight * normalized_logprob`
+## Rime 候选概率评分与融合排序（实验性）
 
-The Rime term is a rank proxy, **not** Rime's actual probability. Weight 0 preserves
-Rime order; weight 1 uses only LLM scores. The default is an initial heuristic,
-not a fitted/calibrated optimum. Normalization may favor longer predictable strings;
-no EOS probability is included. Ties retain original order. The exposed Rime API
-does not provide consumed pinyin spans, so candidates are not claimed to cover an
-equal span. Strict span grouping and cross-page retrieval remain future work.
+开启 **用 MLX 给当前拼音候选打分**。它的优先级高于缓存 top-k 排序、独立补全和旧版推荐。Rime 根据全拼或小鹤双拼提供当前页符合输入的候选，模型不直接解析原始拼音。`POST /score` 接收 `context`、`preedit`（用于调试的元数据）以及 1–9 个候选字符串，每个候选最多 64 个字符，分词后也不能超过 64 个 token。
 
-Context is limited to 80 characters. Each request prefills it once, reuses the
-first-token distribution, and deep-copies its KV cache for each multi-token
-candidate. Candidate branches cannot modify each other's prefix. There is no
-persistent cache or reuse across requests.
+### 评分方法
 
-Before starting a new pinyin composition, the app reads up to 80 characters before
-the current selection from the host's IMK text interface (bounded UTF-16 range).
-Thus candidate scoring can resume after cursor movement or document deletion,
-using the updated document rather than only locally committed text. Selected text,
-text after the cursor, and the new preedit are excluded. Hosts that do not expose
-surrounding text still fall back to local commit history; navigation clears that
-history, so restoration is unavailable there. This does not use Accessibility or
-read other applications. Legacy cached next-token mode still requires a ready
-prediction before composition; it does not wait for a new request at this point.
+对每个候选，后端分别编码上下文和候选，再按 `encode(context) + encode(candidate)` 拼接，明确两者的 token 边界。计算时使用候选已有的 token 作为后续位置的输入，逐个读取条件对数概率，只累计候选位置的分数。
 
-The app immediately displays Rime's page, waits 120 ms after input, then requests
-scores. A response can reorder only the unchanged page and context within 700 ms
-of request start. Further input, navigation, selection, focus change, disabled
-settings, or cancellation invalidates the response. Hovering either candidate
-window also prevents a pending reorder. Up/down selection locks scoring for that
-page. This differs from frozen next-token mode: a stationary page may update once
-when scoring arrives. The side window is titled **Rime + LLM · 融合排序**; its ranks are
-among the supplied candidates, not full-vocabulary token ranks. Request delay
-remains visible; all per-token scores are available in the opt-in debug window.
+例如候选由两个 token 组成，其总对数概率为：
 
-Timeouts, busy service, invalid responses, and missing context leave Rime usable.
-The 2.4 s worker budget is checked between candidates; one Metal call cannot be
-interrupted. No cross-page ranking or automatic insertion is performed. Disable
-this option to return to the previous cached top-k mode.
+```text
+log P(token₁ | 上下文) + log P(token₂ | 上下文, token₁)
+```
 
-## Reproducible diagnostic evaluation
+响应包含原候选 ID、token ID、各 token 的条件对数概率、总对数概率、归一化 LLM 分数、Rime 排名分数和最终融合分数。设置中可调整 LLM 权重（0–100%，默认 35%）及长度处理方式：按字符平均、按 token 平均或不归一化，默认按字符平均。
 
-`evaluation_cases.json` contains 20 hand-written context/pinyin/target cases,
-including homophone pairs. Export actual first-page Rime candidates (9 each)
-using an isolated user directory, then evaluate the installed model:
+```text
+score = (1 - weight) * -log(original_rank) + weight * normalized_logprob
+```
+
+其中 `original_rank` 是从 1 开始的 Rime 原始排名，`log` 为自然对数，`normalized_logprob` 是按所选方式处理后的 LLM 分数。最终分数越高，排名越靠前；同分时保持原顺序。
+
+Rime 项只是根据排名构造的分数，**不是 Rime 的真实概率**。权重为 0 时保留 Rime 顺序，为 1 时完全使用 LLM 分数。默认值是初始启发式参数，不是拟合或校准得到的最优值。归一化可能偏向较长、容易预测的字符串；评分不包含结束标记 EOS 的概率。
+
+当前使用的 Rime API 不提供候选实际消耗的拼音范围，因此不能保证参与比较的候选覆盖相同范围。严格的拼音范围分组和跨页提词尚未实现。
+
+### 上下文与缓存
+
+上下文最多 80 个字符。每个请求只对上下文做一次预填充，复用首个 token 的概率分布；对每个包含多个 token 的候选，深拷贝上下文 KV 缓存后分别计算。候选分支不会修改彼此的前缀缓存。目前没有持久缓存，也不跨请求复用。
+
+开始新一段拼音前，应用通过当前输入应用的 IMK 文本接口，读取选区起点前最多 80 个字符；接口查询使用有界的 UTF-16 范围。这样，移动光标或删除正文后，可以根据更新后的文档恢复评分，而不只是依赖输入法最近上屏的文字。选中文本、光标后的文本及本轮待上屏拼音不计入上下文。
+
+若应用不提供光标周围的正文，仍回退到本地上屏历史；移动位置会清空该历史，因此这类应用中无法恢复上下文。此功能不使用辅助功能权限，也不读取其他应用。旧版缓存 next-token 模式仍要求开始拼音前已有预测结果，不会在此处等待新请求。
+
+### 请求时机与界面更新
+
+应用先立即显示 Rime 当前页候选，输入停顿 120 ms 后再请求评分。只有请求开始后 700 ms 内返回，并且页面及上下文仍未变化的响应，才能用于重排。继续输入、导航、选择、焦点变化、关闭相关设置或取消请求，都会使旧响应失效。鼠标停留在主候选窗口或侧窗上时，也不会应用待返回的排序；用上下键选词会锁定当前页评分。
+
+与冻结 next-token 预测的模式不同，此模式允许静止页面在评分返回后更新一次。侧窗标题为 **Rime + LLM · 融合排序**，显示的是所提交候选之间的融合排名，**不是整个模型词表的 token 排名**。请求延迟仍会显示；开启调试窗口可查看各 token 的分数。
+
+请求超时、服务忙碌、响应无效或缺少上下文时，Rime 仍可正常使用。后端在候选之间检查 2.4 秒的处理预算，单次 Metal 运算无法中途打断。此模式不会跨页排序，也不会自动插入文字。关闭该选项后，如果缓存 top-k 排序选项仍开启，就会回到旧模式。
+
+## 可复现的诊断评测
+
+`evaluation_cases.json` 包含 20 个人工编写的“上下文 / 拼音 / 目标词”样例，其中包括同音词对。先使用隔离的用户目录，导出 Rime 实际生成的首页候选（每页 9 个），再评测已安装的模型：
 
 ```sh
 scratch=$(mktemp -d /tmp/feather-eval.XXXXXX)
@@ -151,19 +105,21 @@ scratch=$(mktemp -d /tmp/feather-eval.XXXXXX)
   --fixtures /tmp/feather-evaluation-candidates.json --output /tmp/feather-evaluation-results.json
 ```
 
-Reports Top-1/Top-5 counts for original Rime, pure token/character scores, and
-35% fusion, with all cases in the denominator (missing targets count as misses).
-Also reports target coverage, per-request cached/uncached median and nearest-rank
-P95 after a warm-up, and maximum per-token score difference. Timings exclude HTTP
-and UI, run cached before uncached for each case, and are only diagnostic samples.
-The set is synthetic, full-pinyin only, without personal learning; it is not a
-held-out benchmark or evidence of production accuracy. No weights are tuned on it.
+评测报告包含原始 Rime、纯 LLM 按 token / 字符平均评分、35% 融合排序的 Top-1 和 Top-5 命中数。所有样例都计入分母，目标词不在候选页中也算未命中。同时报告目标词覆盖数、预热后每次请求使用缓存与不使用缓存的耗时中位数和 P95（最近秩法），以及逐 token 分数的最大差异。
 
-Recorded run: [2026-09-14 results](evaluations/2026-09-14-qwen17-fusion.json).
-On these 20 cases, Rime hit 11/20 Top-1 and 18/20 Top-5; pure LLM token and
-character means both hit 20/20; 35% fusion hit 19/20 and 20/20. This set therefore
-does **not** demonstrate fusion outperforming pure LLM scoring. Cached median/P95
-was 41.5/88 ms versus 85/109 ms without caching. BF16 computation changed some
-scores (maximum absolute token log-probability difference 0.13455): first choices
-agreed in 20/20 cases, full orders in 18/20. A single FP32 control case reduced the
-maximum difference to 0.00000763; caching is not claimed to be bitwise equivalent.
+计时不包含 HTTP 和界面处理；每个样例先运行缓存版本，再运行无缓存版本，只用于诊断。这组数据是人工合成的全拼样例，不含个人学习记录，不是独立留出的基准测试，也不能证明实际使用准确率。没有使用它调整权重。
+
+### 已记录结果
+
+详见 [2026-09-14 评测结果](evaluations/2026-09-14-qwen17-fusion.json)。这 20 个样例的结果如下：
+
+| 排序方法 | Top-1 命中数 | Top-5 命中数 |
+| --- | --- | --- |
+| Rime 原顺序 | 11/20 | 18/20 |
+| 纯 LLM，按 token 平均 | 20/20 | 20/20 |
+| 纯 LLM，按字符平均 | 20/20 | 20/20 |
+| 35% 融合排序 | 19/20 | 20/20 |
+
+因此，这组样例**没有证明融合排序优于纯 LLM 评分**。
+
+缓存版本的耗时中位数 / P95 为 41.5 / 88 ms，无缓存版本为 85 / 109 ms。BF16 计算产生了部分分数差异，token 对数概率的最大绝对差为 0.13455：20/20 个样例的首选一致，18/20 个样例的完整顺序一致。单个 FP32 对照样例将最大差异降至 0.00000763；不能认为缓存前后的计算结果逐位相同。
