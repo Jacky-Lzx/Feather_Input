@@ -65,3 +65,19 @@ int feather_page_size(const char *schema, int count) {
   api->config_close(&config);
   return ok;
 }
+
+int feather_candidate_slice(uintptr_t s, int offset, char **texts, int capacity) {
+  if (offset < 0 || capacity <= 0 || !RIME_PROVIDED(api, candidate_list_from_index)) return 0;
+  RimeCandidateListIterator it = {0};
+  if (!api->candidate_list_from_index(s, &it, offset)) return 0;
+  int n = 0;
+  while (n < capacity && api->candidate_list_next(&it)) {
+    texts[n++] = strdup(it.candidate.text ? it.candidate.text : "");
+  }
+  api->candidate_list_end(&it);
+  return n;
+}
+int feather_select_global(uintptr_t s, int index) {
+  if (index < 0 || !RIME_PROVIDED(api, select_candidate)) return 0;
+  return api->select_candidate(s, (size_t)index);
+}

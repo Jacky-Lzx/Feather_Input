@@ -15,3 +15,5 @@ void feather_free(char *text);
 int feather_select_candidate(uintptr_t session, int index);
 
 int feather_page_size(const char *schema, int count);
+int feather_candidate_slice(uintptr_t session, int offset, char **texts, int capacity);
+int feather_select_global(uintptr_t session, int index);

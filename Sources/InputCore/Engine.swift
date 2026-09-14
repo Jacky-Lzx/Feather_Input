@@ -67,6 +67,19 @@ public final class Session {
     public static func utf16Cursor(_ text: String, byteOffset: Int) -> Int {
         String(decoding: text.utf8.prefix(max(0, byteOffset)), as: UTF8.self).utf16.count
     }
+    public func candidateSlice(offset: Int, count: Int = 128) -> [String] {
+        guard offset >= 0, offset <= Int(Int32.max) else { return [] }
+        let capacity = min(128, max(1, count))
+        var pointers = [UnsafeMutablePointer<CChar>?](repeating: nil, count: capacity)
+        let n = feather_candidate_slice(id, Int32(offset), &pointers, Int32(capacity))
+        return pointers.prefix(Int(n)).compactMap { p in
+            guard let p else { return nil }; defer { feather_free(p) }; return String(cString: p)
+        }
+    }
+    @discardableResult public func selectGlobalCandidate(at index: Int) -> Bool {
+        guard index >= 0, index <= Int(Int32.max) else { return false }
+        return feather_select_global(id, Int32(index)) != 0
+    }
     public var candidates: (texts: [String], highlight: Int) {
         var pointers = [UnsafeMutablePointer<CChar>?](repeating: nil, count: 10)
         var highlight: Int32 = 0

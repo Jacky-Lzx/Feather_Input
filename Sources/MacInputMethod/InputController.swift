@@ -17,6 +17,54 @@ final class InputController: IMKInputController {
         rightControlTap.reset()
         return true
     }
+    private var expandedTexts: [String]?
+    private var expandedIndex = 0
+    private let expandedRows = 8
+    private var expansionTask: Task<Void, Never>?
+    private var expansionID = UUID()
+    private func closeExpanded() {
+        expansionTask?.cancel(); expansionTask = nil
+        expansionID = UUID(); expandedTexts = nil
+    }
+    private func renderExpanded(_ client: IMKTextInput, loading: Bool = false) {
+        guard let texts = expandedTexts, !texts.isEmpty else { return }
+        let version = expansionID
+        candidatesPanel.showExpanded(texts: texts, highlight: expandedIndex,
+            caret: lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20)),
+            rows: expandedRows, loading: loading) { [weak self, weak client] index in
+                guard let self, let client, self.expansionID == version, !self.bypassSecureInput() else { return }
+                self.selectExpanded(index, client: client)
+            }
+    }
+    private func selectExpanded(_ index: Int, client: IMKTextInput) {
+        guard let texts = expandedTexts, texts.indices.contains(index), let session else { return }
+        if session.selectGlobalCandidate(at: index) {
+            closeExpanded()
+            refresh(client)
+        }
+    }
+    private func openExpanded(_ client: IMKTextInput) {
+        guard let session else { return }
+        invalidateRecommendation()
+        closeExpanded()
+        expandedTexts = session.candidateSlice(offset: 0)
+        guard expandedTexts?.isEmpty == false else { closeExpanded(); return }
+        expandedIndex = 0
+        let preedit = session.preedit.text
+        let version = expansionID
+        renderExpanded(client, loading: expandedTexts?.count == 128)
+        expansionTask = Task { @MainActor [weak self, weak client] in
+            while let self, let client, self.expansionID == version, let texts = self.expandedTexts,
+                  self.isActive, !self.bypassSecureInput(), session.preedit.text == preedit {
+                do { try await Task.sleep(nanoseconds: 10_000_000) } catch { return }
+                guard self.expansionID == version, !Task.isCancelled else { return }
+                let more = session.candidateSlice(offset: texts.count)
+                self.expandedTexts?.append(contentsOf: more)
+                self.renderExpanded(client, loading: more.count == 128)
+                if more.count < 128 { return }
+            }
+        }
+    }
     private var session: Session?
     private let candidatesPanel = CandidatePanel()
     private let modeIndicator = ModeIndicator()
@@ -169,13 +217,14 @@ final class InputController: IMKInputController {
         recommendationVersion = UUID()
         candidatesPanel.markRecommendation(nil)
         if clearContext {
+            closeExpanded()
             recentContext = ""
             scoredPreedit = ""; scoredOriginal = []; scoredContext = ""
             cancelRanking(clearCache: true)
             if session?.preedit.text.isEmpty != false { frozenPrediction = nil }
         }
     }
-    deinit { recommendationTask?.cancel(); rankingTask?.cancel() }
+    deinit { recommendationTask?.cancel(); rankingTask?.cancel(); expansionTask?.cancel() }
     private var rightControlTap = RightControlTap()
     private var capsLockSwitch = CapsLockSwitch()
     private var isActive = false
@@ -212,6 +261,7 @@ final class InputController: IMKInputController {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard !bypassSecureInput() else { return false }
         guard let event, let client = sender as? IMKTextInput else { return false }
+        if expandedTexts != nil, [.leftMouseDown, .rightMouseDown, .scrollWheel].contains(event.type), candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
         let composing = session?.preedit.text.isEmpty == false
@@ -277,10 +327,23 @@ final class InputController: IMKInputController {
         else if let chars = characters, chars.unicodeScalars.count == 1,
                 let scalar = chars.unicodeScalars.first, scalar.value < 128 { key = Int32(scalar.value) }
         else { return false }
-        if !ascii, !session.preedit.text.isEmpty {
-            if key == 0xff51 { key = 0xff55 }
-            else if key == 0xff53 { key = 0xff56 }
+        if let texts = expandedTexts {
+            if [0xff51, 0xff53, 0xff52, 0xff54].contains(key) {
+                expandedIndex = CandidateGrid.move(index: expandedIndex, count: texts.count, rows: expandedRows,
+                    horizontal: key == 0xff51 ? -1 : key == 0xff53 ? 1 : 0,
+                    vertical: key == 0xff52 ? -1 : key == 0xff54 ? 1 : 0)
+                renderExpanded(client)
+                return true
+            }
+            if key == 32 || key == 0xff0d { selectExpanded(expandedIndex, client: client); return true }
+            if key == 0xff1b { closeExpanded(); refresh(client, allowScoring: false); return true }
+            closeExpanded()
         }
+        if !ascii, !session.preedit.text.isEmpty, key == 0xff53 {
+            openExpanded(client)
+            return true
+        }
+        if !ascii, !session.preedit.text.isEmpty, key == 0xff51 { key = 0xff55 }
         if scoringEnabled, !session.preedit.text.isEmpty, [0xff52, 0xff54, 0xff50, 0xff57].contains(key) {
             scoringLockedPreedit = session.preedit.text
             scoringLockedOriginal = session.candidates.texts
@@ -324,6 +387,7 @@ final class InputController: IMKInputController {
         invalidateRecommendation(clearContext: true)
     }
     private func refresh(_ client: IMKTextInput, allowScoring: Bool = true) {
+        closeExpanded()
         guard !bypassSecureInput() else { return }
         invalidateRecommendation()
         guard let session else { return }
@@ -563,17 +627,24 @@ final class InputController: IMKInputController {
             }
             for _ in 0..<3 { key(previous, code: 126, flags: [.function]) }
             guard controller.displayedOriginal == first else { throw Engine.Failure.schemaUnavailable }
-            for page in 1...3 {
-                key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
-                guard controller.displayedOriginal == pages[page] else { throw Engine.Failure.schemaUnavailable }
-            }
-            for _ in 0..<3 { key(String(UnicodeScalar(NSLeftArrowFunctionKey)!), code: 123) }
-            guard controller.displayedOriginal == first else { throw Engine.Failure.schemaUnavailable }
-            key(next, code: 121)
-            guard controller.displayedOriginal == pages[1] else { throw Engine.Failure.schemaUnavailable }
+            key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            guard let all = controller.expandedTexts, all.count > 16, all.first == first.first else { throw Engine.Failure.schemaUnavailable }
+            key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
+            guard controller.expandedIndex == 8 else { throw Engine.Failure.schemaUnavailable }
+            key(String(UnicodeScalar(NSDownArrowFunctionKey)!), code: 125)
+            guard controller.expandedIndex == 9 else { throw Engine.Failure.schemaUnavailable }
+            key(String(UnicodeScalar(NSLeftArrowFunctionKey)!), code: 123)
+            guard controller.expandedIndex == 1 else { throw Engine.Failure.schemaUnavailable }
+            key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
+            let expected = all[9]
+            key(" ", code: 49)
+            guard controller.expandedTexts == nil else { throw Engine.Failure.schemaUnavailable }
+            if client.committed.isEmpty { key(" ", code: 49) }
+            guard client.committed.hasPrefix(expected) else { throw Engine.Failure.schemaUnavailable }
             controller.deactivateServer(client)
         }
-        print("PASS: biru full/Flypy continuous paging beyond page two, left/right arrows, Fn arrows and dedicated PageDown")
+        print("PASS: biru full/Flypy continuous paging beyond page two, expanded grid column/row movement and global candidate selection")
     }
 
     static func verifySecureInput(server: IMKServer) throws {

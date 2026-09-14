@@ -76,7 +76,48 @@ final class CandidatePanel {
     func contains(_ point: NSPoint) -> Bool { (panel.isVisible && panel.frame.contains(point)) || predictions.contains(point) }
     func hide() { panel.orderOut(nil); predictions.hide(); selection = nil }
     @objc private func choose(_ sender: NSButton) { selection?(sender.tag) }
+    func showExpanded(texts: [String], highlight: Int, caret: NSRect, rows: Int, loading: Bool, onSelect: @escaping (Int) -> Void) {
+        guard !texts.isEmpty else { return }
+        predictions.hide()
+        selection = onSelect
+        let visible = (NSScreen.screens.first { $0.frame.intersects(caret) } ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1000, height: 700)
+        let font = NSFont.systemFont(ofSize: 17)
+        let labels = texts.enumerated().map { "\($0.offset + 1)  \($0.element)" }
+        let width = min(260, max(120, labels.map { ($0 as NSString).size(withAttributes: [.font: font]).width + 24 }.max() ?? 120))
+        let rowHeight: CGFloat = min(34, max(18, (visible.height - 60) / CGFloat(rows)))
+        let height = CGFloat(rows) * rowHeight + 44
+        let columns = (texts.count + rows - 1) / rows
+        let viewportWidth = min(visible.width, min(900, CGFloat(columns) * width + 16))
+        let frame = CandidateGeometry.frame(size: NSSize(width: viewportWidth, height: height), caret: caret, visible: visible)
+        panel.setFrame(frame, display: false)
+        background.frame = NSRect(origin: .zero, size: frame.size)
+        scroll.frame = background.bounds
+        scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = false
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: max(viewportWidth, CGFloat(columns) * width + 16), height: height - 16))
+        let title = NSTextField(labelWithString: "全部候选 · Rime 顺序 · \(texts.count) 个\(loading ? " · 加载中" : "") · ←→ 切列 / ↑↓ 选词 / 空格或回车确认 / Esc 收起")
+        title.font = .systemFont(ofSize: 11)
+        title.frame = NSRect(x: 8, y: height - 38, width: document.frame.width - 16, height: 18)
+        document.addSubview(title)
+        let columnHighlight = NSView(frame: NSRect(x: 8 + CGFloat(highlight / rows) * width, y: 2, width: width - 4, height: CGFloat(rows) * rowHeight))
+        columnHighlight.wantsLayer = true
+        columnHighlight.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
+        columnHighlight.layer?.cornerRadius = 8
+        document.addSubview(columnHighlight)
+        buttons.removeAll()
+        for (i, label) in labels.enumerated() {
+            let button = CandidateButton(frame: NSRect(x: 8 + CGFloat(i / rows) * width, y: height - 40 - CGFloat(i % rows + 1) * rowHeight, width: width - 4, height: rowHeight - 2))
+            button.title = label; button.toolTip = texts[i]; button.font = font; button.isBordered = false
+            button.tag = i; button.target = self; button.action = #selector(choose(_:))
+            button.isCurrentCandidate = i == highlight
+            buttons.append(button); document.addSubview(button)
+        }
+        scroll.documentView = document
+        if buttons.indices.contains(highlight) { document.scrollToVisible(buttons[highlight].frame) }
+        panel.orderFrontRegardless()
+    }
     func show(texts: [String], highlight: Int, caret: NSRect, continuation: Bool = false, llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, llmTitle: String = "LLM top-k · 本轮预测", onSelect: ((Int) -> Void)? = nil) {
+        scroll.hasHorizontalScroller = false
         guard !texts.isEmpty else { hide(); return }
         selection = onSelect
         let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
@@ -165,6 +206,13 @@ final class CandidatePanel {
             chosen = nil
             _ = candidatePanel.verifyClick(on: 0)
             guard chosen == nil else { throw Engine.Failure.schemaUnavailable }
+            let all = (0..<19).map { "候选\($0)" }
+            candidatePanel.showExpanded(texts: all, highlight: 9, caret: NSRect(x: 300, y: 400, width: 1, height: 20), rows: 8, loading: false) { chosen = $0 }
+            guard candidatePanel.buttons.count == 19, candidatePanel.buttons[9].isCurrentCandidate,
+                  candidatePanel.buttons[0].frame.minX < candidatePanel.buttons[8].frame.minX,
+                  candidatePanel.buttons[8].frame.minY > candidatePanel.buttons[9].frame.minY,
+                  !candidatePanel.panel.canBecomeKey, candidatePanel.verifyClick(on: 18), chosen == 18 else { throw Engine.Failure.schemaUnavailable }
+            candidatePanel.hide()
         }
         print("PASS: native candidate buttons, horizontal/vertical presentation, non-key window and hidden callback invalidation")
     }
