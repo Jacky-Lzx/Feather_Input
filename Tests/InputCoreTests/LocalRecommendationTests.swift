@@ -71,8 +71,8 @@ final class LocalRecommendationTests: XCTestCase {
         let texts = ["幻境", "环境", "环径"]
         XCTAssertEqual(try LocalRecommendation.parseCandidateScores(data([
             ["id": 0, "text": "幻境", "score": -8.0], ["id": 2, "text": "环径", "score": -8.0],
-            ["id": 1, "text": "环境", "score": -2.0]
-        ]), candidates: texts), [.init(text: "环境", rank: 1), .init(text: "幻境", rank: 2), .init(text: "环径", rank: 3)])
+            ["id": 1, "text": "环境", "score": -2.0, "lm_score": -1.5]
+        ]), candidates: texts), [.init(text: "环境", rank: 1, modelScore: -1.5, fusionScore: -2), .init(text: "幻境", rank: 2, fusionScore: -8), .init(text: "环径", rank: 3, fusionScore: -8)])
         for row in [["id": 1, "text": "环境", "score": -1.0], ["id": 0, "text": "其他", "score": -1.0], ["id": 0, "text": "环境", "score": 1.0]] as [[String: Any]] {
             XCTAssertThrowsError(try LocalRecommendation.parseCandidateScores(data([row]), candidates: ["环境"]))
         }

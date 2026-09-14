@@ -331,6 +331,10 @@ final class InputController: IMKInputController {
         displayedOriginal = candidates.texts
         displayedPreedit = preedit.text
         displayedOrder = order
+        Task { @MainActor [predictions = frozenPrediction ?? [], scoring = scoringEnabled, delay = frozenPredictionDelayMS] in
+            CandidateDebugWindow.shared.update(preedit: preedit.text, rime: candidates.texts,
+                predictions: predictions, final: order.map { candidates.texts[$0] }, scoring: scoring, delay: delay)
+        }
         let reordered = order != Array(candidates.texts.indices)
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
                              highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
@@ -450,7 +454,12 @@ final class InputController: IMKInputController {
         let debug = NSMenuItem(title: "LLM 调试…", action: #selector(showLLMDebug(_:)), keyEquivalent: "")
         debug.target = self
         menu.addItem(debug)
+        let candidatesDebug = NSMenuItem(title: "候选对比调试…", action: #selector(showCandidateDebug(_:)), keyEquivalent: "")
+        candidatesDebug.target = self; menu.addItem(candidatesDebug)
         return menu
+    }
+    @objc private func showCandidateDebug(_ sender: Any?) {
+        Task { @MainActor in CandidateDebugWindow.shared.show() }
     }
     @objc private func showLLMDebug(_ sender: Any?) {
         Task { @MainActor in LLMDebugWindow.shared.show() }

@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try PersistentModeIndicator.verify()
                 try InputController.verifyMenuCommands(server: server!)
                 try CandidatePanel.verifyPresentation()
+                try CandidateDebugWindow.verify()
                 try InputController.verifyKeyboardAndClick(server: server!)
                 try InputController.verifyCapsLock(server: server!)
                 try InputController.verifyRecommendationLifecycle(server: server!)

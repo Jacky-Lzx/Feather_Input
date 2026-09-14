@@ -132,7 +132,11 @@ public enum LocalRecommendation {
     public struct RankedToken: Equatable {
         public let text: String
         public let rank: Int
-        public init(text: String, rank: Int) { self.text = text; self.rank = rank }
+        public let modelScore: Double?
+        public let fusionScore: Double?
+        public init(text: String, rank: Int, modelScore: Double? = nil, fusionScore: Double? = nil) {
+            self.text = text; self.rank = rank; self.modelScore = modelScore; self.fusionScore = fusionScore
+        }
     }
     public static func parseMLXRankedTokens(_ data: Data, context: String, count: Int = 5) throws -> [RankedToken] {
         struct Reply: Decodable {
@@ -160,7 +164,7 @@ public enum LocalRecommendation {
     }
     public static func parseCandidateScores(_ data: Data, candidates: [String]) throws -> [RankedToken] {
         struct Reply: Decodable {
-            struct Candidate: Decodable { let id: Int; let text: String; let score: Double }
+            struct Candidate: Decodable { let id: Int; let text: String; let score: Double; let lm_score: Double? }
             let candidates: [Candidate]
         }
         let reply = try JSONDecoder().decode(Reply.self, from: data)
@@ -170,7 +174,7 @@ public enum LocalRecommendation {
             throw Failure.invalidResponse
         }
         return reply.candidates.sorted { $0.score == $1.score ? $0.id < $1.id : $0.score > $1.score }
-            .enumerated().map { RankedToken(text: $0.element.text, rank: $0.offset + 1) }
+            .enumerated().map { RankedToken(text: $0.element.text, rank: $0.offset + 1, modelScore: $0.element.lm_score.flatMap { $0.isFinite ? $0 : nil }, fusionScore: $0.element.score) }
     }
     public static func scoreCandidates(context: String, preedit: String, candidates: [String]) async throws -> [RankedToken] {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:1235/score")!)

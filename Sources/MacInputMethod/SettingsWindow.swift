@@ -137,6 +137,7 @@ private struct SettingsView: View {
                 }
                 Toggle("LLM 调试模式（仅内存记录）", isOn: $debugLog.enabled)
                 Button("打开 LLM 调试窗口") { LLMDebugWindow.shared.show() }
+                Button("打开候选对比调试面板") { CandidateDebugWindow.shared.show() }
                 if !status.isEmpty { Text(status).font(.footnote).textSelection(.enabled) }
                 Text("词库和学习记录保存在本机。")
                     .font(.footnote).foregroundStyle(.secondary)
