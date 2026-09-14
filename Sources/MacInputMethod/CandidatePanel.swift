@@ -86,7 +86,8 @@ final class CandidatePanel {
         let range = CandidateGrid.pageRange(index: highlight, count: texts.count, rows: rows)
         let page = range.lowerBound / (rows * 5) + 1
         let pages = (texts.count + rows * 5 - 1) / (rows * 5)
-        let width = min((min(900, visible.width) - 16) / CGFloat(min(5, (texts.count + rows - 1) / rows)), max(120, labels.map { ($0 as NSString).size(withAttributes: [.font: font]).width + 24 }.max() ?? 120))
+        let measuredWidth = labels[range].map { ($0 as NSString).size(withAttributes: [.font: font]).width + 20 }.max() ?? 84
+        let width = min((visible.width - 16) / CGFloat(min(5, (texts.count + rows - 1) / rows)), min(128, max(84, measuredWidth)))
         let rowHeight: CGFloat = min(34, max(18, (visible.height - 60) / CGFloat(rows)))
         let height = CGFloat(rows) * rowHeight + 44
         let columns = min(5, (texts.count + rows - 1) / rows)
