@@ -25,7 +25,7 @@ public final class Session {
     private let id: UInt
     private let engine: Engine
     private var scheme: InputScheme
-    private var candidateCount = 5
+    public private(set) var candidateCount = 5
     fileprivate init(id: UInt, engine: Engine, scheme: InputScheme) { self.id = id; self.engine = engine; self.scheme = scheme }
     @discardableResult public func setCandidateCount(_ count: Int) -> Bool {
         let count = min(9, max(1, count))

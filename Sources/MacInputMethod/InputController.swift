@@ -19,7 +19,7 @@ final class InputController: IMKInputController {
     }
     private var expandedTexts: [String]?
     private var expandedIndex = 0
-    private let expandedRows = 8
+    private var expandedRows = 5
     private var expansionTask: Task<Void, Never>?
     private var expansionID = UUID()
     private func closeExpanded() {
@@ -45,6 +45,7 @@ final class InputController: IMKInputController {
     }
     private func openExpanded(_ client: IMKTextInput) {
         guard let session else { return }
+        expandedRows = session.candidateCount
         invalidateRecommendation()
         closeExpanded()
         expandedTexts = session.candidateSlice(offset: 0)
@@ -602,7 +603,7 @@ final class InputController: IMKInputController {
         let defaults = UserDefaults.standard
         let saved = ["scheme", "candidateCount", "aiCandidateScoringEnabled", "aiRerankingEnabled", "aiRecommendationEnabled"].map { ($0, defaults.object(forKey: $0)) }
         defer { for (key, value) in saved { if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) } } }
-        defaults.set(5, forKey: "candidateCount")
+        defaults.set(7, forKey: "candidateCount")
         for key in ["aiCandidateScoringEnabled", "aiRerankingEnabled", "aiRecommendationEnabled"] { defaults.set(false, forKey: key) }
         for scheme in [InputScheme.full, .flypy] {
             defaults.set(scheme.rawValue, forKey: "scheme")
@@ -617,6 +618,7 @@ final class InputController: IMKInputController {
             for (text, code) in [("b", UInt16(11)), ("i", 34), ("r", 15), ("u", 32)] { key(text, code: code) }
             guard controller.displayedOriginal.contains("比如") else { throw Engine.Failure.schemaUnavailable }
             let first = controller.displayedOriginal
+            guard first.count == 7 else { throw Engine.Failure.schemaUnavailable }
             let next = String(UnicodeScalar(NSPageDownFunctionKey)!)
             let previous = String(UnicodeScalar(NSPageUpFunctionKey)!)
             var pages = [first]
@@ -631,13 +633,13 @@ final class InputController: IMKInputController {
             RunLoop.current.run(until: Date().addingTimeInterval(0.15))
             guard let all = controller.expandedTexts, all.count > 16, all.first == first.first else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
-            guard controller.expandedIndex == 8 else { throw Engine.Failure.schemaUnavailable }
+            guard controller.expandedRows == 7, controller.expandedIndex == 7 else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSDownArrowFunctionKey)!), code: 125)
-            guard controller.expandedIndex == 9 else { throw Engine.Failure.schemaUnavailable }
+            guard controller.expandedIndex == 8 else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSLeftArrowFunctionKey)!), code: 123)
             guard controller.expandedIndex == 1 else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
-            let expected = all[9]
+            let expected = all[8]
             key(" ", code: 49)
             guard controller.expandedTexts == nil else { throw Engine.Failure.schemaUnavailable }
             if client.committed.isEmpty { key(" ", code: 49) }
