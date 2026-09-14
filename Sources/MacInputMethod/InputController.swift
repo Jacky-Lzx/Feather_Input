@@ -1,9 +1,22 @@
 import AppKit
+import Carbon
 import InputMethodKit
 import InputCore
 
 @objc(FeatherInputController)
 final class InputController: IMKInputController {
+    private var secureInputEnabled: () -> Bool = { IsSecureEventInputEnabled() }
+    private func bypassSecureInput() -> Bool {
+        guard secureInputEnabled() else { return false }
+        session?.clear()
+        _ = session?.takeCommit()
+        invalidateRecommendation(clearContext: true)
+        frozenPrediction = nil
+        candidatesPanel.hide()
+        modeIndicator.hide()
+        rightControlTap.reset()
+        return true
+    }
     private var session: Session?
     private let candidatesPanel = CandidatePanel()
     private let modeIndicator = ModeIndicator()
@@ -51,10 +64,11 @@ final class InputController: IMKInputController {
                 try await Task.sleep(nanoseconds: UInt64(timing.debounceMS) * 1_000_000)
                 try Task.checkCancellation()
                 let started = DispatchTime.now().uptimeNanoseconds
+                guard self?.secureInputEnabled() == false else { return }
                 let result = try await request(context, preedit, candidates)
                 let delay = Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
                 try Task.checkCancellation()
-                guard let self, let client, self.isActive, !self.ascii, self.scoringEnabled,
+                guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii, self.scoringEnabled,
                       self.recommendationVersion == version, self.recentContext == context, self.scoringSettings == settings,
                       self.session?.preedit.text == preedit, self.session?.candidates.texts == candidates,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
@@ -92,10 +106,11 @@ final class InputController: IMKInputController {
         rankingTask = Task { @MainActor [weak self, weak client] in
             do {
                 let started = DispatchTime.now().uptimeNanoseconds
+                guard self?.secureInputEnabled() == false else { return }
                 let tokens = try await request(context)
                 let delayMS = Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
                 try Task.checkCancellation()
-                guard let self, let client, self.isActive, !self.ascii, self.rankingEnabled,
+                guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii, self.rankingEnabled,
                       self.rankingVersion == version, self.recentContext == context,
                       self.session?.preedit.text.isEmpty == true, self.frozenPrediction == nil,
                       (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == count,
@@ -125,6 +140,7 @@ final class InputController: IMKInputController {
     }
     // Query after the host has processed navigation/deletion, before creating marked text.
     private func restoreContextBeforeComposition(_ client: IMKTextInput) {
+        guard !bypassSecureInput() else { return }
         let selection = client.selectedRange()
         guard selection.location != NSNotFound, selection.location >= 0 else { return }
         let count = min(selection.location, 320) // IMK ranges are UTF-16, not Swift characters.
@@ -194,6 +210,7 @@ final class InputController: IMKInputController {
         Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]).rawValue)
     }
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
+        guard !bypassSecureInput() else { return false }
         guard let event, let client = sender as? IMKTextInput else { return false }
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
@@ -286,6 +303,7 @@ final class InputController: IMKInputController {
         return handled
     }
     override func commitComposition(_ sender: Any!) {
+        guard !bypassSecureInput() else { return }
         guard let client = sender as? IMKTextInput, let session else { return }
         session.commit()
         refresh(client)
@@ -294,6 +312,7 @@ final class InputController: IMKInputController {
         invalidateRecommendation(clearContext: true)
     }
     private func refresh(_ client: IMKTextInput, allowScoring: Bool = true) {
+        guard !bypassSecureInput() else { return }
         invalidateRecommendation()
         guard let session else { return }
         let committed = session.takeCommit()
@@ -341,7 +360,7 @@ final class InputController: IMKInputController {
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
                              highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor,
                              llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS, llmTitle: scoringEnabled ? "Rime + LLM · 融合排序" : "LLM top-k · 本轮预测") { [weak self, weak client] index in
-            guard let self, self.isActive, let client, let session = self.session,
+            guard let self, !self.bypassSecureInput(), self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
                   self.displayedOrder == order else { return }
             self.rightControlTap.cancel()
@@ -366,12 +385,12 @@ final class InputController: IMKInputController {
             do {
                 try await Task.sleep(nanoseconds: 250_000_000)
                 try Task.checkCancellation()
-                guard self?.isActive == true, self?.recommendationVersion == version,
+                guard self?.secureInputEnabled() == false, self?.isActive == true, self?.recommendationVersion == version,
                       UserDefaults.standard.bool(forKey: "aiRecommendationEnabled"),
                       UserDefaults.standard.string(forKey: "aiModel") == model else { return }
                 let index = try await request(model, token, context, preedit, texts)
                 try Task.checkCancellation()
-                guard let self, self.isActive, !self.ascii, self.recommendationVersion == version,
+                guard let self, !self.bypassSecureInput(), self.isActive, !self.ascii, self.recommendationVersion == version,
                       UserDefaults.standard.bool(forKey: "aiRecommendationEnabled"),
                       UserDefaults.standard.string(forKey: "aiModel") == model,
                       self.session?.preedit.text == preedit, self.session?.candidates.texts == texts else { return }
@@ -398,7 +417,7 @@ final class InputController: IMKInputController {
             do {
                 try await Task.sleep(nanoseconds: 400_000_000)
                 try Task.checkCancellation()
-                guard self?.isActive == true, self?.recommendationVersion == version,
+                guard self?.secureInputEnabled() == false, self?.isActive == true, self?.recommendationVersion == version,
                       UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
                       UserDefaults.standard.string(forKey: "aiModel") == savedModel,
                       UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
@@ -406,7 +425,7 @@ final class InputController: IMKInputController {
                 let texts = try await request(model, token, context)
                 guard let text = texts.first else { return }
                 try Task.checkCancellation()
-                guard let self, let client, self.isActive, !self.ascii,
+                guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii,
                       self.recommendationVersion == version, self.recentContext == context,
                       self.session?.preedit.text.isEmpty == true,
                       UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
@@ -421,7 +440,7 @@ final class InputController: IMKInputController {
                 guard let anchor else { return }
                 self.continuationText = text
                 self.candidatesPanel.show(texts: texts, highlight: -1, caret: anchor, continuation: true) { [weak self, weak client] index in
-                    guard let self, let client, self.isActive, !self.ascii, self.recommendationVersion == version,
+                    guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii, self.recommendationVersion == version,
                           self.continuationText == text, self.session?.preedit.text.isEmpty == true,
                           UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
                           UserDefaults.standard.string(forKey: "aiModel") == savedModel,
@@ -501,6 +520,28 @@ final class InputController: IMKInputController {
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
         modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
+    }
+
+    static func verifySecureInput(server: IMKServer) throws {
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(client)
+        controller.ascii = false
+        controller.session?.setASCII(false)
+        controller.session?.process(110)
+        controller.recentContext = "synthetic context"
+        controller.secureInputEnabled = { true }
+        for (text, code) in [("u", UInt16(32)), ("a", UInt16(0)), ("1", UInt16(18)), ("", UInt16(51))] {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code)!
+            guard !controller.handle(event, client: client) else { throw Engine.Failure.schemaUnavailable }
+        }
+        controller.commitComposition(client)
+        guard client.committed.isEmpty, client.marked.isEmpty, controller.recentContext.isEmpty,
+              controller.session?.preedit.text.isEmpty == true, !controller.ascii else { throw Engine.Failure.schemaUnavailable }
+        controller.secureInputEnabled = { false }
+        controller.deactivateServer(client)
+        print("PASS: secure input passes u/letters/digits/delete to host, discards composition without insertion")
     }
 
     static func verifyScoringLifecycle(server: IMKServer) throws {
