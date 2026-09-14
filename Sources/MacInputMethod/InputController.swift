@@ -28,7 +28,8 @@ final class InputController: IMKInputController {
     private var scoredOriginal: [String] = []
     private var scoredContext = ""
     private var scoredSettings = ""
-    private var scoringSettings: String { "\(UserDefaults.standard.object(forKey: "aiFusionWeight") as? Double ?? 0.35)|\(UserDefaults.standard.string(forKey: "aiScoreNormalization") ?? "character")" }
+    private var scoringTiming: ScoringTiming { ScoringTiming() }
+    private var scoringSettings: String { "\(UserDefaults.standard.object(forKey: "aiFusionWeight") as? Double ?? 0.35)|\(UserDefaults.standard.string(forKey: "aiScoreNormalization") ?? "character")|\(scoringTiming.debounceMS)|\(scoringTiming.responseLimitMS)" }
     private var scoringLockedPreedit = ""
     private var scoringLockedOriginal: [String] = []
     private var requestScoring: (String, String, [String]) async throws -> [LocalRecommendation.RankedToken] = {
@@ -39,6 +40,7 @@ final class InputController: IMKInputController {
               scoredPreedit != preedit || scoredOriginal != candidates || scoredContext != recentContext || scoredSettings != scoringSettings else { return }
         guard scoringLockedPreedit != preedit || scoringLockedOriginal != candidates else { return }
         let settings = scoringSettings
+        let timing = scoringTiming
         let version = recommendationVersion
         let context = recentContext
         let range = client.selectedRange()
@@ -46,7 +48,7 @@ final class InputController: IMKInputController {
         let request = requestScoring
         recommendationTask = Task { @MainActor [weak self, weak client] in
             do {
-                try await Task.sleep(nanoseconds: 120_000_000)
+                try await Task.sleep(nanoseconds: UInt64(timing.debounceMS) * 1_000_000)
                 try Task.checkCancellation()
                 let started = DispatchTime.now().uptimeNanoseconds
                 let result = try await request(context, preedit, candidates)
@@ -56,7 +58,7 @@ final class InputController: IMKInputController {
                       self.recommendationVersion == version, self.recentContext == context, self.scoringSettings == settings,
                       self.session?.preedit.text == preedit, self.session?.candidates.texts == candidates,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
-                      NSEqualRanges(client.selectedRange(), range), delay <= 700,
+                      NSEqualRanges(client.selectedRange(), range), delay <= timing.responseLimitMS,
                       !self.candidatesPanel.contains(NSEvent.mouseLocation) else { return }
                 self.scoredPreedit = preedit
                 self.scoredOriginal = candidates
@@ -503,12 +505,13 @@ final class InputController: IMKInputController {
 
     static func verifyScoringLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard
-        let saved = ["aiCandidateScoringEnabled", "scheme"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["aiCandidateScoringEnabled", "scheme", "debugScoringTimingEnabled"].map { ($0, defaults.object(forKey: $0)) }
         defer {
             for (key, value) in saved {
                 if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
             }
         }
+        defaults.set(false, forKey: "debugScoringTimingEnabled")
         defaults.set(true, forKey: "aiCandidateScoringEnabled")
         defaults.set(InputScheme.full.rawValue, forKey: "scheme")
         let client = SmokeTextClient()

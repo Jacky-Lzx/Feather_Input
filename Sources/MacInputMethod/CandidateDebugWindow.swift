@@ -76,6 +76,9 @@ final class CandidateDebugWindow: ObservableObject {
 
 private struct CandidateDebugView: View {
     @ObservedObject var log: CandidateDebugWindow
+    @AppStorage("debugScoringTimingEnabled") private var timingEnabled = false
+    @AppStorage("debugScoringDebounceMS") private var debounceMS = 120
+    @AppStorage("debugScoringResponseLimitMS") private var responseLimitMS = 700
     private func column(_ title: String, rows: [String]) -> some View {
         VStack(alignment: .leading) {
             Text(title).font(.headline)
@@ -97,6 +100,14 @@ private struct CandidateDebugView: View {
                 Spacer()
                 Button("清空") { log.clear() }
             }
+            Toggle("自定义评分时序", isOn: $timingEnabled)
+            HStack(spacing: 24) {
+                Stepper("请求前停顿：\(debounceMS) ms", value: $debounceMS, in: 0...2000, step: 10)
+                Stepper("响应采用时限：\(responseLimitMS) ms", value: $responseLimitMS, in: 50...2000, step: 50)
+                Button("恢复默认") { debounceMS = 120; responseLimitMS = 700; timingEnabled = false }
+            }.disabled(!timingEnabled)
+            Text("时限从请求发出开始计算，不包含停顿；仅影响候选评分模式。关闭自定义恢复 120 / 700 ms。设置保存到本机，与是否记录候选无关。")
+                .font(.caption).foregroundStyle(.secondary)
             Text("拼音：\(log.preedit.isEmpty ? "—" : log.preedit)").font(.headline)
             Text(log.detail).font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 16) {
