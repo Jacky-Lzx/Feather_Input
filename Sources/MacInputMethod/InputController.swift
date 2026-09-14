@@ -264,11 +264,23 @@ final class InputController: IMKInputController {
             // Caps Lock controls language in Feather; Shift still controls letter case.
             characters = flags.contains(.shift) ? chars.uppercased() : chars.lowercased()
         }
-        let key: Int32
-        if let value = special[event.keyCode] { key = value }
+        // Fn+arrows may retain the physical arrow keyCode while characters carry
+        // the logical Home/End/PageUp/PageDown function key.
+        let navigation: [UInt32: Int32] = [UInt32(NSHomeFunctionKey): 0xff50,
+            UInt32(NSEndFunctionKey): 0xff57, UInt32(NSPageUpFunctionKey): 0xff55,
+            UInt32(NSPageDownFunctionKey): 0xff56]
+        let logicalNavigation = characters?.unicodeScalars.count == 1
+            ? characters?.unicodeScalars.first.flatMap { navigation[$0.value] } : nil
+        var key: Int32
+        if let value = logicalNavigation { key = value }
+        else if let value = special[event.keyCode] { key = value }
         else if let chars = characters, chars.unicodeScalars.count == 1,
                 let scalar = chars.unicodeScalars.first, scalar.value < 128 { key = Int32(scalar.value) }
         else { return false }
+        if !ascii, !session.preedit.text.isEmpty {
+            if key == 0xff51 { key = 0xff55 }
+            else if key == 0xff53 { key = 0xff56 }
+        }
         if scoringEnabled, !session.preedit.text.isEmpty, [0xff52, 0xff54, 0xff50, 0xff57].contains(key) {
             scoringLockedPreedit = session.preedit.text
             scoringLockedOriginal = session.candidates.texts
@@ -520,6 +532,48 @@ final class InputController: IMKInputController {
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
         modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
+    }
+
+    static func verifyRepeatedPaging(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let saved = ["scheme", "candidateCount", "aiCandidateScoringEnabled", "aiRerankingEnabled", "aiRecommendationEnabled"].map { ($0, defaults.object(forKey: $0)) }
+        defer { for (key, value) in saved { if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) } } }
+        defaults.set(5, forKey: "candidateCount")
+        for key in ["aiCandidateScoringEnabled", "aiRerankingEnabled", "aiRecommendationEnabled"] { defaults.set(false, forKey: key) }
+        for scheme in [InputScheme.full, .flypy] {
+            defaults.set(scheme.rawValue, forKey: "scheme")
+            let client = SmokeTextClient()
+            guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+            controller.activateServer(client)
+            func key(_ text: String, code: UInt16, flags: NSEvent.ModifierFlags = []) {
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                    windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code)!
+                _ = controller.handle(event, client: client)
+            }
+            for (text, code) in [("b", UInt16(11)), ("i", 34), ("r", 15), ("u", 32)] { key(text, code: code) }
+            guard controller.displayedOriginal.contains("比如") else { throw Engine.Failure.schemaUnavailable }
+            let first = controller.displayedOriginal
+            let next = String(UnicodeScalar(NSPageDownFunctionKey)!)
+            let previous = String(UnicodeScalar(NSPageUpFunctionKey)!)
+            var pages = [first]
+            for _ in 0..<3 {
+                key(next, code: 125, flags: [.function])
+                guard controller.displayedOriginal != pages.last! else { throw Engine.Failure.schemaUnavailable }
+                pages.append(controller.displayedOriginal)
+            }
+            for _ in 0..<3 { key(previous, code: 126, flags: [.function]) }
+            guard controller.displayedOriginal == first else { throw Engine.Failure.schemaUnavailable }
+            for page in 1...3 {
+                key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
+                guard controller.displayedOriginal == pages[page] else { throw Engine.Failure.schemaUnavailable }
+            }
+            for _ in 0..<3 { key(String(UnicodeScalar(NSLeftArrowFunctionKey)!), code: 123) }
+            guard controller.displayedOriginal == first else { throw Engine.Failure.schemaUnavailable }
+            key(next, code: 121)
+            guard controller.displayedOriginal == pages[1] else { throw Engine.Failure.schemaUnavailable }
+            controller.deactivateServer(client)
+        }
+        print("PASS: biru full/Flypy continuous paging beyond page two, left/right arrows, Fn arrows and dedicated PageDown")
     }
 
     static func verifySecureInput(server: IMKServer) throws {
