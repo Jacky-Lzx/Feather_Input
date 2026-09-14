@@ -123,6 +123,8 @@ final class InputController: IMKInputController {
     private var displayedPreedit = ""
     private var displayedHighlight = 0
     private let generatedPanel = CandidatePanel()
+    private var chooseGenerated: ((Int, IMKTextInput) -> Bool)?
+    private var consumedGeneratedKey: UInt16?
     private var generationTask: Task<Void, Never>?
     private var generationEnabled: Bool { UserDefaults.standard.object(forKey: "aiPinyinGenerationEnabled") as? Bool ?? true }
     private var requestGeneration: (String, String, String) async throws -> LocalRecommendation.GeneratedCandidates = {
@@ -160,24 +162,31 @@ final class InputController: IMKInputController {
                 let suggestions = reply.candidates.map(\.text).filter { !existing.contains($0) }
                 CandidateDebugWindow.shared.updateGeneration(input: raw, result: reply, delay: delay)
                 guard !suggestions.isEmpty else { return }
+                self.chooseGenerated = { [weak self, weak client] index, target in
+                    guard let self, let client, target === client, !self.bypassSecureInput(), self.isActive, !self.ascii,
+                          self.generatedPanel.isVisible, self.generationEnabled, self.recommendationVersion == version,
+                          suggestions.indices.contains(index), session.rawInput == raw,
+                          session.preedit.text == preedit, self.recentContext == context,
+                          self.scheme.rawValue == schema, NSEqualRanges(client.selectedRange(), range),
+                          NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground else { return false }
+                    // Generation covers the entire raw composition. Never use a Rime candidate ID.
+                    let text = suggestions[index]
+                    session.clear()
+                    _ = session.takeCommit()
+                    self.invalidateRecommendation()
+                    self.frozenPrediction = nil
+                    self.scoredPreedit = ""; self.scoredOriginal = []; self.scoredContext = ""
+                    self.scoringLockedPreedit = ""; self.scoringLockedOriginal = []
+                    self.recentContext = String((context + text).suffix(80))
+                    client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+                    self.refresh(client)
+                    return true
+                }
                 self.generatedPanel.show(texts: suggestions, highlight: -1,
                     caret: self.lastCaret ?? self.candidatesPanel.frame, clientLevel: Int(client.windowLevel()),
-                    beside: self.candidatesPanel.companionAnchor, continuation: true) { [weak self, weak client] index in
-                        guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii,
-                              self.generationEnabled, self.recommendationVersion == version,
-                              suggestions.indices.contains(index), session.rawInput == raw,
-                              session.preedit.text == preedit, self.recentContext == context,
-                              self.scheme.rawValue == schema, NSEqualRanges(client.selectedRange(), range),
-                              NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground else { return }
-                        // Generation covers the entire raw composition. Never use a Rime candidate ID.
-                        let text = suggestions[index]
-                        session.clear()
-                        _ = session.takeCommit()
-                        self.invalidateRecommendation()
-                        self.frozenPrediction = nil
-                        self.recentContext = String((context + text).suffix(80))
-                        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-                        self.refresh(client)
+                    beside: self.candidatesPanel.companionAnchor, continuation: true, optionNumbers: true) { [weak self, weak client] index in
+                        guard let client else { return }
+                        _ = self?.chooseGenerated?(index, client)
                     }
             } catch { /* Optional suggestions never block ordinary input. */ }
         }
@@ -321,7 +330,7 @@ final class InputController: IMKInputController {
     }
     private func invalidateRecommendation(clearContext: Bool = false) {
         generationTask?.cancel(); generationTask = nil
-        generatedPanel.hide()
+        generatedPanel.hide(); chooseGenerated = nil
         Task { @MainActor in CandidateDebugWindow.shared.clearGeneration() }
         recommendationTask?.cancel()
         recommendationTask = nil
@@ -373,6 +382,30 @@ final class InputController: IMKInputController {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard !bypassSecureInput() else { return false }
         guard let event, let client = sender as? IMKTextInput else { return false }
+        let shortcutFlags = event.modifierFlags.intersection([.command, .control, .option, .shift, .function])
+        let finishedGeneratedShortcut = consumedGeneratedKey != nil && event.type == .flagsChanged &&
+            [UInt16(58), 61].contains(event.keyCode) && shortcutFlags.isEmpty
+        if shortcutFlags != .option { consumedGeneratedKey = nil }
+        if finishedGeneratedShortcut {
+            rightControlTap.cancel()
+            return false
+        }
+        if event.type == .keyDown, shortcutFlags == .option {
+            if event.isARepeat, consumedGeneratedKey == event.keyCode { return true }
+            consumedGeneratedKey = nil
+            if generatedPanel.isVisible, let index = [UInt16(18): 0, 19: 1, 20: 2, 83: 0, 84: 1, 85: 2][event.keyCode] {
+                _ = chooseGenerated?(index, client)
+                consumedGeneratedKey = event.keyCode
+                rightControlTap.cancel()
+                return true
+            }
+        }
+        // Pressing/releasing Option alone must preserve the suggestions until the digit arrives.
+        if event.type == .flagsChanged, [UInt16(58), 61].contains(event.keyCode),
+           generatedPanel.isVisible, shortcutFlags == .option || shortcutFlags.isEmpty {
+            rightControlTap.cancel()
+            return false
+        }
         if [.leftMouseDown, .rightMouseDown, .scrollWheel].contains(event.type), generatedPanel.contains(NSEvent.mouseLocation) { return false }
         if expandedTexts != nil, [.leftMouseDown, .rightMouseDown, .scrollWheel].contains(event.type), candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
@@ -819,32 +852,53 @@ final class InputController: IMKInputController {
                 guard context == "落霞与", schema == mode.rawValue else { throw Engine.Failure.schemaUnavailable }
                 receivedInput = raw
                 try? await Task.sleep(nanoseconds: 50_000_000)
-                return try LocalRecommendation.parseGenerated(Data("{\"candidates\":[{\"text\":\"孤鹜\",\"score\":-1}],\"syllables\":[[\"gu\",\"wu\"]],\"elapsed_ms\":20,\"truncated\":false}".utf8))
+                return try LocalRecommendation.parseGenerated(Data("{\"candidates\":[{\"text\":\"孤鹜\",\"score\":-1},{\"text\":\"孤骛\",\"score\":-2},{\"text\":\"孤鶩\",\"score\":-3}],\"syllables\":[[\"gu\",\"wu\"]],\"elapsed_ms\":20,\"truncated\":false}".utf8))
             }
-            func key(_ text: String, code: UInt16 = 0) {
-                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            func key(_ text: String, code: UInt16 = 0, flags: NSEvent.ModifierFlags = [], repeating: Bool = false) {
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
                     windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
-                    isARepeat: false, keyCode: code)!
+                    isARepeat: repeating, keyCode: code)!
                 _ = controller.handle(event, client: client)
             }
             for c in "guwu" { key(String(c)) }
             RunLoop.current.run(until: Date().addingTimeInterval(0.45))
             guard receivedInput == "guwu", controller.generatedPanel.isVisible, controller.generatedPanel.verifyClick(on: 0), client.committed == "孤鹜",
                   client.marked.isEmpty, controller.session?.rawInput.isEmpty == true else { throw Engine.Failure.schemaUnavailable }
+            func option(_ pressed: Bool) {
+                let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: pressed ? .option : [], timestamp: 0,
+                    windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 58)!
+                _ = controller.handle(event, client: client)
+            }
+            for (code, expected) in [(UInt16(18), "孤鹜"), (UInt16(19), "孤骛"), (UInt16(20), "孤鶩")] {
+                controller.recentContext = "落霞与"
+                for c in "guwu" { key(String(c)) }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.45))
+                option(true)
+                guard controller.generatedPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+                let before = client.committed
+                key("™", code: code, flags: .option)
+                guard client.committed == before + expected, client.marked.isEmpty,
+                      !controller.generatedPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+                key("™", code: code, flags: .option, repeating: true)
+                guard client.committed == before + expected else { throw Engine.Failure.schemaUnavailable }
+                option(false)
+                guard controller.recentContext == "落霞与" + expected else { throw Engine.Failure.schemaUnavailable }
+            }
+            let beforeCancellation = client.committed
             controller.recentContext = "落霞与"
             for c in "guwu" { key(String(c)) }
             RunLoop.current.run(until: Date().addingTimeInterval(0.14))
             key("", code: 51)
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             _ = controller.generatedPanel.verifyClick(on: 0)
-            guard !controller.generatedPanel.isVisible, client.committed == "孤鹜" else { throw Engine.Failure.schemaUnavailable }
+            guard !controller.generatedPanel.isVisible, client.committed == beforeCancellation else { throw Engine.Failure.schemaUnavailable }
             controller.secureInputEnabled = { true }
             key("a")
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
             guard !controller.generatedPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
             controller.deactivateServer(client)
         }
-        print("PASS: full/Flypy raw-input generation, click commits only generated text, stale and secure replies rejected")
+        print("PASS: full/Flypy raw-input generation, click/Option 1–3 commit generated text, modifier press preserved, repeats and stale/secure replies rejected")
     }
     static func verifyScoringLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard

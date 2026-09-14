@@ -65,7 +65,7 @@ private struct SettingsView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 Divider()
                 Toggle("根据上下文和拼音生成新词（实验）", isOn: $pinyinGenerationEnabled)
-                Text("完整输入 2–6 个音节后，侧边显示最多 3 个 AI 建议，点击上屏。支持全拼、小鹤双拼；不占用原候选数字键。")
+                Text("完整输入 2–6 个音节后，侧边显示最多 3 个 AI 建议，按 ⌥1／⌥2／⌥3 或点击上屏。支持全拼、小鹤双拼；普通数字键选择 Rime 候选。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Toggle("用 MLX 给当前拼音候选打分", isOn: $scoringEnabled)
                 HStack {
