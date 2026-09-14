@@ -1,6 +1,13 @@
 import XCTest
 @testable import InputCore
 final class CandidateGridTests: XCTestCase {
+    func testNumbersReferToHighlightedColumn() {
+        XCTAssertEqual(CandidateGrid.numberedIndex(number: 3, highlight: 8, count: 80, rows: 7), 9)
+        XCTAssertEqual(CandidateGrid.numberedIndex(number: 7, highlight: 35, count: 80, rows: 7), 41)
+        XCTAssertNil(CandidateGrid.numberedIndex(number: 8, highlight: 8, count: 80, rows: 7))
+        XCTAssertNil(CandidateGrid.numberedIndex(number: 3, highlight: 14, count: 16, rows: 7))
+        XCTAssertEqual(CandidateGrid.numberedIndex(number: 2, highlight: 14, count: 16, rows: 7), 15)
+    }
     func testFiveColumnPages() {
         let next = CandidateGrid.move(index: 35, count: 83, rows: 8, horizontal: 1, vertical: 0)
         XCTAssertEqual(next, 43)

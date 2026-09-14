@@ -336,6 +336,13 @@ final class InputController: IMKInputController {
                 renderExpanded(client)
                 return true
             }
+            if (49...57).contains(key), !flags.contains(.shift) {
+                if let index = CandidateGrid.numberedIndex(number: Int(key - 48), highlight: expandedIndex,
+                    count: texts.count, rows: expandedRows) {
+                    selectExpanded(index, client: client)
+                }
+                return true // An unassigned number must not select from the ordinary Rime page.
+            }
             if key == 32 || key == 0xff0d { selectExpanded(expandedIndex, client: client); return true }
             if key == 0xff1b { closeExpanded(); refresh(client, allowScoring: false); return true }
             closeExpanded()
@@ -639,8 +646,8 @@ final class InputController: IMKInputController {
             key(String(UnicodeScalar(NSLeftArrowFunctionKey)!), code: 123)
             guard controller.expandedIndex == 1 else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSRightArrowFunctionKey)!), code: 124)
-            let expected = all[8]
-            key(" ", code: 49)
+            let expected = all[9]
+            key("3", code: 20)
             guard controller.expandedTexts == nil else { throw Engine.Failure.schemaUnavailable }
             if client.committed.isEmpty { key(" ", code: 49) }
             guard client.committed.hasPrefix(expected) else { throw Engine.Failure.schemaUnavailable }
