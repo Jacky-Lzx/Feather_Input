@@ -486,7 +486,8 @@ final class InputController: IMKInputController {
         invalidateRecommendation(clearContext: changesPosition)
         if event.type == .flagsChanged {
             if event.keyCode == 62 {
-                rightControlHeld = event.modifierFlags.contains(.control)
+                rightControlHeld = event.modifierFlags.contains(.control) ||
+                    event.modifierFlags.rawValue & RightControlTap.rightControl != 0
                 if composing { rightControlTap.cancel(); return true }
             }
             if event.keyCode == 57 || event.keyCode == 0 {
