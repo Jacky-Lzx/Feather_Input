@@ -9,9 +9,13 @@ final class SmokeTextClient: NSObject, IMKTextInput {
     var caretRectangle = NSRect(x: 300, y: 400, width: 1, height: 20)
     var exposesDocument = false
     var documentSelection: NSRange?
+    var textInputUnavailable = false
     func insertText(_ string: Any!, replacementRange: NSRange) { committed += string as? String ?? ""; marked = "" }
     func setMarkedText(_ string: Any!, selectionRange: NSRange, replacementRange: NSRange) { if !ignoresMarkedText { marked = string as? String ?? "" } }
-    func selectedRange() -> NSRange { documentSelection ?? NSRange(location: committed.utf16.count, length: 0) }
+    func selectedRange() -> NSRange {
+        if textInputUnavailable { return NSRange(location: NSNotFound, length: 0) }
+        return documentSelection ?? NSRange(location: committed.utf16.count, length: 0)
+    }
     func markedRange() -> NSRange { NSRange(location: committed.utf16.count, length: marked.utf16.count) }
     func attributedSubstring(from range: NSRange) -> NSAttributedString! {
         guard exposesDocument, range.location >= 0, range.location <= committed.utf16.count,

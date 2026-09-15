@@ -416,6 +416,27 @@ final class InputController: IMKInputController {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard !bypassSecureInput() else { return false }
         guard let event, let client = sender as? IMKTextInput else { return false }
+        // Some applications activate an input source for key handling even when
+        // the focused view is not text-editable. Do not start a Rime composition
+        // in that case; IMK reports this with an unavailable selection range.
+        if event.type == .keyDown, event.keyCode == 53 {
+            guard session?.preedit.text.isEmpty == false else { return false }
+            session?.clear()
+            _ = session?.takeCommit()
+            invalidateRecommendation(clearContext: true)
+            candidatesPanel.hide()
+            generatedPanel.hide()
+            modeIndicator.hide()
+            return true
+        }
+        if event.type == .keyDown, !textInputAvailable(client),
+           event.modifierFlags.intersection([.command, .control, .option, .function]).isEmpty,
+           event.keyCode != 53 {
+            invalidateRecommendation(clearContext: true)
+            candidatesPanel.hide()
+            generatedPanel.hide()
+            return false
+        }
         if event.type == .keyDown || event.type == .flagsChanged {
             cancelFocusIndicator()
             if event.type == .keyDown { modeIndicator.hide() }
@@ -567,6 +588,12 @@ final class InputController: IMKInputController {
             return true
         }
         return handled
+    }
+
+    private func textInputAvailable(_ client: IMKTextInput) -> Bool {
+        let range = client.selectedRange()
+        guard range.location != NSNotFound, range.location >= 0, range.length >= 0 else { return false }
+        return client.supportsUnicode()
     }
     override func commitComposition(_ sender: Any!) {
         guard !bypassSecureInput() else { return }
@@ -965,6 +992,26 @@ final class InputController: IMKInputController {
             controller.deactivateServer(client)
         }
         print("PASS: non-inline clients show composition with/without candidates; Return, Backspace, Escape and secure hiding")
+    }
+
+    static func verifyNoTextField(server: IMKServer) throws {
+        let client = SmokeTextClient()
+        client.textInputUnavailable = true
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+        controller.secureInputEnabled = { false }
+        controller.activateServer(client)
+        func key(_ text: String, code: UInt16 = 0) {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
+                isARepeat: false, keyCode: code)!
+            _ = controller.handle(event, client: client)
+        }
+        for c in "abc" { key(String(c)) }
+        guard client.committed.isEmpty, client.marked.isEmpty,
+              controller.session?.preedit.text.isEmpty == true,
+              !controller.candidatesPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: non-text clients do not open composition; Escape and candidate windows remain app-owned")
     }
     static func verifyGenerationLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard
