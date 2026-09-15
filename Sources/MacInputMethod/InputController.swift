@@ -482,7 +482,9 @@ final class InputController: IMKInputController {
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
         let composing = session?.preedit.text.isEmpty == false
-        let changesPosition = event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || (!composing && [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode))
+        let expandedNavigation = expandedTexts != nil &&
+            (event.type == .flagsChanged || [UInt16(4), 37, 38, 40].contains(event.keyCode))
+        let changesPosition = !expandedNavigation && (event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || (!composing && [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode)))
         invalidateRecommendation(clearContext: changesPosition)
         if event.type == .flagsChanged {
             if event.keyCode == 62 {
