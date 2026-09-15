@@ -525,14 +525,23 @@ final class InputController: IMKInputController {
         let vimModifierDown = rightControlHeld || capsLockHeld ||
             flags.contains(.capsLock) ||
             event.modifierFlags.rawValue & RightControlTap.rightControl != 0
-        if composing, vimModifierDown,
-           let character = event.characters?.lowercased(), character.count == 1 {
-            let vimKey: Int32? = switch character {
+        if composing, vimModifierDown {
+            // Control changes NSEvent.characters (Ctrl-H is backspace, Ctrl-J
+            // is newline, etc.), so use the physical macOS keyCode as the
+            // fallback. This is also what lets right-Control + h work in Kitty.
+            let character = event.characters?.lowercased()
+            let vimKey: Int32? = switch event.keyCode {
+            case 4: 0xff51  // h / left
+            case 38: 0xff54 // j / down
+            case 40: 0xff52 // k / up
+            case 37: 0xff53 // l / right
+            default: switch character {
             case "h": 0xff51 // left
             case "j": 0xff54 // down
             case "k": 0xff52 // up
             case "l": 0xff53 // right
             default: nil
+            }
             }
             if let vimKey {
                 if let texts = expandedTexts {
