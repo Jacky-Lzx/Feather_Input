@@ -536,6 +536,11 @@ final class InputController: IMKInputController {
                         horizontal: vimKey == 0xff51 ? -1 : vimKey == 0xff53 ? 1 : 0,
                         vertical: vimKey == 0xff52 ? -1 : vimKey == 0xff54 ? 1 : 0)
                     renderExpanded(client)
+                } else if vimKey == 0xff51 || vimKey == 0xff53 {
+                    // In the ordinary candidate list, h/l are the Vim-style
+                    // command to open the full candidate grid. Once expanded,
+                    // they are handled above as horizontal column movement.
+                    openExpanded(client)
                 } else {
                     _ = session.process(vimKey)
                     refresh(client, allowScoring: false)
