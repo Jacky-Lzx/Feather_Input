@@ -6,6 +6,7 @@ final class SmokeTextClient: NSObject, IMKTextInput {
     var committed = ""
     var marked = ""
     var ignoresMarkedText = false
+    var caretRectangle = NSRect(x: 300, y: 400, width: 1, height: 20)
     var exposesDocument = false
     var documentSelection: NSRange?
     func insertText(_ string: Any!, replacementRange: NSRange) { committed += string as? String ?? ""; marked = "" }
@@ -20,7 +21,7 @@ final class SmokeTextClient: NSObject, IMKTextInput {
     func length() -> Int { committed.utf16.count + marked.utf16.count }
     func characterIndex(for point: NSPoint, tracking mappingMode: IMKLocationToOffsetMappingMode, inMarkedRange: UnsafeMutablePointer<ObjCBool>!) -> Int { 0 }
     func attributes(forCharacterIndex index: Int, lineHeightRectangle rect: UnsafeMutablePointer<NSRect>!) -> [AnyHashable: Any]! {
-        rect.pointee = NSRect(x: 300, y: 400, width: 1, height: 20)
+        rect.pointee = caretRectangle
         return [:]
     }
     func validAttributesForMarkedText() -> [Any]! { [] }

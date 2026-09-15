@@ -8,6 +8,7 @@ final class InputController: IMKInputController {
     private var secureInputEnabled: () -> Bool = { IsSecureEventInputEnabled() }
     private func bypassSecureInput() -> Bool {
         guard secureInputEnabled() else { return false }
+        cancelFocusIndicator()
         session?.clear()
         _ = session?.takeCommit()
         invalidateRecommendation(clearContext: true)
@@ -105,6 +106,36 @@ final class InputController: IMKInputController {
     private var session: Session?
     private let candidatesPanel = CandidatePanel()
     private let modeIndicator = ModeIndicator()
+    private var focusIndicatorTask: Task<Void, Never>?
+    private var focusIndicatorVersion = UUID()
+    private func cancelFocusIndicator() {
+        focusIndicatorTask?.cancel(); focusIndicatorTask = nil
+        focusIndicatorVersion = UUID()
+    }
+    private func scheduleFocusIndicator(_ client: IMKTextInput) {
+        cancelFocusIndicator()
+        modeIndicator.hide()
+        let version = focusIndicatorVersion
+        let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        focusIndicatorTask = Task { @MainActor [weak self, weak client] in
+            // Focus callbacks can precede the application's caret layout. Retry briefly.
+            for delay in [80, 120, 200] {
+                do { try await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000) } catch { return }
+                guard let self, let client, !Task.isCancelled, self.isActive,
+                      self.focusIndicatorVersion == version, !self.secureInputEnabled(),
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground else { return }
+                var caret = NSRect.zero
+                let selection = client.selectedRange()
+                _ = client.attributes(forCharacterIndex: selection.location == NSNotFound ? 0 : selection.location,
+                                      lineHeightRectangle: &caret)
+                guard caret.origin.x.isFinite, caret.origin.y.isFinite, caret.width.isFinite,
+                      caret.height.isFinite, caret.height > 0 else { continue }
+                self.lastCaret = caret
+                self.modeIndicator.show(ascii: self.ascii, caret: caret, clientLevel: Int(client.windowLevel()))
+                return
+            }
+        }
+    }
     private var ascii = false
     private var recommendationTask: Task<Void, Never>?
     private var recommendationVersion = UUID()
@@ -345,7 +376,7 @@ final class InputController: IMKInputController {
             if session?.preedit.text.isEmpty != false { frozenPrediction = nil }
         }
     }
-    deinit { generationTask?.cancel(); recommendationTask?.cancel(); rankingTask?.cancel(); expansionTask?.cancel() }
+    deinit { focusIndicatorTask?.cancel(); generationTask?.cancel(); recommendationTask?.cancel(); rankingTask?.cancel(); expansionTask?.cancel() }
     private var rightControlTap = RightControlTap()
     private var capsLockSwitch = CapsLockSwitch()
     private var isActive = false
@@ -367,8 +398,10 @@ final class InputController: IMKInputController {
         activeScheme = scheme
         session?.setASCII(ascii)
         PersistentModeIndicator.shared.update(ascii: ascii)
+        if let client = sender as? IMKTextInput { scheduleFocusIndicator(client) }
     }
     override func deactivateServer(_ sender: Any!) {
+        cancelFocusIndicator()
         invalidateRecommendation(clearContext: true)
         isActive = false
         modeIndicator.hide()
@@ -382,6 +415,10 @@ final class InputController: IMKInputController {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard !bypassSecureInput() else { return false }
         guard let event, let client = sender as? IMKTextInput else { return false }
+        if event.type == .keyDown || event.type == .flagsChanged {
+            cancelFocusIndicator()
+            if event.type == .keyDown { modeIndicator.hide() }
+        }
         let shortcutFlags = event.modifierFlags.intersection([.command, .control, .option, .shift, .function])
         let finishedGeneratedShortcut = consumedGeneratedKey != nil && event.type == .flagsChanged &&
             [UInt16(58), 61].contains(event.keyCode) && shortcutFlags.isEmpty
@@ -750,6 +787,7 @@ final class InputController: IMKInputController {
         session?.setASCII(ascii)
     }
     @objc private func toggleASCII(_ sender: Any?) {
+        cancelFocusIndicator()
         invalidateRecommendation(clearContext: true)
         let target = commandClient(sender)
         commitComposition(target)
@@ -842,6 +880,40 @@ final class InputController: IMKInputController {
         print("PASS: secure input passes u/letters/digits/delete to host, discards composition without insertion")
     }
 
+    static func verifyFocusIndicator(server: IMKServer) throws {
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+        controller.secureInputEnabled = { false }
+        controller.activateServer(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.14))
+        guard controller.modeIndicator.isVisible, controller.modeIndicator.text == "中文" else { throw Engine.Failure.schemaUnavailable }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.85))
+        guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        controller.ascii = true
+        client.caretRectangle = .zero
+        controller.activateServer(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        client.caretRectangle = NSRect(x: 400, y: 500, width: 1, height: 20)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        guard controller.modeIndicator.isVisible, controller.modeIndicator.text == "英文" else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(client)
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+        _ = controller.handle(event, client: client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        controller.activateServer(client)
+        controller.deactivateServer(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        controller.secureInputEnabled = { true }
+        controller.activateServer(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: focus shows Chinese/English briefly, retries caret layout, cancels on typing/deactivation and skips secure input")
+    }
     static func verifyCompositionFallback(server: IMKServer) throws {
         let defaults = UserDefaults.standard
         let saved = defaults.object(forKey: "scheme")
