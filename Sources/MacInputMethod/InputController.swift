@@ -16,6 +16,8 @@ final class InputController: IMKInputController {
         candidatesPanel.hide()
         modeIndicator.hide()
         rightControlTap.reset()
+        rightControlHeld = false
+        capsLockHeld = false
         return true
     }
     private var expandedTexts: [String]?
@@ -384,6 +386,8 @@ final class InputController: IMKInputController {
     deinit { focusIndicatorTask?.cancel(); generationTask?.cancel(); recommendationTask?.cancel(); rankingTask?.cancel(); expansionTask?.cancel() }
     private var rightControlTap = RightControlTap()
     private var capsLockSwitch = CapsLockSwitch()
+    private var rightControlHeld = false
+    private var capsLockHeld = false
     private var isActive = false
     private var lastCaret: NSRect?
     private var activeScheme: InputScheme?
@@ -393,6 +397,8 @@ final class InputController: IMKInputController {
     override func activateServer(_ sender: Any!) {
         invalidateRecommendation(clearContext: true)
         rightControlTap.reset()
+        rightControlHeld = false
+        capsLockHeld = false
         capsLockSwitch.reset(isLocked: CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift))
         isActive = true
         frozenPrediction = nil
@@ -411,6 +417,8 @@ final class InputController: IMKInputController {
         isActive = false
         modeIndicator.hide()
         rightControlTap.reset()
+        rightControlHeld = false
+        capsLockHeld = false
         commitComposition(sender)
         candidatesPanel.hide()
     }
@@ -477,6 +485,14 @@ final class InputController: IMKInputController {
         let changesPosition = event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || (!composing && [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode))
         invalidateRecommendation(clearContext: changesPosition)
         if event.type == .flagsChanged {
+            if event.keyCode == 62 {
+                rightControlHeld = event.modifierFlags.contains(.control)
+                if composing { rightControlTap.cancel(); return true }
+            }
+            if event.keyCode == 57 || event.keyCode == 0 {
+                capsLockHeld = event.modifierFlags.contains(.capsLock)
+                if composing { rightControlTap.cancel(); return true }
+            }
             if capsLockSwitch.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
                 rightControlTap.cancel()
                 toggleASCII([kIMKCommandClientName as String: client])
@@ -505,6 +521,28 @@ final class InputController: IMKInputController {
             session.setASCII(ascii)
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if composing, (rightControlHeld || capsLockHeld),
+           let character = event.characters?.lowercased(), character.count == 1 {
+            let vimKey: Int32? = switch character {
+            case "h": 0xff51 // left
+            case "j": 0xff54 // down
+            case "k": 0xff52 // up
+            case "l": 0xff53 // right
+            default: nil
+            }
+            if let vimKey {
+                if let texts = expandedTexts {
+                    expandedIndex = CandidateGrid.move(index: expandedIndex, count: texts.count, rows: expandedRows,
+                        horizontal: vimKey == 0xff51 ? -1 : vimKey == 0xff53 ? 1 : 0,
+                        vertical: vimKey == 0xff52 ? -1 : vimKey == 0xff54 ? 1 : 0)
+                    renderExpanded(client)
+                } else {
+                    _ = session.process(vimKey)
+                    refresh(client, allowScoring: false)
+                }
+                return true
+            }
+        }
         // Control-Shift-Space toggles Chinese/English without intercepting bare Shift.
         if event.keyCode == 49 && flags.contains([.control, .shift]) && !flags.contains(.command) {
             toggleASCII([kIMKCommandClientName as String: client])
