@@ -523,7 +523,8 @@ final class InputController: IMKInputController {
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let vimModifierDown = rightControlHeld || capsLockHeld ||
-            flags.contains(.capsLock)
+            flags.contains(.capsLock) ||
+            event.modifierFlags.rawValue & RightControlTap.rightControl != 0
         if composing, vimModifierDown,
            let character = event.characters?.lowercased(), character.count == 1 {
             let vimKey: Int32? = switch character {
