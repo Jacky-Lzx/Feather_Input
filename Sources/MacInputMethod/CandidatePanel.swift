@@ -80,6 +80,7 @@ final class CandidatePanel {
         let boundedClient = min(maximum - 1, max(0, clientLevel))
         panel.level = NSWindow.Level(rawValue: max(NSWindow.Level.popUpMenu.rawValue, boundedClient + 1))
     }
+    private(set) var compositionText = ""
     var isVisible: Bool { panel.isVisible }
     var frame: NSRect { panel.frame }
     var companionAnchor: NSRect { predictions.isVisible ? panel.frame.union(predictions.frame) : panel.frame }
@@ -92,7 +93,7 @@ final class CandidatePanel {
         }
     }
     func contains(_ point: NSPoint) -> Bool { (panel.isVisible && panel.frame.contains(point)) || predictions.contains(point) }
-    func hide() { panel.orderOut(nil); predictions.hide(); selection = nil }
+    func hide() { compositionText = ""; panel.orderOut(nil); predictions.hide(); selection = nil }
     @objc private func choose(_ sender: NSButton) { selection?(sender.tag) }
     func showExpanded(texts: [String], highlight: Int, caret: NSRect, rows: Int, loading: Bool, clientLevel: Int = 0, onSelect: @escaping (Int) -> Void) {
         guard !texts.isEmpty else { return }
@@ -143,10 +144,11 @@ final class CandidatePanel {
         scroll.contentView.scroll(to: .zero)
         panel.orderFrontRegardless()
     }
-    func show(texts: [String], highlight: Int, caret: NSRect, clientLevel: Int = 0, beside: NSRect? = nil, continuation: Bool = false, optionNumbers: Bool = false, llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, llmTitle: String = "LLM top-k · 本轮预测", onSelect: ((Int) -> Void)? = nil) {
+    func show(texts: [String], highlight: Int, composition: String = "", cursor: Int = 0, caret: NSRect, clientLevel: Int = 0, beside: NSRect? = nil, continuation: Bool = false, optionNumbers: Bool = false, llmTokens: [LocalRecommendation.RankedToken] = [], llmDelayMS: Int? = nil, llmTitle: String = "LLM top-k · 本轮预测", onSelect: ((Int) -> Void)? = nil) {
         scroll.hasHorizontalScroller = false
         updateWindowLevel(clientLevel)
-        guard !texts.isEmpty else { hide(); return }
+        guard !texts.isEmpty || !composition.isEmpty else { hide(); return }
+        compositionText = composition
         selection = onSelect
         let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
         let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main
@@ -160,16 +162,41 @@ final class CandidatePanel {
         let recommendationSpace: CGFloat = UserDefaults.standard.bool(forKey: "aiRecommendationEnabled") ? 26 : 0
         let widths = labels.map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) + 20 + recommendationSpace }
         let pad: CGFloat = 8, gap: CGFloat = 4, rowHeight = ceil(fontSize * 1.4) + 12
-        let horizontalWidth = widths.reduce(0, +) + gap * CGFloat(texts.count - 1) + pad * 2
-        let horizontal = UserDefaults.standard.string(forKey: "candidateLayout") == "horizontal" && horizontalWidth <= visible.width
-        let needsScroll = !horizontal && rowHeight * CGFloat(texts.count) + gap * CGFloat(texts.count - 1) + pad * 2 > visible.height
+        let headerHeight: CGFloat = composition.isEmpty ? 0 : texts.isEmpty ? 48 : 28
+        let headerFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let marked = NSMutableString(string: composition)
+        marked.insert("│", at: min(max(0, cursor), marked.length))
+        let header = NSTextField(labelWithString: marked as String)
+        header.font = headerFont
+        header.lineBreakMode = .byTruncatingMiddle
+        header.textColor = .secondaryLabelColor
+        header.toolTip = composition
+        header.setAccessibilityLabel("正在输入：" + composition)
+        let headerWidth = composition.isEmpty ? 0 : min(360, max(texts.isEmpty ? 260 : 100,
+            ceil((marked as String as NSString).size(withAttributes: [.font: headerFont]).width))) + pad * 2
+        let gaps = gap * CGFloat(max(0, texts.count - 1))
+        let horizontalWidth = max(headerWidth, widths.reduce(0, +) + gaps + pad * 2)
+        let horizontal = !texts.isEmpty && UserDefaults.standard.string(forKey: "candidateLayout") == "horizontal" && horizontalWidth <= visible.width
+        let contentHeight = headerHeight + (texts.isEmpty ? 0 : horizontal ? rowHeight : rowHeight * CGFloat(texts.count) + gaps) + pad * 2
+        let needsScroll = contentHeight > visible.height
         let scrollerWidth: CGFloat = needsScroll ? 16 : 0
-        let itemWidth = min(widths.max() ?? 100, max(1, visible.width - pad * 2 - scrollerWidth))
+        let itemWidth = min(max(widths.max() ?? 100, headerWidth - pad * 2), max(1, visible.width - pad * 2 - scrollerWidth))
         let naturalSize = NSSize(width: horizontal ? horizontalWidth : itemWidth + pad * 2 + scrollerWidth,
-                                 height: horizontal ? rowHeight + pad * 2 : rowHeight * CGFloat(texts.count) + gap * CGFloat(texts.count - 1) + pad * 2)
+                                 height: contentHeight)
         let frame = beside.map { CandidateGeometry.companionFrame(size: naturalSize, anchor: $0, visible: visible) } ?? CandidateGeometry.frame(size: naturalSize, caret: anchor, visible: visible)
         let document = NSView(frame: NSRect(origin: .zero, size: NSSize(width: naturalSize.width - scrollerWidth, height: naturalSize.height)))
         buttons.removeAll()
+        if !composition.isEmpty {
+            header.frame = NSRect(x: pad + 4, y: naturalSize.height - pad - 22, width: naturalSize.width - pad * 2 - 8 - scrollerWidth, height: 20)
+            document.addSubview(header)
+            if texts.isEmpty {
+                let hint = NSTextField(labelWithString: "无候选 · Return 输入原文 · Esc 取消")
+                hint.font = .systemFont(ofSize: 11)
+                hint.textColor = .tertiaryLabelColor
+                hint.frame = NSRect(x: pad + 4, y: pad + 2, width: naturalSize.width - pad * 2 - 8 - scrollerWidth, height: 18)
+                document.addSubview(hint)
+            }
+        }
         var x = pad
         for (index, label) in labels.enumerated() {
             let button = CandidateButton(title: label, target: self, action: #selector(choose(_:)))
@@ -180,7 +207,7 @@ final class CandidatePanel {
             button.toolTip = label
             button.setAccessibilityLabel(continuation ? "AI 续写：" + texts[index] + (optionNumbers ? "，Option 加 \(index + 1) 或点击插入" : "，点击插入") : "候选 \(index + 1)：\(label)")
             button.frame = NSRect(x: horizontal ? x : pad,
-                                  y: naturalSize.height - pad - rowHeight - (horizontal ? 0 : CGFloat(index) * (rowHeight + gap)),
+                                  y: naturalSize.height - pad - headerHeight - rowHeight - (horizontal ? 0 : CGFloat(index) * (rowHeight + gap)),
                                   width: horizontal ? widths[index] : itemWidth, height: rowHeight)
             x += widths[index] + gap
             document.addSubview(button)
@@ -191,7 +218,7 @@ final class CandidatePanel {
         scroll.hasVerticalScroller = needsScroll
         scroll.documentView = document
         let visibleIndex = buttons.indices.contains(highlight) ? highlight : 0
-        document.scrollToVisible(buttons[visibleIndex].frame)
+        if buttons.indices.contains(visibleIndex) { document.scrollToVisible(buttons[visibleIndex].frame) }
         background.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
         panel.invalidateShadow()

@@ -492,11 +492,11 @@ final class InputController: IMKInputController {
             if key == 0xff1b { closeExpanded(); refresh(client, allowScoring: false); return true }
             closeExpanded()
         }
-        if !ascii, !session.preedit.text.isEmpty, key == 0xff53 {
+        if !ascii, !session.preedit.text.isEmpty, !session.candidates.texts.isEmpty, key == 0xff53 {
             openExpanded(client)
             return true
         }
-        if !ascii, !session.preedit.text.isEmpty, key == 0xff51 { key = 0xff55 }
+        if !ascii, !session.preedit.text.isEmpty, !session.candidates.texts.isEmpty, key == 0xff51 { key = 0xff55 }
         if scoringEnabled, !session.preedit.text.isEmpty, [0xff52, 0xff54, 0xff50, 0xff57].contains(key) {
             scoringLockedPreedit = session.preedit.text
             scoringLockedOriginal = session.candidates.texts
@@ -556,7 +556,8 @@ final class InputController: IMKInputController {
         client.setMarkedText(preedit.text, selectionRange: NSRange(location: preedit.cursor, length: 0),
                              replacementRange: NSRange(location: NSNotFound, length: 0))
         let candidates = session.candidates
-        guard !preedit.text.isEmpty, !candidates.texts.isEmpty else {
+        let composition = preedit.text.isEmpty ? session.rawInput : preedit.text
+        guard !composition.isEmpty else {
             candidatesPanel.hide()
             displayedOrder = []
             if preedit.text.isEmpty {
@@ -573,6 +574,18 @@ final class InputController: IMKInputController {
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
         if caret.origin.x.isFinite, caret.origin.y.isFinite, caret.height > 0 { lastCaret = caret }
         let anchor = lastCaret ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
+        if candidates.texts.isEmpty {
+            frozenPrediction = nil
+            scoredPreedit = ""; scoredOriginal = []; scoredContext = ""
+            displayedOrder = []; displayedOriginal = []; displayedPreedit = preedit.text
+            candidatesPanel.show(texts: [], highlight: -1, composition: composition,
+                cursor: preedit.text.isEmpty ? composition.utf16.count : preedit.cursor,
+                caret: anchor, clientLevel: Int(client.windowLevel()))
+            Task { @MainActor in
+                CandidateDebugWindow.shared.update(preedit: composition, rime: [], predictions: [], final: [], scoring: false, delay: nil)
+            }
+            return
+        }
         if scoringEnabled && (scoredPreedit != preedit.text || scoredOriginal != candidates.texts || scoredContext != recentContext || scoredSettings != scoringSettings) {
             frozenPrediction = nil
         }
@@ -587,7 +600,7 @@ final class InputController: IMKInputController {
         }
         let reordered = order != Array(candidates.texts.indices)
         candidatesPanel.show(texts: order.map { candidates.texts[$0] },
-                             highlight: reordered ? displayedHighlight : candidates.highlight, caret: anchor, clientLevel: Int(client.windowLevel()),
+                             highlight: reordered ? displayedHighlight : candidates.highlight, composition: composition, cursor: preedit.cursor, caret: anchor, clientLevel: Int(client.windowLevel()),
                              llmTokens: frozenPrediction ?? [], llmDelayMS: frozenPredictionDelayMS, llmTitle: scoringEnabled ? "Rime + LLM · 融合排序" : "LLM top-k · 本轮预测") { [weak self, weak client] index in
             guard let self, !self.bypassSecureInput(), self.isActive, let client, let session = self.session,
                   session.preedit.text == preedit.text, session.candidates.texts == candidates.texts,
@@ -829,6 +842,46 @@ final class InputController: IMKInputController {
         print("PASS: secure input passes u/letters/digits/delete to host, discards composition without insertion")
     }
 
+    static func verifyCompositionFallback(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: "scheme")
+        defer { if let saved { defaults.set(saved, forKey: "scheme") } else { defaults.removeObject(forKey: "scheme") } }
+        for (scheme, raw) in [(InputScheme.full, "v"), (.flypy, "github"), (.flypy, "qwerty")] {
+            defaults.set(scheme.rawValue, forKey: "scheme")
+            let client = SmokeTextClient()
+            client.ignoresMarkedText = true
+            guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
+            controller.secureInputEnabled = { false }
+            controller.activateServer(client)
+            func key(_ text: String, code: UInt16 = 0) {
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
+                    isARepeat: false, keyCode: code)!
+                _ = controller.handle(event, client: client)
+            }
+            for c in raw { key(String(c)) }
+            guard controller.session?.candidates.texts.isEmpty == true, client.marked.isEmpty,
+                  controller.candidatesPanel.isVisible, controller.candidatesPanel.compositionText == controller.session?.preedit.text,
+                  !controller.candidatesPanel.verifyClick(on: 0) else { throw Engine.Failure.schemaUnavailable }
+            key("\r", code: 36)
+            guard client.committed == raw, !controller.candidatesPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+            for c in raw { key(String(c)) }
+            key("", code: 51)
+            guard controller.session?.rawInput == String(raw.dropLast()),
+                  controller.candidatesPanel.compositionText == controller.session?.preedit.text else { throw Engine.Failure.schemaUnavailable }
+            key("", code: 53)
+            guard client.committed == raw, !controller.candidatesPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+            // With ordinary candidates, the input line is still visible in non-inline clients.
+            for c in "ni" { key(String(c)) }
+            guard controller.session?.candidates.texts.isEmpty == false, controller.candidatesPanel.isVisible,
+                  !controller.candidatesPanel.compositionText.isEmpty, client.marked.isEmpty else { throw Engine.Failure.schemaUnavailable }
+            controller.secureInputEnabled = { true }
+            key("a")
+            guard !controller.candidatesPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+            controller.deactivateServer(client)
+        }
+        print("PASS: non-inline clients show composition with/without candidates; Return, Backspace, Escape and secure hiding")
+    }
     static func verifyGenerationLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard
         let keys = ["aiPinyinGenerationEnabled", "aiCandidateScoringEnabled", "aiRerankingEnabled", "aiRecommendationEnabled", "scheme"]

@@ -5,10 +5,11 @@ import InputMethodKit
 final class SmokeTextClient: NSObject, IMKTextInput {
     var committed = ""
     var marked = ""
+    var ignoresMarkedText = false
     var exposesDocument = false
     var documentSelection: NSRange?
     func insertText(_ string: Any!, replacementRange: NSRange) { committed += string as? String ?? ""; marked = "" }
-    func setMarkedText(_ string: Any!, selectionRange: NSRange, replacementRange: NSRange) { marked = string as? String ?? "" }
+    func setMarkedText(_ string: Any!, selectionRange: NSRange, replacementRange: NSRange) { if !ignoresMarkedText { marked = string as? String ?? "" } }
     func selectedRange() -> NSRange { documentSelection ?? NSRange(location: committed.utf16.count, length: 0) }
     func markedRange() -> NSRange { NSRange(location: committed.utf16.count, length: marked.utf16.count) }
     func attributedSubstring(from range: NSRange) -> NSAttributedString! {
