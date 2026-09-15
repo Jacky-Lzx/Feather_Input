@@ -522,6 +522,28 @@ final class InputController: IMKInputController {
             session.setASCII(ascii)
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // The expanded panel is a keyboard navigation surface.  IMK can
+        // deliver a keyDown from a held right-Control chord without the
+        // modifier bit (and Ctrl-H may arrive as a control character), so
+        // use the physical keyCode while the panel is visible.  This also
+        // keeps navigation reliable after releasing and pressing Control
+        // again.
+        if let texts = expandedTexts {
+            let expandedVimKey: Int32? = switch event.keyCode {
+            case 4: 0xff51  // h / left
+            case 38: 0xff54 // j / down
+            case 40: 0xff52 // k / up
+            case 37: 0xff53 // l / right
+            default: nil
+            }
+            if let expandedVimKey {
+                expandedIndex = CandidateGrid.move(index: expandedIndex, count: texts.count, rows: expandedRows,
+                    horizontal: expandedVimKey == 0xff51 ? -1 : expandedVimKey == 0xff53 ? 1 : 0,
+                    vertical: expandedVimKey == 0xff52 ? -1 : expandedVimKey == 0xff54 ? 1 : 0)
+                renderExpanded(client)
+                return true
+            }
+        }
         let vimModifierDown = rightControlHeld || capsLockHeld ||
             flags.contains(.capsLock) ||
             event.modifierFlags.rawValue & RightControlTap.rightControl != 0 ||
@@ -951,13 +973,18 @@ final class InputController: IMKInputController {
             let controlUp = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: [],
                 timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
                 isARepeat: false, keyCode: 62)!
-            let ctrlL = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control,
+            let ctrlL = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
                 timestamp: 0, windowNumber: 0, context: nil, characters: "\u{0c}", charactersIgnoringModifiers: "l",
                 isARepeat: false, keyCode: 37)!
             _ = controller.handle(controlDown, client: client)
             _ = controller.handle(ctrlL, client: client)
             _ = controller.handle(controlUp, client: client)
             guard controller.expandedIndex == 8 else { throw Engine.Failure.schemaUnavailable }
+            let plainH = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil, characters: "\u{08}", charactersIgnoringModifiers: "h",
+                isARepeat: false, keyCode: 4)!
+            _ = controller.handle(plainH, client: client)
+            guard controller.expandedIndex == 1 else { throw Engine.Failure.schemaUnavailable }
             let expected = all[2]
             key("3", code: 20)
             guard controller.expandedTexts == nil else { throw Engine.Failure.schemaUnavailable }
