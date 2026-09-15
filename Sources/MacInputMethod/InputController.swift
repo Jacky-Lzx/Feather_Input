@@ -521,7 +521,9 @@ final class InputController: IMKInputController {
             session.setASCII(ascii)
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if composing, (rightControlHeld || capsLockHeld),
+        let vimModifierDown = rightControlHeld || capsLockHeld ||
+            flags.contains(.capsLock)
+        if composing, vimModifierDown,
            let character = event.characters?.lowercased(), character.count == 1 {
             let vimKey: Int32? = switch character {
             case "h": 0xff51 // left
