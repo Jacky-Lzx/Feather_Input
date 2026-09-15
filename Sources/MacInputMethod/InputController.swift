@@ -524,7 +524,12 @@ final class InputController: IMKInputController {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let vimModifierDown = rightControlHeld || capsLockHeld ||
             flags.contains(.capsLock) ||
-            event.modifierFlags.rawValue & RightControlTap.rightControl != 0
+            event.modifierFlags.rawValue & RightControlTap.rightControl != 0 ||
+            // Once the expanded grid owns navigation, some keyboard paths
+            // report only the aggregate Control flag (without the side bit
+            // or a preceding flagsChanged event). Keep physical h/j/k/l
+            // usable in that state instead of translating Ctrl-H to delete.
+            (expandedTexts != nil && flags.contains(.control))
         if composing, vimModifierDown {
             // Control changes NSEvent.characters (Ctrl-H is backspace, Ctrl-J
             // is newline, etc.), so use the physical macOS keyCode as the
@@ -937,6 +942,22 @@ final class InputController: IMKInputController {
             guard controller.expandedIndex == 8 else { throw Engine.Failure.schemaUnavailable }
             key(String(UnicodeScalar(NSLeftArrowFunctionKey)!), code: 123)
             guard controller.expandedIndex == 1 else { throw Engine.Failure.schemaUnavailable }
+            // Verify the physical Ctrl-H/L path after the grid is already
+            // open.  The modifier may arrive without the right-side flag on
+            // the second press, so this must still move across columns.
+            let controlDown = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: .control,
+                timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                isARepeat: false, keyCode: 62)!
+            let controlUp = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                isARepeat: false, keyCode: 62)!
+            let ctrlL = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control,
+                timestamp: 0, windowNumber: 0, context: nil, characters: "\u{0c}", charactersIgnoringModifiers: "l",
+                isARepeat: false, keyCode: 37)!
+            _ = controller.handle(controlDown, client: client)
+            _ = controller.handle(ctrlL, client: client)
+            _ = controller.handle(controlUp, client: client)
+            guard controller.expandedIndex == 8 else { throw Engine.Failure.schemaUnavailable }
             let expected = all[2]
             key("3", code: 20)
             guard controller.expandedTexts == nil else { throw Engine.Failure.schemaUnavailable }
