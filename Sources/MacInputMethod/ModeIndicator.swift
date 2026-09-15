@@ -39,7 +39,7 @@ final class ModeIndicator {
     }
     deinit { dismissTimer?.invalidate() }
 
-    func show(ascii: Bool, caret: NSRect, clientLevel: Int = 0, untilInput: Bool = false) {
+    func show(ascii: Bool, caret: NSRect, clientLevel: Int = 0, untilInput: Bool = false, duration: TimeInterval = 0.8) {
         hide()
         label.stringValue = ascii ? "英文" : "中文"
         let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
@@ -50,7 +50,7 @@ final class ModeIndicator {
         panel.orderFrontRegardless()
         waitsForInput = untilInput
         guard !untilInput else { return }
-        let timer = Timer(timeInterval: 0.8, repeats: false) { [weak self] _ in self?.hide() }
+        let timer = Timer(timeInterval: max(0.1, min(5.0, duration.isFinite ? duration : 0.8)), repeats: false) { [weak self] _ in self?.hide() }
         dismissTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }

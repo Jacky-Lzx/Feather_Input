@@ -107,6 +107,10 @@ final class InputController: IMKInputController {
     private let candidatesPanel = CandidatePanel()
     private let modeIndicator = ModeIndicator()
     private var focusModeUntilInput: Bool { UserDefaults.standard.object(forKey: "focusModeUntilInput") as? Bool ?? true }
+    private var focusModeDuration: TimeInterval {
+        let value = UserDefaults.standard.object(forKey: "focusModeDuration") as? Double ?? 0.8
+        return value.isFinite ? max(0.1, min(5.0, value)) : 0.8
+    }
     private var focusIndicatorTask: Task<Void, Never>?
     private var focusIndicatorVersion = UUID()
     private func cancelFocusIndicator() {
@@ -132,7 +136,7 @@ final class InputController: IMKInputController {
                 guard caret.origin.x.isFinite, caret.origin.y.isFinite, caret.width.isFinite,
                       caret.height.isFinite, caret.height > 0 else { continue }
                 self.lastCaret = caret
-                self.modeIndicator.show(ascii: self.ascii, caret: caret, clientLevel: Int(client.windowLevel()), untilInput: self.focusModeUntilInput)
+                self.modeIndicator.show(ascii: self.ascii, caret: caret, clientLevel: Int(client.windowLevel()), untilInput: self.focusModeUntilInput, duration: self.focusModeDuration)
                 return
             }
         }
@@ -912,15 +916,20 @@ final class InputController: IMKInputController {
     static func verifyFocusIndicator(server: IMKServer) throws {
         let defaults = UserDefaults.standard
         let saved = defaults.object(forKey: "focusModeUntilInput")
-        defer { if let saved { defaults.set(saved, forKey: "focusModeUntilInput") } else { defaults.removeObject(forKey: "focusModeUntilInput") } }
+        let savedDuration = defaults.object(forKey: "focusModeDuration")
+        defer {
+            if let saved { defaults.set(saved, forKey: "focusModeUntilInput") } else { defaults.removeObject(forKey: "focusModeUntilInput") }
+            if let savedDuration { defaults.set(savedDuration, forKey: "focusModeDuration") } else { defaults.removeObject(forKey: "focusModeDuration") }
+        }
         defaults.set(false, forKey: "focusModeUntilInput")
+        defaults.set(0.2, forKey: "focusModeDuration")
         let client = SmokeTextClient()
         guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
         controller.secureInputEnabled = { false }
         controller.activateServer(client)
         RunLoop.current.run(until: Date().addingTimeInterval(0.14))
         guard controller.modeIndicator.isVisible, controller.modeIndicator.text == "中文" else { throw Engine.Failure.schemaUnavailable }
-        RunLoop.current.run(until: Date().addingTimeInterval(0.85))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
         controller.ascii = true
         client.caretRectangle = .zero

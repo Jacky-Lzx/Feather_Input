@@ -27,6 +27,7 @@ private struct SettingsView: View {
     @AppStorage("aiCandidateCount") private var aiCandidateCount = 5
     @AppStorage("candidateLayout") private var layout = "vertical"
     @AppStorage("focusModeUntilInput") private var focusModeUntilInput = true
+    @AppStorage("focusModeDuration") private var focusModeDuration = 0.8
     @AppStorage("showPersistentMode") private var showPersistentMode = true
     @AppStorage("aiFusionWeight") private var fusionWeight = 0.35
     @AppStorage("aiScoreNormalization") private var scoreNormalization = "character"
@@ -53,6 +54,10 @@ private struct SettingsView: View {
                 Toggle("屏幕左下角常驻显示中／英", isOn: $showPersistentMode)
                 Toggle("焦点状态提示持续到开始输入", isOn: $focusModeUntilInput)
                 Text("开启后，光标旁的中英文提示保持显示，直到开始按键或失焦；关闭后显示 0.8 秒。下次获得焦点生效。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Stepper("焦点提示显示：\(focusModeDuration, specifier: "%.1f") 秒", value: $focusModeDuration, in: 0.1...5.0, step: 0.1)
+                    .disabled(focusModeUntilInput)
+                Text("仅在关闭“持续到开始输入”时生效，范围 0.1–5.0 秒。")
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("候选排列", selection: $layout) {
                     Text("竖排").tag("vertical")
