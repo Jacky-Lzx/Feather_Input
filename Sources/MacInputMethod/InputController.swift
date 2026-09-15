@@ -106,6 +106,7 @@ final class InputController: IMKInputController {
     private var session: Session?
     private let candidatesPanel = CandidatePanel()
     private let modeIndicator = ModeIndicator()
+    private var focusModeUntilInput: Bool { UserDefaults.standard.object(forKey: "focusModeUntilInput") as? Bool ?? true }
     private var focusIndicatorTask: Task<Void, Never>?
     private var focusIndicatorVersion = UUID()
     private func cancelFocusIndicator() {
@@ -131,7 +132,7 @@ final class InputController: IMKInputController {
                 guard caret.origin.x.isFinite, caret.origin.y.isFinite, caret.width.isFinite,
                       caret.height.isFinite, caret.height > 0 else { continue }
                 self.lastCaret = caret
-                self.modeIndicator.show(ascii: self.ascii, caret: caret, clientLevel: Int(client.windowLevel()))
+                self.modeIndicator.show(ascii: self.ascii, caret: caret, clientLevel: Int(client.windowLevel()), untilInput: self.focusModeUntilInput)
                 return
             }
         }
@@ -464,7 +465,7 @@ final class InputController: IMKInputController {
             return false
         }
         rightControlTap.cancel()
-        modeIndicator.hide()
+        if !modeIndicator.waitsForInput { modeIndicator.hide() }
         if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
             // Adding flagsChanged opts out of IMK's keyDown-only default mouse handling.
             if !candidatesPanel.contains(NSEvent.mouseLocation) { commitComposition(sender) }
@@ -787,6 +788,7 @@ final class InputController: IMKInputController {
         session?.setASCII(ascii)
     }
     @objc private func toggleASCII(_ sender: Any?) {
+        let keepFocusIndicator = modeIndicator.isVisible && modeIndicator.waitsForInput && focusModeUntilInput
         cancelFocusIndicator()
         invalidateRecommendation(clearContext: true)
         let target = commandClient(sender)
@@ -801,7 +803,7 @@ final class InputController: IMKInputController {
             lastCaret = caret
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
-        modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()))
+        modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()), untilInput: keepFocusIndicator)
     }
 
     static func verifyRepeatedPaging(server: IMKServer) throws {
@@ -881,6 +883,10 @@ final class InputController: IMKInputController {
     }
 
     static func verifyFocusIndicator(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: "focusModeUntilInput")
+        defer { if let saved { defaults.set(saved, forKey: "focusModeUntilInput") } else { defaults.removeObject(forKey: "focusModeUntilInput") } }
+        defaults.set(false, forKey: "focusModeUntilInput")
         let client = SmokeTextClient()
         guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
         controller.secureInputEnabled = { false }
@@ -897,7 +903,13 @@ final class InputController: IMKInputController {
         client.caretRectangle = NSRect(x: 400, y: 500, width: 1, height: 20)
         RunLoop.current.run(until: Date().addingTimeInterval(0.15))
         guard controller.modeIndicator.isVisible, controller.modeIndicator.text == "英文" else { throw Engine.Failure.schemaUnavailable }
+        defaults.set(true, forKey: "focusModeUntilInput")
         controller.activateServer(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        guard controller.modeIndicator.isVisible, controller.modeIndicator.waitsForInput else { throw Engine.Failure.schemaUnavailable }
+        controller.toggleASCII([kIMKCommandClientName as String: client])
+        RunLoop.current.run(until: Date().addingTimeInterval(0.9))
+        guard controller.modeIndicator.isVisible, controller.modeIndicator.text == "中文" else { throw Engine.Failure.schemaUnavailable }
         let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
             windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
         _ = controller.handle(event, client: client)
@@ -912,7 +924,7 @@ final class InputController: IMKInputController {
         RunLoop.current.run(until: Date().addingTimeInterval(0.15))
         guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(client)
-        print("PASS: focus shows Chinese/English briefly, retries caret layout, cancels on typing/deactivation and skips secure input")
+        print("PASS: focus duration preference, persistent mode updates, caret retry, typing/deactivation cancellation and secure suppression")
     }
     static func verifyCompositionFallback(server: IMKServer) throws {
         let defaults = UserDefaults.standard

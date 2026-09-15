@@ -11,6 +11,7 @@ final class ModeIndicator {
     private let panel: ModeIndicatorWindow
     private let label = NSTextField(labelWithString: "")
     private var dismissTimer: Timer?
+    private(set) var waitsForInput = false
     var text: String { label.stringValue }
     var isVisible: Bool { panel.isVisible }
 
@@ -38,7 +39,7 @@ final class ModeIndicator {
     }
     deinit { dismissTimer?.invalidate() }
 
-    func show(ascii: Bool, caret: NSRect, clientLevel: Int = 0) {
+    func show(ascii: Bool, caret: NSRect, clientLevel: Int = 0, untilInput: Bool = false) {
         hide()
         label.stringValue = ascii ? "英文" : "中文"
         let anchor = NSRect(x: caret.minX, y: caret.minY, width: max(1, caret.width), height: max(1, caret.height))
@@ -47,11 +48,14 @@ final class ModeIndicator {
         panel.level = NSWindow.Level(rawValue: max(NSWindow.Level.popUpMenu.rawValue, clientLevel + 1))
         panel.setFrame(CandidateGeometry.frame(size: NSSize(width: 66, height: 32), caret: anchor, visible: visible), display: true)
         panel.orderFrontRegardless()
+        waitsForInput = untilInput
+        guard !untilInput else { return }
         let timer = Timer(timeInterval: 0.8, repeats: false) { [weak self] _ in self?.hide() }
         dismissTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
     func hide() {
+        waitsForInput = false
         dismissTimer?.invalidate()
         dismissTimer = nil
         panel.orderOut(nil)
