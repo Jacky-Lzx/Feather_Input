@@ -33,7 +33,7 @@ scripts/install.sh
 - 中文模式下可直接输入英文单词并从同一候选窗选择，例如 `github` 会提供规范写法 `GitHub`。英文默认低于常规中文候选，支持前缀补全和用户词频学习；设置中可配置至少输入 1–12 个字符才显示，默认为 3。Return 仍可原样上屏当前输入。
 - 数据位置：`~/Library/Application Support/FeatherInput`；方案和字号保存在应用偏好设置中。
 
-更新前切换到其他输入法并退出 FeatherInput 进程，将旧应用移开后重新安装。卸载时先在系统设置中移除输入源，再删除 `~/Library/Input Methods/FeatherInput.app`。用户词库不会被自动删除。
+更新时运行 `scripts/build-app.sh` 后切换到其他输入法，再运行 `scripts/install.sh`；安装脚本会原子替换旧应用、重启 InputMethodKit 进程、保留已有输入源授权，并在注册失败时恢复旧版本。每次构建都会自动递增本机安装包的 `CFBundleVersion`，避免 macOS 继续使用旧的输入源缓存，无需在系统设置中删除再添加。卸载时才需要先在系统设置中移除输入源，再删除 `~/Library/Input Methods/FeatherInput.app`。用户词库不会被自动删除。
 
 当前为开发预览版，使用本机 ad-hoc 签名；正式分发还需 Developer ID 签名、公证及更多应用兼容性验证。模糊音、词库管理界面暂未实现。
 
