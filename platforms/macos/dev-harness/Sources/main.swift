@@ -77,6 +77,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     true
   }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    controller?.shutdown()
+    controller = nil
+  }
 }
 
 @main
@@ -105,6 +110,7 @@ struct FeatherDevHarnessMain {
         userData: paths.userData,
         schema: paths.schema
       )
+      defer { session.close() }
       _ = try session.activate()
       for character in "nihao" {
         _ = try session.send(text: String(character))

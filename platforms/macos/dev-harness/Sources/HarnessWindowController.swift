@@ -41,6 +41,11 @@ final class HarnessWindowController: NSWindowController, NSTableViewDataSource, 
     window?.makeFirstResponder(captureView)
   }
 
+  func shutdown() {
+    _ = try? session.deactivate()
+    session.close()
+  }
+
   func numberOfRows(in tableView: NSTableView) -> Int {
     currentResponse?.candidates.count ?? 0
   }

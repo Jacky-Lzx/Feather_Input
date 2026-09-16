@@ -80,6 +80,13 @@ final class FeatherSession {
     }
   }
 
+  func close() {
+    if let handle {
+      feather_ime_free(handle)
+      self.handle = nil
+    }
+  }
+
   func activate() throws -> FeatherResponseValue {
     try consume(feather_ime_activate(requireHandle()), operation: "activate")
   }
