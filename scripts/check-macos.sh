@@ -21,6 +21,19 @@ swiftc \
     -framework AppKit \
     platforms/macos/dev-harness/Sources/*.swift
 
+echo "正在检查 C ABI 头文件……"
+xcrun clang \
+    -std=c11 \
+    -fsyntax-only \
+    -I rust/crates/feather-ffi/include \
+    rust/crates/feather-ffi/tests/header_smoke.c
+xcrun clang++ \
+    -std=c++17 \
+    -x c++ \
+    -fsyntax-only \
+    -I rust/crates/feather-ffi/include \
+    rust/crates/feather-ffi/tests/header_smoke.c
+
 echo "正在检查 shell 脚本……"
 sh -n \
     scripts/build-macos-dev-harness.sh \

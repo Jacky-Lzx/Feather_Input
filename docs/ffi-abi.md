@@ -1,0 +1,86 @@
+# Feather C ABI v2
+
+## 设计目标
+
+C ABI 是平台适配层与 Rust 输入核心之间唯一稳定的二进制边界。它不暴露 Rust、
+Swift、C++、AppKit 或 librime 对象，并把成功结果、失败状态和资源所有权明确分开。
+
+当前 ABI 版本是 `2`。调用方必须在创建会话前检查
+`feather_ime_abi_version()`，并通过 `feather_ime_capabilities()` 确认所需能力。
+版本不匹配时不得继续调用其他接口。
+
+## 返回值与错误
+
+除查询和释放函数外，每个接口都返回 `FeatherStatus`：
+
+- `FEATHER_STATUS_OK` 表示成功；
+- 非零状态表示参数、线程、生命周期、引擎或内部错误；
+- 若调用方提供 `out_error`，失败时会得到包含状态码和 UTF-8 消息的
+  `FeatherError`；
+- 调用前必须把 `out_error` 指向的槽位初始化为 `NULL`，已有错误必须先释放；
+- `FeatherError` 必须且只能由 `feather_error_free()` 释放；
+- 成功时输出错误指针为 `NULL`，失败时普通输出指针为 `NULL`；
+- Rust panic 会在 ABI 边界被转换成 `FEATHER_STATUS_INTERNAL_ERROR`，不会穿过 C
+  调用栈。
+
+`FEATHER_STATUS_ABI_MISMATCH` 保留给平台包装层表达版本协商失败；当前 Rust 动态库
+不会自行返回该状态，因为版本检查发生在创建会话之前。
+
+## 会话生命周期
+
+推荐顺序如下：
+
+```text
+检查版本和能力
+       ↓
+new / new_rime
+       ↓
+activate → key / select / set_mode
+       ↓
+deactivate（可选）
+       ↓
+close（幂等）
+       ↓
+free（仅一次）
+```
+
+`feather_ime_close()` 会关闭引擎资源，但保留 handle，以便重复关闭能够安全成功。
+关闭后的业务调用返回 `FEATHER_STATUS_SESSION_CLOSED`。
+`feather_ime_free()` 只释放 handle，调用后指针立即失效；重复释放或继续使用属于调用方
+错误。
+
+创建、业务调用、`close` 和 `free` 必须在创建会话的同一线程执行。能够返回状态的
+接口会把跨线程调用报告为 `FEATHER_STATUS_WRONG_THREAD`。`free` 没有错误返回值，因此
+调用方必须在进入它之前保证线程正确。
+
+## 响应所有权
+
+每次成功的业务调用都会返回独立的 `FeatherResponse`：
+
+- 调用方使用完毕后必须调用 `feather_ime_response_free()`；
+- `commit`、`preedit`、候选数组和候选文字都由响应对象拥有；
+- 上述指针只在响应被释放前有效；
+- 响应释放不影响 session，也不影响其他响应；
+- 候选选择使用 `(revision, value)` 不透明身份，不能用显示文字或数组下标替代。
+
+所有传入字符串和按键文字均使用 UTF-8。`cursor_utf8` 也是 UTF-8 字节偏移，平台层
+负责转换成原生文本 API 所要求的坐标单位。
+
+## 能力位
+
+ABI v2 当前公开以下能力：
+
+- `FEATHER_CAP_RIME_ENGINE`：可以创建 librime 会话；
+- `FEATHER_CAP_OPAQUE_CANDIDATE_ID`：候选使用 revision 与不透明 ID；
+- `FEATHER_CAP_EXPLICIT_CLOSE`：支持显式、幂等关闭；
+- `FEATHER_CAP_STRUCTURED_ERROR`：支持结构化状态和错误对象。
+
+平台层只应要求自身实际依赖的能力。新增可选能力时增加新的位，不改变已有位的含义。
+
+## 兼容性规则
+
+- 破坏函数签名、字段含义、枚举值或所有权规则时必须提升 ABI 版本；
+- 同一 ABI 版本内不重排或删除公开结构字段；
+- 跨 ABI 传递的整数宽度使用 `<stdint.h>` 类型；
+- C 头文件必须同时通过 C11 和 C++17 语法检查；
+- Swift Harness 是当前首个消费者，但接口设计不得依赖 Swift importer 的特有行为。

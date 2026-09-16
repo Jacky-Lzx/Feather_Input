@@ -53,5 +53,8 @@ open .build/macos-dev-harness/FeatherInputDevHarness.app
 核心。单击候选行会按 `(revision, candidate_id)` 选择候选。`Control-Space` 只切换
 调试壳内部的直输模式，不修改系统输入法设置。
 
+调试壳要求 Feather C ABI v2 的全部基础能力。Rust 返回的结构化状态码和诊断消息会
+由 Swift 桥接层转换成可读错误；退出时先关闭 librime 会话，再释放 ABI handle。
+
 当前开发构建仍然依赖本机 Homebrew librime。消除绝对动态库依赖、通用二进制、签名
 和发布打包属于后续 portable build 阶段。

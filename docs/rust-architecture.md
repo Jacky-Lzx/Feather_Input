@@ -84,12 +84,18 @@ Rime 按键事件和候选迭代操作。未来的 Rust 实现可以使用解析
 
 ## ABI 规则
 
-- ABI 具有显式版本号和不透明 session handle。
-- 调用方拥有 session；每个响应对象需要单独释放。
+- ABI 具有显式版本号、能力位和不透明 session handle。
+- 业务接口返回结构化状态；诊断信息由独立错误对象承载并显式释放。
+- 调用方先显式、幂等地关闭 session，再且仅再释放一次 handle。
+- session 的创建、调用、关闭和释放必须位于同一线程。
+- 调用方拥有 session；每个响应对象和错误对象都需要单独释放。
 - 字符串采用 UTF-8，并且只在对应响应被释放前有效。
 - 候选身份以整数 ID 加 revision 的形式跨越 ABI 边界。
 - 同一 ABI 主版本内，结构只能在末尾追加字段。
 - Rust、Swift、C++、Python 或操作系统对象均不得直接跨越边界。
+
+完整的状态码、所有权和生命周期约定见
+[`ffi-abi.md`](ffi-abi.md)。
 
 ## 迁移步骤
 
@@ -110,6 +116,9 @@ Rime 按键事件和候选迭代操作。未来的 Rust 实现可以使用解析
 生命周期、session、方案选择、按键映射、候选快照和全局候选选择。Rime 的 C 类型
 与候选索引不会越过该 crate；核心和平台层只接触 `InputEngine`、revision 和不透明
 候选 ID。
+
+`feather-ffi` 当前提供 ABI v2：显式输出指针、结构化错误、能力查询、同线程检查和
+幂等关闭。公开头文件同时接受 C11 与 C++17 语法检查。
 
 `platforms/macos/dev-harness` 提供普通 AppKit 调试应用，用来验证 Swift、C ABI、
 Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入源，使用独立用户

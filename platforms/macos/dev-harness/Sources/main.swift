@@ -110,7 +110,7 @@ struct FeatherDevHarnessMain {
         userData: paths.userData,
         schema: paths.schema
       )
-      defer { session.close() }
+      defer { try? session.close() }
       _ = try session.activate()
       for character in "nihao" {
         _ = try session.send(text: String(character))

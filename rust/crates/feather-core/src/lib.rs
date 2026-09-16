@@ -9,7 +9,7 @@ pub use model::{
     EngineCandidateId, EngineSnapshot, InputEffect, InputEvent, InputMode, Key,
 };
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 #[cfg(test)]
 mod tests {

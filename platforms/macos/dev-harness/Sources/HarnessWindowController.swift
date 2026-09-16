@@ -43,7 +43,7 @@ final class HarnessWindowController: NSWindowController, NSTableViewDataSource, 
 
   func shutdown() {
     _ = try? session.deactivate()
-    session.close()
+    try? session.close()
   }
 
   func numberOfRows(in tableView: NSTableView) -> Int {
