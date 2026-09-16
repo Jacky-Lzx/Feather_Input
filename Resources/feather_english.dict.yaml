@@ -1,0 +1,19 @@
+# Rime dictionary
+# encoding: utf-8
+---
+name: feather_english
+version: "0.1"
+sort: by_weight
+use_preset_vocabulary: false
+import_tables:
+  - easy_en
+...
+
+# Preserve the conventional spelling of common software terms. Codes stay
+# lowercase so they are available without leaving Feather's Chinese mode.
+GitHub	github	1000000
+macOS	macos	1000000
+SwiftUI	swiftui	1000000
+AppKit	appkit	1000000
+LLM	llm	1000000
+C++	cpp	1000000

@@ -38,6 +38,8 @@ for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
     for c in "ni".utf8 { session.process(Int32(c)) }
     let firstPage = session.candidates.texts
     check(firstPage.count == 5, "five candidates per page")
+    check(firstPage.first?.utf8.contains(where: { $0 >= 0x80 }) == true,
+          "\(scheme.title): Chinese remains first for ambiguous lowercase input")
     session.process(0xff56)
     check(session.candidates.texts != firstPage, "Page Down changes candidates")
     session.process(0xff55)
@@ -53,6 +55,11 @@ for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
     check(session.takeCommit() == secondPage[1], "click commits current page candidate")
     session.process(44)
     check(session.takeCommit() == "，", "Chinese punctuation")
+    for c in "gith".utf8 { session.process(Int32(c)) }
+    let english = session.candidateSlice(offset: 0)
+    check(english.contains("GitHub"), "\(scheme.title): English prefix completion")
+    check(session.selectGlobalCandidate(at: english.firstIndex(of: "GitHub")!), "select English completion")
+    check(session.takeCommit() == "GitHub", "\(scheme.title): English commit")
     let second = try engine.session(scheme)
     session.process(110)
     check(second.preedit.text.isEmpty, "independent client sessions")
@@ -72,5 +79,5 @@ for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
     session.setASCII(true)
     let handled = session.process(97)
     check(!handled || session.takeCommit() == "a", "ASCII pass-through")
-    print("PASS: \(scheme.title), candidates, commit, Escape, Backspace, paging, numeric selection, punctuation, session isolation, ASCII")
+    print("PASS: \(scheme.title), Chinese and English candidates, commit, Escape, Backspace, paging, numeric selection, punctuation, session isolation, ASCII")
 }

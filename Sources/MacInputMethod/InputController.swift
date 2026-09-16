@@ -1082,7 +1082,7 @@ final class InputController: IMKInputController {
         guard controller.modeIndicator.isVisible, controller.modeIndicator.text == "中文" else { throw Engine.Failure.schemaUnavailable }
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
         guard !controller.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
-        controller.ascii = true
+        InputModeMemory.shared.update(ascii: true, application: client.bundleIdentifier() ?? "unknown")
         client.caretRectangle = .zero
         controller.activateServer(client)
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
@@ -1117,7 +1117,9 @@ final class InputController: IMKInputController {
         let defaults = UserDefaults.standard
         let saved = defaults.object(forKey: "scheme")
         defer { if let saved { defaults.set(saved, forKey: "scheme") } else { defaults.removeObject(forKey: "scheme") } }
-        for (scheme, raw) in [(InputScheme.full, "v"), (.flypy, "github"), (.flypy, "qwerty")] {
+        // These deliberately absent strings exercise raw fallback without
+        // colliding with either the Chinese schemas or English completion.
+        for (scheme, raw) in [(InputScheme.full, "vvqzxx"), (.flypy, "qzvvxx"), (.flypy, "qzvvxy")] {
             defaults.set(scheme.rawValue, forKey: "scheme")
             let client = SmokeTextClient()
             client.ignoresMarkedText = true
@@ -1196,7 +1198,7 @@ final class InputController: IMKInputController {
                 guard context == "落霞与", schema == mode.rawValue else { throw Engine.Failure.schemaUnavailable }
                 receivedInput = raw
                 try? await Task.sleep(nanoseconds: 50_000_000)
-                return try LocalRecommendation.parseGenerated(Data("{\"candidates\":[{\"text\":\"孤鹜\",\"score\":-1},{\"text\":\"孤骛\",\"score\":-2},{\"text\":\"孤鶩\",\"score\":-3}],\"syllables\":[[\"gu\",\"wu\"]],\"elapsed_ms\":20,\"truncated\":false}".utf8))
+                return try LocalRecommendation.parseGenerated(Data("{\"candidates\":[{\"text\":\"菰鹜\",\"score\":-1},{\"text\":\"罛鹜\",\"score\":-2},{\"text\":\"蓇鹜\",\"score\":-3}],\"syllables\":[[\"gu\",\"wu\"]],\"elapsed_ms\":20,\"truncated\":false}".utf8))
             }
             func key(_ text: String, code: UInt16 = 0, flags: NSEvent.ModifierFlags = [], repeating: Bool = false) {
                 let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
@@ -1206,14 +1208,14 @@ final class InputController: IMKInputController {
             }
             for c in "guwu" { key(String(c)) }
             RunLoop.current.run(until: Date().addingTimeInterval(0.45))
-            guard receivedInput == "guwu", controller.generatedPanel.isVisible, controller.generatedPanel.verifyClick(on: 0), client.committed == "孤鹜",
+            guard receivedInput == "guwu", controller.generatedPanel.isVisible, controller.generatedPanel.verifyClick(on: 0), client.committed == "菰鹜",
                   client.marked.isEmpty, controller.session?.rawInput.isEmpty == true else { throw Engine.Failure.schemaUnavailable }
             func option(_ pressed: Bool) {
                 let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: pressed ? .option : [], timestamp: 0,
                     windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 58)!
                 _ = controller.handle(event, client: client)
             }
-            for (code, expected) in [(UInt16(18), "孤鹜"), (UInt16(19), "孤骛"), (UInt16(20), "孤鶩")] {
+            for (code, expected) in [(UInt16(18), "菰鹜"), (UInt16(19), "罛鹜"), (UInt16(20), "蓇鹜")] {
                 controller.recentContext = "落霞与"
                 for c in "guwu" { key(String(c)) }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.45))

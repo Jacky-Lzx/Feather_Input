@@ -1,0 +1,10 @@
+patch:
+  schema/dependencies/@next: feather_english
+  engine/translators/@next: table_translator@feather_english
+  # Keep ordinary lowercase Shuangpin ahead of English completions. English
+  # remains available on the same Rime candidate stream and learns selections.
+  feather_english:
+    __include: feather_english.schema:/translator
+    initial_quality: -1
+  recognizer/patterns/uppercase: ""
+  speller/alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA

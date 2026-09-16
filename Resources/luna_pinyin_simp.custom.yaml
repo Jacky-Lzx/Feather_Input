@@ -1,0 +1,10 @@
+patch:
+  schema/dependencies/@next: feather_english
+  engine/translators/@next: table_translator@feather_english
+  # Keep ordinary lowercase Pinyin ahead of English completions. English words
+  # still rise when there is no matching Chinese candidate or after learning.
+  feather_english:
+    __include: feather_english.schema:/translator
+    initial_quality: -1
+  recognizer/patterns/uppercase: ""
+  speller/alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA

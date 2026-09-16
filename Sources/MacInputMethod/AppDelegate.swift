@@ -9,7 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let resources = Bundle.main.resourcePath else { return }
         let smokeTest = CommandLine.arguments.contains("--smoke-test")
         let smokeDefaults = UserDefaults.standard
-        let smokeKeys = ["aiPinyinGenerationEnabled", "inputModeMemoryPolicy", "inputModeGlobalASCII", "inputModeByApplication"]
+        let smokeKeys = ["aiPinyinGenerationEnabled", "aiCandidateScoringEnabled", "aiRerankingEnabled",
+                         "aiRecommendationEnabled", "aiContinuationEnabled", "inputModeMemoryPolicy",
+                         "inputModeGlobalASCII", "inputModeByApplication"]
         let savedSmokeDefaults = smokeTest ? smokeKeys.map { ($0, smokeDefaults.object(forKey: $0)) } : []
         let restoreSmokeDefaults = {
             for (key, value) in savedSmokeDefaults {
@@ -29,7 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             PersistentModeIndicator.shared.refresh()
             if smokeTest {
-                smokeDefaults.set(false, forKey: "aiPinyinGenerationEnabled")
+                for key in ["aiPinyinGenerationEnabled", "aiCandidateScoringEnabled", "aiRerankingEnabled",
+                            "aiRecommendationEnabled", "aiContinuationEnabled"] {
+                    smokeDefaults.set(false, forKey: key)
+                }
                 smokeDefaults.set(InputModeMemoryPolicy.global.rawValue, forKey: "inputModeMemoryPolicy")
                 smokeDefaults.set(false, forKey: "inputModeGlobalASCII")
                 try PersistentModeIndicator.verify()

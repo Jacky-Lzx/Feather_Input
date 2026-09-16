@@ -3,9 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p .deps dist/rime dist/licenses
 fetch() {
-  local name="$1" revision="$2"
+  local name="$1" revision="$2" repository="${3:-rime/rime-$1}"
   local path=".deps/$name"
-  if [ ! -d "$path/.git" ]; then git clone "https://github.com/rime/rime-$name.git" "$path"; fi
+  if [ ! -d "$path/.git" ]; then git clone "https://github.com/$repository.git" "$path"; fi
   if ! git -C "$path" cat-file -e "$revision^{commit}" 2>/dev/null; then git -C "$path" fetch origin "$revision"; fi
   git -C "$path" checkout --detach "$revision"
   if [ "$name" = essay ]; then cp "$path/essay.txt" dist/rime/; else cp "$path"/*.yaml dist/rime/; fi
@@ -17,7 +17,8 @@ fetch prelude 082425ea0684bca36474415d4a0e8db9b016487e
 # stroke revision is pinned alongside the other data repositories.
 fetch stroke 1e8fff9b9494ddec23b0cbc526bcfd8171a6fd48
 fetch essay e9b1a374a6ea015fca5bdd04318924b4483ac35a
-cp Resources/default.custom.yaml dist/rime/
+fetch easy-en 54a4a07289412efc54134092c0d945f895a71ed3 BlindingDark/rime-easy-en
+cp Resources/*.custom.yaml Resources/*.dict.yaml Resources/feather_english.schema.yaml dist/rime/
 mkdir -p dist/rime/opencc
 cp -R "$(brew --prefix opencc)/share/opencc/"* dist/rime/opencc/
 
