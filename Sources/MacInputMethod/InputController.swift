@@ -490,6 +490,19 @@ final class InputController: IMKInputController {
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
         let composing = session?.preedit.text.isEmpty == false
+        let clearsComposition = event.type == .keyDown && composing && event.keyCode == 13 &&
+            shortcutFlags.contains(.control) && shortcutFlags.intersection([.command, .option]).isEmpty
+        if clearsComposition {
+            rightControlTap.cancel()
+            session?.clear()
+            _ = session?.takeCommit()
+            frozenPrediction = nil
+            invalidateRecommendation(clearContext: true)
+            candidatesPanel.hide()
+            generatedPanel.hide()
+            refresh(client, allowScoring: false)
+            return true
+        }
         let expandedNavigation = expandedTexts != nil &&
             (event.type == .flagsChanged || [UInt16(4), 37, 38, 40].contains(event.keyCode))
         let changesPosition = !expandedNavigation && (event.type != .keyDown || event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false || (!composing && [51, 117, 123, 124, 125, 126, 115, 119, 36, 48].contains(event.keyCode)))
@@ -1026,6 +1039,29 @@ final class InputController: IMKInputController {
         controller.secureInputEnabled = { false }
         controller.deactivateServer(client)
         print("PASS: secure input passes u/letters/digits/delete to host, discards composition without insertion")
+    }
+
+    static func verifyControlW(server: IMKServer) throws {
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        controller.activateServer(client)
+        guard let session = controller.session else { throw Engine.Failure.schemaUnavailable }
+        for key in "nihao".utf8 { session.process(Int32(key)) }
+        controller.refresh(client)
+        guard !session.preedit.text.isEmpty, !client.marked.isEmpty else { throw Engine.Failure.schemaUnavailable }
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0,
+            windowNumber: 0, context: nil, characters: "\u{17}", charactersIgnoringModifiers: "w",
+            isARepeat: false, keyCode: 13)!
+        guard controller.handle(event, client: client), session.preedit.text.isEmpty, session.rawInput.isEmpty,
+              client.marked.isEmpty, client.committed.isEmpty,
+              !controller.candidatesPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+        guard !controller.handle(event, client: client), client.committed.isEmpty else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        controller.deactivateServer(client)
+        print("PASS: Ctrl-W clears active pinyin without reaching the host and passes through when idle")
     }
 
     static func verifyFocusIndicator(server: IMKServer) throws {

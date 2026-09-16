@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try CandidatePanel.verifyPresentation()
                 try CandidateDebugWindow.verify()
                 try InputController.verifySecureInput(server: server!)
+                try InputController.verifyControlW(server: server!)
                 try InputController.verifyRepeatedPaging(server: server!)
                 try InputController.verifyKeyboardAndClick(server: server!)
                 try InputController.verifyCapsLock(server: server!)
