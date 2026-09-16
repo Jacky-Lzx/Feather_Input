@@ -25,11 +25,13 @@ echo "正在检查 shell 脚本……"
 sh -n \
     scripts/build-macos-dev-harness.sh \
     scripts/test-macos-dev-harness.sh \
+    scripts/test-rime-traces.sh \
     scripts/format-macos.sh \
     scripts/check-macos.sh
 shellcheck \
     scripts/build-macos-dev-harness.sh \
     scripts/test-macos-dev-harness.sh \
+    scripts/test-rime-traces.sh \
     scripts/format-macos.sh \
     scripts/check-macos.sh
 

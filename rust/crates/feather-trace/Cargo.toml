@@ -1,0 +1,18 @@
+[package]
+name = "feather-trace"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+feather-core = { path = "../feather-core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+feather-engine-lexicon = { path = "../feather-engine-lexicon" }
+feather-engine-rime = { path = "../feather-engine-rime" }
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+{
+  "name": "退格修改组合并取消",
+  "steps": [
+    { "action": "activate" },
+    {
+      "action": "text",
+      "value": "ni",
+      "expect": { "handled": true, "candidate_count_min": 1 }
+    },
+    {
+      "action": "key",
+      "key": "backspace",
+      "expect": { "handled": true, "no_commit": true, "candidate_count_min": 1 }
+    },
+    {
+      "action": "key",
+      "key": "escape",
+      "expect": { "handled": true, "no_commit": true, "preedit": "" }
+    }
+  ]
+}

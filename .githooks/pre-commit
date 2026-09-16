@@ -4,7 +4,7 @@ set -eu
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-scope="rust platforms/macos/dev-harness scripts/build-macos-dev-harness.sh scripts/test-macos-dev-harness.sh scripts/format-macos.sh scripts/check-macos.sh"
+scope="rust platforms/macos/dev-harness scripts/build-macos-dev-harness.sh scripts/test-macos-dev-harness.sh scripts/test-rime-traces.sh scripts/format-macos.sh scripts/check-macos.sh"
 
 if ! git diff --quiet -- $scope; then
     echo "提交前检查失败：本次代码范围中存在未暂存修改。" >&2

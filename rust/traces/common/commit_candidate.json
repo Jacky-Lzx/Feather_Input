@@ -1,0 +1,28 @@
+{
+  "name": "输入完整拼音并按稳定候选身份提交",
+  "steps": [
+    {
+      "action": "activate",
+      "expect": { "handled": true, "active": true, "mode": "native" }
+    },
+    {
+      "action": "text",
+      "value": "nihao",
+      "expect": {
+        "handled": true,
+        "no_commit": true,
+        "candidates_contain": ["你好"]
+      }
+    },
+    {
+      "action": "select_candidate",
+      "text": "你好",
+      "expect": {
+        "handled": true,
+        "commit": "你好",
+        "preedit": "",
+        "candidate_count": 0
+      }
+    }
+  ]
+}

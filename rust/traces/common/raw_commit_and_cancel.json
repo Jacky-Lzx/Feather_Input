@@ -1,0 +1,18 @@
+{
+  "name": "回车提交原始输入并用 Escape 取消组合",
+  "steps": [
+    { "action": "activate" },
+    { "action": "text", "value": "nihao", "expect": { "handled": true } },
+    {
+      "action": "key",
+      "key": "enter",
+      "expect": { "handled": true, "commit": "nihao", "preedit": "" }
+    },
+    { "action": "text", "value": "ni", "expect": { "handled": true } },
+    {
+      "action": "key",
+      "key": "escape",
+      "expect": { "handled": true, "no_commit": true, "preedit": "" }
+    }
+  ]
+}

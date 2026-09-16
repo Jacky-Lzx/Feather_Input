@@ -6,6 +6,7 @@ Feather Input 正在以跨平台 Rust 核心重新实现。当前代码包含平
 主要文档：
 
 - [Rust 架构](docs/rust-architecture.md)
+- [输入法行为 Trace](docs/behavior-traces.md)
 - [Rust workspace](rust/README.md)
 - [macOS 开发调试壳](platforms/macos/dev-harness/README.md)
 

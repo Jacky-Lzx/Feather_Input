@@ -1,0 +1,19 @@
+{
+  "name": "拒绝旧 revision 的候选选择",
+  "steps": [
+    { "action": "activate" },
+    {
+      "action": "text",
+      "value": "ni",
+      "expect": { "handled": true, "candidate_count_min": 1 }
+    },
+    { "action": "save_candidate", "name": "old-ni", "text": "你" },
+    { "action": "text", "value": "h", "expect": { "handled": true } },
+    {
+      "action": "select_saved_candidate",
+      "name": "old-ni",
+      "require_stale": true,
+      "expect": { "handled": false, "no_commit": true }
+    }
+  ]
+}

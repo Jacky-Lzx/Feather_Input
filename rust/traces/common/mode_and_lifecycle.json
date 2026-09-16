@@ -1,0 +1,45 @@
+{
+  "name": "直输模式与激活生命周期",
+  "steps": [
+    {
+      "action": "text",
+      "value": "n",
+      "expect": { "handled": false, "active": false, "preedit": "" }
+    },
+    { "action": "activate", "expect": { "active": true, "mode": "native" } },
+    {
+      "action": "set_mode",
+      "mode": "direct",
+      "expect": { "handled": true, "mode": "direct", "preedit": "" }
+    },
+    {
+      "action": "text",
+      "value": "ni",
+      "expect": { "handled": false, "mode": "direct", "preedit": "" }
+    },
+    {
+      "action": "set_mode",
+      "mode": "native",
+      "expect": { "handled": true, "mode": "native" }
+    },
+    {
+      "action": "text",
+      "value": "ni",
+      "expect": { "handled": true, "candidate_count_min": 1 }
+    },
+    {
+      "action": "deactivate",
+      "expect": {
+        "handled": true,
+        "active": false,
+        "preedit": "",
+        "candidate_count": 0
+      }
+    },
+    {
+      "action": "text",
+      "value": "n",
+      "expect": { "handled": false, "active": false, "preedit": "" }
+    }
+  ]
+}

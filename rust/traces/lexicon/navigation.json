@@ -1,0 +1,29 @@
+{
+  "name": "参考词典候选导航",
+  "steps": [
+    { "action": "activate" },
+    {
+      "action": "text",
+      "value": "ni",
+      "expect": {
+        "candidates_exact": ["你", "尼", "你好"],
+        "highlighted_text": "你"
+      }
+    },
+    {
+      "action": "key",
+      "key": "down",
+      "expect": { "handled": true, "highlighted_text": "尼" }
+    },
+    {
+      "action": "key",
+      "key": "up",
+      "expect": { "handled": true, "highlighted_text": "你" }
+    },
+    {
+      "action": "key",
+      "key": "page_up",
+      "expect": { "handled": true, "highlighted_text": "你好" }
+    }
+  ]
+}

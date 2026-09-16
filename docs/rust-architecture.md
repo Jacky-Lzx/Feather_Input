@@ -115,3 +115,7 @@ Rime 按键事件和候选迭代操作。未来的 Rust 实现可以使用解析
 Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入源，使用独立用户
 数据目录，并在界面中显示预编辑、候选、revision 和候选 ID。它是 macOS 平台适配
 层的前置验证工具，不承担正式输入法客户端兼容性。
+
+`feather-trace` 使用严格 JSON 场景记录平台无关的输入事件和语义断言。Runner 在
+运行时解析不透明候选 ID，并自动验证 revision、ID 唯一性、UTF-8 光标和高亮范围。
+通用场景可以由参考词典、librime 适配器和未来原生 Rust 引擎共同执行。

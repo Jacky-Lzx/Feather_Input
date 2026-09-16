@@ -13,6 +13,8 @@ Swift/InputMethodKit 应用并行存在：当前应用继续作为行为基准�
   提供真实方案、候选和上屏行为。
 - `feather-ffi`：面向 Swift、Windows TSF 和 Linux 输入法适配层的 C ABI。目前
   内置参考引擎。
+- `feather-trace`：平台无关的 JSON 行为场景和执行器，用于让参考引擎、librime 和
+  未来原生 Rust 引擎运行同一套语义验证。
 
 运行整个 workspace 的测试：
 
@@ -36,3 +38,6 @@ FEATHER_RIME_SHARED_DATA_DIR=/absolute/path/to/rime \
 ```
 
 参考词典有意保持很小。它是用于验证架构的可执行样例，不用于替代现有 Rime 词库。
+
+行为 Trace 的格式、场景位置和真实 librime 运行方法见
+[`docs/behavior-traces.md`](../docs/behavior-traces.md)。
