@@ -32,7 +32,20 @@ scripts/build-macos-input-method.sh
 构建脚本会递归收集 librime 的非系统动态库依赖到 `Contents/Frameworks`，并将加载路径
 改为 `@rpath`，同时把每项依赖的许可证复制到 `Resources/ThirdPartyLicenses`。生成的
 bundle 不再要求目标 Mac 安装 Homebrew；当前产物仍只包含构建主机的单一 CPU 架构，
-通用二进制和正式发布签名属于后续阶段。
+正式发布签名属于后续阶段。
+
+同时安装 arm64 与 x86_64 Rust target 和对应架构的 librime 后，可以构建 Universal
+输入法：
+
+```sh
+scripts/build-macos-universal.sh input-method
+```
+
+默认从 `/opt/homebrew/opt/librime` 读取 arm64 依赖，从
+`/usr/local/opt/librime` 读取 x86_64 依赖。非默认安装位置可以分别通过
+`FEATHER_RIME_ARM64_PREFIX` 和 `FEATHER_RIME_X86_64_PREFIX` 指定。构建器先生成两个
+完整的单架构 bundle，再合并其中的所有 Mach-O；缺少 target、依赖架构错误或两个
+bundle 的文件集合不一致都会中止构建。
 
 不安装 bundle 的进程内 IMK 客户端测试：
 

@@ -60,5 +60,7 @@ open .build/macos-dev-harness/FeatherInputDevHarness.app
 由 Swift 桥接层转换成可读错误；退出时先关闭 librime 会话，再释放 ABI handle。
 
 开发构建会把 librime 的非系统动态库闭包复制到 app，并重写为 `@rpath`，运行时不再
-依赖目标机器的 Homebrew。当前产物仍只包含构建主机的单一 CPU 架构；通用二进制、
-正式签名和发布打包属于后续 portable build 阶段。
+依赖目标机器的 Homebrew。普通构建仍只包含指定的单一 CPU 架构；准备好两个架构的
+Rust target 和 librime 后，可以运行 `scripts/build-macos-universal.sh dev-harness`
+构建 Universal 调试壳。依赖前缀配置与输入法构建相同；正式签名和发布打包属于后续
+阶段。

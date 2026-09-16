@@ -29,24 +29,43 @@ while IFS= read -r binary; do
     fi
     printf '%s\n' "$binary" >>"$seen"
 
-    binary_id=$(otool -D "$binary" 2>/dev/null | tail -n 1 | sed 's/^[[:space:]]*//')
-    otool -L "$binary" | awk 'NR > 1 { print $1 }' >"$dependencies"
+    otool -L "$binary" | awk '/^[[:space:]]/ { print $1 }' >"$dependencies"
     while IFS= read -r dependency; do
         [ -n "$dependency" ] || continue
-        [ "$dependency" = "$binary_id" ] && continue
+        load_path=$dependency
         case "$dependency" in
-            /System/* | /usr/lib/* | @rpath/* | @loader_path/* | @executable_path/*)
+            /System/* | /usr/lib/* | @loader_path/* | @executable_path/*)
                 continue
+                ;;
+            @rpath/*)
+                name=${dependency#@rpath/}
+                [ -f "$frameworks/$name" ] && continue
+                resolved_dependency=
+                previous_ifs=$IFS
+                IFS=:
+                for search_directory in ${FEATHER_DYLIB_SEARCH_DIRS:-}; do
+                    if [ -f "$search_directory/$name" ]; then
+                        resolved_dependency="$search_directory/$name"
+                        break
+                    fi
+                done
+                IFS=$previous_ifs
+                if [ -z "$resolved_dependency" ]; then
+                    echo "无法解析动态库加载路径：${dependency}（来自 ${binary}）" >&2
+                    echo "请通过 FEATHER_DYLIB_SEARCH_DIRS 提供以冒号分隔的搜索目录。" >&2
+                    exit 1
+                fi
+                dependency=$resolved_dependency
                 ;;
             /*) ;;
             *)
-                echo "无法识别动态库加载路径：$dependency（来自 $binary）" >&2
+                echo "无法识别动态库加载路径：${dependency}（来自 ${binary}）" >&2
                 exit 1
                 ;;
         esac
 
         if [ ! -f "$dependency" ]; then
-            echo "动态库依赖不存在：$dependency（来自 $binary）" >&2
+            echo "动态库依赖不存在：${dependency}（来自 ${binary}）" >&2
             exit 1
         fi
         name=$(basename "$dependency")
@@ -88,6 +107,6 @@ while IFS= read -r binary; do
                 exit 1
             fi
         fi
-        install_name_tool -change "$dependency" "@rpath/$name" "$binary"
+        install_name_tool -change "$load_path" "@rpath/$name" "$binary"
     done <"$dependencies"
 done <"$queue"

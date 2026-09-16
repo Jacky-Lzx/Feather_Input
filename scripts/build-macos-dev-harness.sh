@@ -4,12 +4,30 @@ set -eu
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 source_root="$repo_root/platforms/macos/dev-harness"
 shared_root="$repo_root/platforms/macos/shared"
-build_root="$repo_root/.build/macos-dev-harness"
+build_root=${FEATHER_MACOS_BUILD_ROOT:-"$repo_root/.build/macos-dev-harness"}
 app="$build_root/FeatherInputDevHarness.app"
 executable="$app/Contents/MacOS/FeatherInputDevHarness"
 frameworks="$app/Contents/Frameworks"
 resources="$app/Contents/Resources"
-rust_library="$repo_root/rust/target/release/libfeather_ffi.dylib"
+macos_arch=${FEATHER_MACOS_ARCH:-$(uname -m)}
+deployment_target=${FEATHER_MACOS_DEPLOYMENT_TARGET:-14.0}
+
+case "$macos_arch" in
+    arm64)
+        rust_target=aarch64-apple-darwin
+        ;;
+    x86_64)
+        rust_target=x86_64-apple-darwin
+        ;;
+    *)
+        echo "不支持的 macOS 架构：$macos_arch" >&2
+        exit 1
+        ;;
+esac
+
+rust_target_root=${FEATHER_RUST_TARGET_DIR:-"$repo_root/.build/rust-targets"}
+rust_output="$rust_target_root/$rust_target/release"
+rust_library="$rust_output/libfeather_ffi.dylib"
 
 if [ -n "${FEATHER_RIME_SHARED_DATA_DIR:-}" ]; then
     shared_data=$FEATHER_RIME_SHARED_DATA_DIR
@@ -23,8 +41,13 @@ if [ ! -f "$shared_data/essay.txt" ]; then
     exit 1
 fi
 
-echo "正在构建 Rust C ABI……"
-cargo build --manifest-path "$repo_root/rust/Cargo.toml" --release -p feather-ffi
+echo "正在构建 $macos_arch Rust C ABI……"
+CARGO_TARGET_DIR=$rust_target_root \
+    cargo build \
+    --manifest-path "$repo_root/rust/Cargo.toml" \
+    --release \
+    --target "$rust_target" \
+    -p feather-ffi
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$frameworks" "$resources"
@@ -36,9 +59,10 @@ install_name_tool -id @rpath/libfeather_ffi.dylib "$frameworks/libfeather_ffi.dy
 echo "正在编译 AppKit 调试壳……"
 swiftc \
     -parse-as-library \
+    -target "$macos_arch-apple-macosx$deployment_target" \
     -module-cache-path "$build_root/module-cache" \
     -I "$shared_root/CFeatherIME" \
-    -L "$repo_root/rust/target/release" \
+    -L "$rust_output" \
     -lfeather_ffi \
     -framework AppKit \
     -Xlinker -rpath \

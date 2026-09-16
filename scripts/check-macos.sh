@@ -74,10 +74,12 @@ sh -n \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
     scripts/build-macos-input-source-manager.sh \
+    scripts/build-macos-universal.sh \
     scripts/bundle-macos-dylibs.sh \
     scripts/check-macos-bundle-dependencies.sh \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
+    scripts/merge-macos-app-slices.sh \
     scripts/run-macos-client-acceptance.sh \
     scripts/status-macos-input-method.sh \
     scripts/uninstall-macos-input-method.sh \
@@ -91,10 +93,12 @@ shellcheck \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
     scripts/build-macos-input-source-manager.sh \
+    scripts/build-macos-universal.sh \
     scripts/bundle-macos-dylibs.sh \
     scripts/check-macos-bundle-dependencies.sh \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
+    scripts/merge-macos-app-slices.sh \
     scripts/run-macos-client-acceptance.sh \
     scripts/status-macos-input-method.sh \
     scripts/uninstall-macos-input-method.sh \

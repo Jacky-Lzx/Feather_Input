@@ -51,22 +51,32 @@ fn main() {
     let archive = output.join("libfeather_rime_bridge.a");
     let compiler = env::var_os("CC").unwrap_or_else(|| "cc".into());
     let archiver = env::var_os("AR").unwrap_or_else(|| "ar".into());
+    let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Cargo 必须提供目标操作系统");
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Cargo 必须提供目标架构");
 
-    run(
-        Command::new(compiler)
-            .arg("-std=c11")
-            .arg("-fPIC")
-            .arg("-Wall")
-            .arg("-Wextra")
-            .arg("-Werror")
-            .arg("-I")
-            .arg(&include)
-            .arg("-c")
-            .arg(Path::new("src/bridge.c"))
-            .arg("-o")
-            .arg(&object),
-        "编译 librime C bridge",
-    );
+    let mut compile = Command::new(compiler);
+    compile
+        .arg("-std=c11")
+        .arg("-fPIC")
+        .arg("-Wall")
+        .arg("-Wextra")
+        .arg("-Werror");
+    if target_os == "macos" {
+        let clang_arch = match target_arch.as_str() {
+            "aarch64" => "arm64",
+            "x86_64" => "x86_64",
+            unsupported => panic!("不支持的 macOS C bridge 目标架构：{unsupported}"),
+        };
+        compile.arg("-arch").arg(clang_arch);
+    }
+    compile
+        .arg("-I")
+        .arg(&include)
+        .arg("-c")
+        .arg(Path::new("src/bridge.c"))
+        .arg("-o")
+        .arg(&object);
+    run(&mut compile, "编译 librime C bridge");
     run(
         Command::new(archiver).arg("crs").arg(&archive).arg(&object),
         "归档 librime C bridge",
