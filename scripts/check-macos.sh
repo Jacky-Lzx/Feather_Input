@@ -64,6 +64,7 @@ sh -n \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
     scripts/build-macos-input-source-manager.sh \
+    scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
     scripts/status-macos-input-method.sh \
     scripts/uninstall-macos-input-method.sh \
@@ -76,6 +77,7 @@ shellcheck \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
     scripts/build-macos-input-source-manager.sh \
+    scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
     scripts/status-macos-input-method.sh \
     scripts/uninstall-macos-input-method.sh \
@@ -105,7 +107,7 @@ development_default_state=$(
         -c 'Print :ComponentInputModeDict:tsInputModeListKey:im.feather.inputmethod.rustdev.FeatherInput.Hans:tsInputModeDefaultStateKey' \
         platforms/macos/input-method/Info.plist
 )
-if [ "$development_default_state" != false ]; then
-    echo "InputMethodKit 开发输入模式必须默认为禁用。" >&2
+if [ "$development_default_state" != true ]; then
+    echo "InputMethodKit 开发输入模式必须在显式安装后可用。" >&2
     exit 1
 fi

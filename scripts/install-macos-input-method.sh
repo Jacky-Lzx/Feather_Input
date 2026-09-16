@@ -65,10 +65,6 @@ if ! "$manager" register "$destination"; then
     echo "输入源注册失败，正在恢复安装前状态。" >&2
     exit 1
 fi
-if ! "$manager" disable "$bundle_id"; then
-    echo "无法将新注册的开发输入源保持为禁用状态，正在恢复安装前状态。" >&2
-    exit 1
-fi
 install_complete=true
 if [ -n "$backup_root" ] && [ -d "$backup_root" ]; then
     rm -rf "$backup_root"
@@ -79,4 +75,4 @@ if ! "$manager" status "$bundle_id"; then
 fi
 
 echo "安装完成：$destination"
-echo '请在系统设置的键盘输入源中添加“Feather Rust Dev”；脚本不会自动切换当前输入源。'
+echo '“Feather Rust Dev”已可选择；脚本没有切换当前输入源。'

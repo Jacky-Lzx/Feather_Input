@@ -4,6 +4,7 @@ import Foundation
 private enum ManagerError: LocalizedError {
   case invalidArguments
   case registrationFailed(OSStatus)
+  case enableFailed(identifier: String, status: OSStatus)
   case disableFailed(identifier: String, status: OSStatus)
   case queryUnavailable
 
@@ -11,9 +12,11 @@ private enum ManagerError: LocalizedError {
     switch self {
     case .invalidArguments:
       return
-        "用法：input-source-manager register <bundle-path> | status <bundle-id> | disable <bundle-id>"
+        "用法：input-source-manager register <bundle-path> | status <bundle-id> | enable <bundle-id> | disable <bundle-id>"
     case .registrationFailed(let status):
       return "注册输入源失败：OSStatus=\(status)"
+    case .enableFailed(let identifier, let status):
+      return "启用输入源失败（\(identifier)）：OSStatus=\(status)"
     case .disableFailed(let identifier, let status):
       return "禁用输入源失败（\(identifier)）：OSStatus=\(status)"
     case .queryUnavailable:
@@ -25,6 +28,7 @@ private enum ManagerError: LocalizedError {
 private struct SourceDescription {
   let identifier: String
   let enabled: Bool
+  let enableCapable: Bool
   let selectable: Bool
 }
 
@@ -56,12 +60,21 @@ private enum InputSourceManager {
       } else {
         for source in sources {
           print(
-            "\(source.identifier)\tenabled=\(source.enabled)\tselectable=\(source.selectable)"
+            "\(source.identifier)\tenabled=\(source.enabled)\tenableCapable=\(source.enableCapable)\tselectable=\(source.selectable)"
           )
         }
       }
-    case "disable":
+    case "enable":
       for (source, description) in try sourcePairs(bundleIdentifier: argument)
+      where description.enableCapable && !description.enabled {
+        let status = TISEnableInputSource(source)
+        guard status == noErr else {
+          throw ManagerError.enableFailed(identifier: description.identifier, status: status)
+        }
+        print("已启用输入源：\(description.identifier)")
+      }
+    case "disable":
+      for (source, description) in try sourcePairs(bundleIdentifier: argument).reversed()
       where description.enabled {
         let status = TISDisableInputSource(source)
         guard status == noErr else {
@@ -94,6 +107,7 @@ private enum InputSourceManager {
         SourceDescription(
           identifier: identifier,
           enabled: boolProperty(source, key: kTISPropertyInputSourceIsEnabled),
+          enableCapable: boolProperty(source, key: kTISPropertyInputSourceIsEnableCapable),
           selectable: boolProperty(source, key: kTISPropertyInputSourceIsSelectCapable)
         )
       )

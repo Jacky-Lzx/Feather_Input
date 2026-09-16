@@ -55,7 +55,7 @@
 					<string>Latn</string>
 				</array>
 				<key>tsInputModeDefaultStateKey</key>
-				<false/>
+				<true/>
 				<key>tsInputModeIsVisibleKey</key>
 				<true/>
 				<key>tsInputModePrimaryInScriptKey</key>

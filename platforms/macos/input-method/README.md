@@ -48,8 +48,17 @@ scripts/install-macos-input-method.sh
 scripts/status-macos-input-method.sh
 ```
 
-注册后脚本会显式禁用开发输入模式，也不会切换输入源。请在“系统设置 → 键盘 → 文本
-输入 → 编辑”中手动添加“Feather Rust Dev”，避免脚本改变当前键盘状态。
+注册后开发输入模式会进入可选择状态，但脚本不会调用 `TISSelectInputSource`，因此不会
+切换当前输入源。可以直接从菜单栏输入法菜单选择“Feather Rust Dev”。
+
+如果升级旧安装后仍未显示，可以显式重新注册并启用它：
+
+```sh
+scripts/enable-macos-input-method.sh
+```
+
+该脚本只调用 `TISEnableInputSource`，不会调用 `TISSelectInputSource`，因此不会切换当前
+输入源。启用后可从菜单栏输入法菜单选择“Feather Rust Dev”。
 
 卸载时只会禁用并删除开发 Bundle ID 对应的 bundle，不删除用户词库，也不会触碰
 `im.feather.inputmethod.FeatherInput`：
