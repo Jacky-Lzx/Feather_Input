@@ -2,11 +2,11 @@
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-source_root="$repo_root/platforms/macos/dev-harness"
+source_root="$repo_root/platforms/macos/input-method"
 shared_root="$repo_root/platforms/macos/shared"
-build_root="$repo_root/.build/macos-dev-harness"
-app="$build_root/FeatherInputDevHarness.app"
-executable="$app/Contents/MacOS/FeatherInputDevHarness"
+build_root="$repo_root/.build/macos-input-method"
+app="$build_root/FeatherInputRustDev.app"
+executable="$app/Contents/MacOS/FeatherInputRustDev"
 frameworks="$app/Contents/Frameworks"
 resources="$app/Contents/Resources"
 rust_library="$repo_root/rust/target/release/libfeather_ffi.dylib"
@@ -33,7 +33,7 @@ cp "$source_root/Info.plist" "$app/Contents/Info.plist"
 cp "$rust_library" "$frameworks/libfeather_ffi.dylib"
 install_name_tool -id @rpath/libfeather_ffi.dylib "$frameworks/libfeather_ffi.dylib"
 
-echo "正在编译 AppKit 调试壳……"
+echo "正在编译 InputMethodKit 开发输入法……"
 swiftc \
     -parse-as-library \
     -module-cache-path "$build_root/module-cache" \
@@ -41,6 +41,8 @@ swiftc \
     -L "$repo_root/rust/target/release" \
     -lfeather_ffi \
     -framework AppKit \
+    -framework Carbon \
+    -framework InputMethodKit \
     -Xlinker -rpath \
     -Xlinker @executable_path/../Frameworks \
     "$shared_root"/Sources/*.swift \
@@ -54,4 +56,5 @@ echo "正在复制 Rime 共享数据……"
 ditto "$shared_data" "$resources/rime"
 
 codesign --force --sign - "$app" >/dev/null
-echo "构建完成：$app"
+codesign --verify --strict "$app"
+echo "构建完成（未安装）：$app"

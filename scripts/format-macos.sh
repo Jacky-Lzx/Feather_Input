@@ -7,4 +7,7 @@ cd "$repo_root"
 xcrun swift-format format \
     --in-place \
     --recursive \
-    platforms/macos/dev-harness/Sources
+    platforms/macos/shared/Sources \
+    platforms/macos/dev-harness/Sources \
+    platforms/macos/input-method/Sources \
+    platforms/macos/input-method/Tests

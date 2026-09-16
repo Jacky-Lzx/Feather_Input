@@ -2,14 +2,13 @@
 set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-source_root="$repo_root/platforms/macos/dev-harness"
+source_root="$repo_root/platforms/macos/input-method"
 shared_root="$repo_root/platforms/macos/shared"
-build_root="$repo_root/.build/macos-dev-harness"
-app="$build_root/FeatherInputDevHarness.app"
-executable="$app/Contents/MacOS/FeatherInputDevHarness"
+build_root="$repo_root/.build/macos-input-method-tests"
+app="$build_root/FeatherInputMethodSmoke.app"
+executable="$app/Contents/MacOS/FeatherInputMethodSmoke"
 frameworks="$app/Contents/Frameworks"
-resources="$app/Contents/Resources"
-rust_library="$repo_root/rust/target/release/libfeather_ffi.dylib"
+rust_library="$repo_root/rust/target/debug/libfeather_ffi.dylib"
 
 if [ -n "${FEATHER_RIME_SHARED_DATA_DIR:-}" ]; then
     shared_data=$FEATHER_RIME_SHARED_DATA_DIR
@@ -23,35 +22,42 @@ if [ ! -f "$shared_data/essay.txt" ]; then
     exit 1
 fi
 
-echo "正在构建 Rust C ABI……"
-cargo build --manifest-path "$repo_root/rust/Cargo.toml" --release -p feather-ffi
-
+cargo build --manifest-path "$repo_root/rust/Cargo.toml" -p feather-ffi
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$frameworks" "$resources"
+mkdir -p "$app/Contents/MacOS" "$frameworks"
 mkdir -p "$build_root/module-cache"
 cp "$source_root/Info.plist" "$app/Contents/Info.plist"
+plutil -replace CFBundleExecutable -string FeatherInputMethodSmoke "$app/Contents/Info.plist"
+plutil -replace CFBundleIdentifier \
+    -string im.feather.inputmethod.rustdev.Smoke \
+    "$app/Contents/Info.plist"
+plutil -replace InputMethodConnectionName \
+    -string im.feather.inputmethod.rustdev.Smoke_Connection \
+    "$app/Contents/Info.plist"
 cp "$rust_library" "$frameworks/libfeather_ffi.dylib"
 install_name_tool -id @rpath/libfeather_ffi.dylib "$frameworks/libfeather_ffi.dylib"
-
-echo "正在编译 AppKit 调试壳……"
 swiftc \
     -parse-as-library \
     -module-cache-path "$build_root/module-cache" \
     -I "$shared_root/CFeatherIME" \
-    -L "$repo_root/rust/target/release" \
+    -L "$repo_root/rust/target/debug" \
     -lfeather_ffi \
     -framework AppKit \
+    -framework Carbon \
+    -framework InputMethodKit \
     -Xlinker -rpath \
     -Xlinker @executable_path/../Frameworks \
     "$shared_root"/Sources/*.swift \
-    "$source_root"/Sources/*.swift \
+    "$source_root"/Sources/FeatherInputEnvironment.swift \
+    "$source_root"/Sources/InputController.swift \
+    "$source_root"/Sources/TextCoordinates.swift \
+    "$source_root"/Tests/*.swift \
     -o "$executable"
 
 rust_install_name=$(otool -D "$rust_library" | tail -n 1 | sed 's/^[[:space:]]*//')
 install_name_tool -change "$rust_install_name" @rpath/libfeather_ffi.dylib "$executable"
-
-echo "正在复制 Rime 共享数据……"
-ditto "$shared_data" "$resources/rime"
-
 codesign --force --sign - "$app" >/dev/null
-echo "构建完成：$app"
+
+user_data=$(mktemp -d /tmp/feather-input-method-smoke.XXXXXX)
+trap 'rm -rf "$user_data"' EXIT HUP INT TERM
+"$executable" "$shared_data" "$user_data"

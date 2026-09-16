@@ -1,7 +1,8 @@
 # Feather Input
 
 Feather Input 正在以跨平台 Rust 核心重新实现。当前代码包含平台无关核心、librime
-适配器、稳定 C ABI，以及一个不会注册系统输入源的 macOS AppKit 开发调试壳。
+适配器、稳定 C ABI、一个不会注册系统输入源的 macOS AppKit 开发调试壳，以及隔离
+Bundle ID 的 InputMethodKit 开发适配层。
 
 主要文档：
 
@@ -9,6 +10,7 @@ Feather Input 正在以跨平台 Rust 核心重新实现。当前代码包含平
 - [输入法行为 Trace](docs/behavior-traces.md)
 - [Rust workspace](rust/README.md)
 - [macOS 开发调试壳](platforms/macos/dev-harness/README.md)
+- [macOS InputMethodKit 开发输入法](platforms/macos/input-method/README.md)
 
 Feather Input 是一个从零开始设计的跨平台输入法项目。
 
