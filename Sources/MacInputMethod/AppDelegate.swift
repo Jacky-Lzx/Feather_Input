@@ -8,6 +8,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let resources = Bundle.main.resourcePath else { return }
         let smokeTest = CommandLine.arguments.contains("--smoke-test")
+        let smokeDefaults = UserDefaults.standard
+        let smokeKeys = ["aiPinyinGenerationEnabled", "inputModeMemoryPolicy", "inputModeGlobalASCII", "inputModeByApplication"]
+        let savedSmokeDefaults = smokeTest ? smokeKeys.map { ($0, smokeDefaults.object(forKey: $0)) } : []
+        let restoreSmokeDefaults = {
+            for (key, value) in savedSmokeDefaults {
+                if let value { smokeDefaults.set(value, forKey: key) }
+                else { smokeDefaults.removeObject(forKey: key) }
+            }
+        }
         let user = smokeTest ? NSTemporaryDirectory() + "FeatherInput-smoke-" + UUID().uuidString : FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/FeatherInput").path
         do {
@@ -20,7 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             PersistentModeIndicator.shared.refresh()
             if smokeTest {
-                UserDefaults.standard.set(false, forKey: "aiPinyinGenerationEnabled")
+                smokeDefaults.set(false, forKey: "aiPinyinGenerationEnabled")
+                smokeDefaults.set(InputModeMemoryPolicy.global.rawValue, forKey: "inputModeMemoryPolicy")
+                smokeDefaults.set(false, forKey: "inputModeGlobalASCII")
                 try PersistentModeIndicator.verify()
                 try InputController.verifyMenuCommands(server: server!)
                 try CandidatePanel.verifyPresentation()
@@ -46,10 +57,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print("PASS: app startup, IMKServer, controller class, bundled engine, native candidate panel")
                 session.clear()
                 try? FileManager.default.removeItem(atPath: user)
+                restoreSmokeDefaults()
                 NSApp.terminate(nil)
             }
         } catch {
-            if smokeTest { fputs("FAIL: app smoke test: \(error)\n", stderr); exit(1) }
+            if smokeTest {
+                restoreSmokeDefaults()
+                fputs("FAIL: app smoke test: \(error)\n", stderr)
+                exit(1)
+            }
             let alert = NSAlert()
             alert.messageText = "Feather Input 无法启动"
             alert.informativeText = "引擎或词库加载失败：\(error)。请重新运行打包脚本。"

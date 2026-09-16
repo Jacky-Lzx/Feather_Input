@@ -391,6 +391,7 @@ final class InputController: IMKInputController {
     private var isActive = false
     private var lastCaret: NSRect?
     private var activeScheme: InputScheme?
+    private var activeApplication = "unknown"
     private var scheme: InputScheme {
         InputScheme(rawValue: UserDefaults.standard.string(forKey: "scheme") ?? "") ?? .full
     }
@@ -403,6 +404,13 @@ final class InputController: IMKInputController {
         isActive = true
         frozenPrediction = nil
         lastCaret = nil
+        if let client = sender as? IMKTextInput {
+            activeApplication = client.bundleIdentifier() ??
+                NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+        } else {
+            activeApplication = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+        }
+        ascii = InputModeMemory.shared.activate(application: activeApplication)
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
         session?.select(scheme)
@@ -910,6 +918,7 @@ final class InputController: IMKInputController {
         let target = commandClient(sender)
         commitComposition(target)
         ascii.toggle()
+        InputModeMemory.shared.update(ascii: ascii, application: activeApplication)
         session?.setASCII(ascii)
         PersistentModeIndicator.shared.update(ascii: ascii)
         guard let textClient = target as? IMKTextInput else { modeIndicator.hide(); return }
@@ -1464,8 +1473,15 @@ final class InputController: IMKInputController {
         }
         for key in "nihao".utf8 { session.process(Int32(key)) }
         controller.refresh(textClient)
-        guard !flags(1 << 18), flags(0), controller.ascii,
-              textClient.committed == "你好你好", textClient.marked.isEmpty,
+        // A held mode key belongs to Vim candidate navigation while composing;
+        // a bare tap switches language again after the composition is closed.
+        let controlDown = flags(1 << 18)
+        let controlUp = flags(0)
+        guard controlDown, controlUp, !controller.ascii, textClient.committed == "你好",
+              !textClient.marked.isEmpty else { throw Engine.Failure.schemaUnavailable }
+        controller.commitComposition(textClient)
+        guard textClient.committed == "你好你好", textClient.marked.isEmpty,
+              !flags(1 << 18), flags(0), controller.ascii,
               controller.modeIndicator.isVisible, controller.modeIndicator.text == "英文" else { throw Engine.Failure.schemaUnavailable }
         _ = flags(1 << 18)
         let shortcut = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0,

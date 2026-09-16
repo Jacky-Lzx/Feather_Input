@@ -29,6 +29,7 @@ private struct SettingsView: View {
     @AppStorage("focusModeUntilInput") private var focusModeUntilInput = true
     @AppStorage("focusModeDuration") private var focusModeDuration = 0.8
     @AppStorage("showPersistentMode") private var showPersistentMode = true
+    @AppStorage("inputModeMemoryPolicy") private var inputModeMemoryPolicy = InputModeMemoryPolicy.global.rawValue
     @AppStorage("aiFusionWeight") private var fusionWeight = 0.35
     @AppStorage("aiScoreNormalization") private var scoreNormalization = "character"
     @AppStorage("aiPinyinGenerationEnabled") private var pinyinGenerationEnabled = true
@@ -51,6 +52,14 @@ private struct SettingsView: View {
                         Text(mode.title).tag(mode.rawValue)
                     }
                 }
+                Picker("切换应用时的中英文状态", selection: $inputModeMemoryPolicy) {
+                    Text("全局记忆").tag(InputModeMemoryPolicy.global.rawValue)
+                    Text("按应用记忆").tag(InputModeMemoryPolicy.perApplication.rawValue)
+                    Text("恢复为中文").tag(InputModeMemoryPolicy.resetToChinese.rawValue)
+                    Text("恢复为英文").tag(InputModeMemoryPolicy.resetToEnglish.rawValue)
+                }
+                Text("全局记忆会让所有应用共享最后一次状态；按应用记忆会分别保存。恢复模式仅在切换到另一个应用时重置，同一应用内切换输入框不会重置。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("屏幕左下角常驻显示中／英", isOn: $showPersistentMode)
                 Toggle("焦点状态提示持续到开始输入", isOn: $focusModeUntilInput)
                 Text("开启后，光标旁的中英文提示保持显示，直到开始按键或失焦；关闭后显示 0.8 秒。下次获得焦点生效。")
