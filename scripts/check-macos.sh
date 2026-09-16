@@ -74,6 +74,8 @@ sh -n \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
     scripts/build-macos-input-source-manager.sh \
+    scripts/bundle-macos-dylibs.sh \
+    scripts/check-macos-bundle-dependencies.sh \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
     scripts/run-macos-client-acceptance.sh \
@@ -89,6 +91,8 @@ shellcheck \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
     scripts/build-macos-input-source-manager.sh \
+    scripts/bundle-macos-dylibs.sh \
+    scripts/check-macos-bundle-dependencies.sh \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
     scripts/run-macos-client-acceptance.sh \

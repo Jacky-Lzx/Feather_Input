@@ -59,5 +59,6 @@ open .build/macos-dev-harness/FeatherInputDevHarness.app
 调试壳要求 Feather C ABI v2 的全部基础能力。Rust 返回的结构化状态码和诊断消息会
 由 Swift 桥接层转换成可读错误；退出时先关闭 librime 会话，再释放 ABI handle。
 
-当前开发构建仍然依赖本机 Homebrew librime。消除绝对动态库依赖、通用二进制、签名
-和发布打包属于后续 portable build 阶段。
+开发构建会把 librime 的非系统动态库闭包复制到 app，并重写为 `@rpath`，运行时不再
+依赖目标机器的 Homebrew。当前产物仍只包含构建主机的单一 CPU 架构；通用二进制、
+正式签名和发布打包属于后续 portable build 阶段。

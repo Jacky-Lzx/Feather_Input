@@ -50,8 +50,17 @@ swiftc \
 rust_install_name=$(otool -D "$rust_library" | tail -n 1 | sed 's/^[[:space:]]*//')
 install_name_tool -change "$rust_install_name" @rpath/libfeather_ffi.dylib "$executable"
 
+echo "正在收集便携动态库……"
+"$repo_root/scripts/bundle-macos-dylibs.sh" \
+    "$frameworks/libfeather_ffi.dylib" \
+    "$frameworks" \
+    "$resources/ThirdPartyLicenses"
+
 echo "正在复制 Rime 共享数据……"
 ditto "$shared_data" "$resources/rime"
 
+find "$frameworks" -type f -name '*.dylib' -exec codesign --force --sign - {} \; >/dev/null
+"$repo_root/scripts/check-macos-bundle-dependencies.sh" "$app"
 codesign --force --sign - "$app" >/dev/null
+codesign --verify --deep --strict "$app"
 echo "构建完成：$app"

@@ -29,6 +29,11 @@ scripts/build-macos-input-method.sh
 点击候选使用 ABI 提供的不透明候选 ID；上下方向键逐项移动高亮，左右方向键翻页，具体
 候选状态仍由 librime 处理。安装注册和真实客户端验收将在后续独立提交中完成。
 
+构建脚本会递归收集 librime 的非系统动态库依赖到 `Contents/Frameworks`，并将加载路径
+改为 `@rpath`，同时把每项依赖的许可证复制到 `Resources/ThirdPartyLicenses`。生成的
+bundle 不再要求目标 Mac 安装 Homebrew；当前产物仍只包含构建主机的单一 CPU 架构，
+通用二进制和正式发布签名属于后续阶段。
+
 不安装 bundle 的进程内 IMK 客户端测试：
 
 ```sh
