@@ -762,9 +762,24 @@ final class InputController: IMKInputController {
     }
 
     private func textInputAvailable(_ client: IMKTextInput) -> Bool {
+        guard client.supportsUnicode() else { return false }
         let range = client.selectedRange()
-        guard range.location != NSNotFound, range.location >= 0, range.length >= 0 else { return false }
-        return client.supportsUnicode()
+        if range.location != NSNotFound, range.location >= 0, range.length >= 0 { return true }
+
+        // NSTextInputClient explicitly permits {NSNotFound, 0} when there is
+        // no selection. Menu-bar popovers (including Eudic's quick-search
+        // field) can report that transiently while still exposing a usable
+        // insertion point, so selection alone cannot identify a non-text view.
+        func isUsableCaret(_ rect: NSRect) -> Bool {
+            rect.origin.x.isFinite && rect.origin.y.isFinite && rect.width.isFinite &&
+                rect.height.isFinite && rect.height > 0
+        }
+        var caret = NSRect.zero
+        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
+        if isUsableCaret(caret) { return true }
+        var actual = NSRange(location: NSNotFound, length: 0)
+        return isUsableCaret(client.firstRect(forCharacterRange: NSRange(location: 0, length: 0),
+                                              actualRange: &actual))
     }
     override func commitComposition(_ sender: Any!) {
         guard !bypassSecureInput() else { return }
@@ -1271,6 +1286,27 @@ final class InputController: IMKInputController {
               !controller.candidatesPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(client)
         print("PASS: non-text clients do not open composition; Escape and candidate windows remain app-owned")
+    }
+    static func verifySelectionlessTextField(server: IMKServer) throws {
+        let client = SmokeTextClient()
+        client.selectionUnavailable = true
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        controller.secureInputEnabled = { false }
+        controller.activateServer(client)
+        func key(_ text: String, code: UInt16 = 0) -> Bool {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
+                isARepeat: false, keyCode: code)!
+            return controller.handle(event, client: client)
+        }
+        guard key("n"), key("i"), controller.session?.rawInput == "ni",
+              !client.marked.isEmpty, controller.candidatesPanel.isVisible,
+              key(" ", code: 49), !client.committed.isEmpty,
+              controller.session?.rawInput.isEmpty == true else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: selectionless popover text fields accept composition when caret geometry is available")
     }
     static func verifyGenerationLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard
