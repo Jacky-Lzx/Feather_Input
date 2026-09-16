@@ -18,4 +18,10 @@ Swift/InputMethodKit 应用并行存在：当前应用继续作为行为基准�
 cargo test --manifest-path rust/Cargo.toml
 ```
 
+运行与提交前 hook 相同的完整检查：
+
+```sh
+scripts/check-rust.sh
+```
+
 参考词典有意保持很小。它是用于验证架构的可执行样例，不用于替代现有 Rime 词库。

@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if ! git diff --quiet -- rust; then
+    echo "提交前检查失败：rust/ 中存在未暂存修改。" >&2
+    echo "请先暂存、还原或移动这些修改，避免格式化扩大提交范围。" >&2
+    exit 1
+fi
+
+untracked=$(git ls-files --others --exclude-standard -- rust)
+if [ -n "$untracked" ]; then
+    echo "提交前检查失败：rust/ 中存在未跟踪文件：" >&2
+    echo "$untracked" >&2
+    echo "请先决定是否将它们加入本次提交。" >&2
+    exit 1
+fi
+
+echo "正在格式化 Rust 代码……"
+cargo fmt --manifest-path rust/Cargo.toml --all
+
+if ! git diff --quiet -- rust; then
+    echo "cargo fmt 已修改文件，本次提交已中止。" >&2
+    echo "请审核格式化结果，重新 git add 后再次提交。" >&2
+    exit 1
+fi
+
+exec scripts/check-rust.sh
