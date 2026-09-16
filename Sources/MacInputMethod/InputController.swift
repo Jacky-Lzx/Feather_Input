@@ -106,8 +106,8 @@ final class InputController: IMKInputController {
         }
     }
     private var session: Session?
-    private let candidatesPanel = CandidatePanel()
-    private let modeIndicator = ModeIndicator()
+    private lazy var candidatesPanel = OwnedCandidatePanel(owner: self, role: .primary)
+    private lazy var modeIndicator = OwnedModeIndicator(owner: self)
     private var focusModeUntilInput: Bool { UserDefaults.standard.object(forKey: "focusModeUntilInput") as? Bool ?? true }
     private var focusModeDuration: TimeInterval {
         let value = UserDefaults.standard.object(forKey: "focusModeDuration") as? Double ?? 0.8
@@ -160,7 +160,7 @@ final class InputController: IMKInputController {
     private var displayedOriginal: [String] = []
     private var displayedPreedit = ""
     private var displayedHighlight = 0
-    private let generatedPanel = CandidatePanel()
+    private lazy var generatedPanel = OwnedCandidatePanel(owner: self, role: .generated)
     private var chooseGenerated: ((Int, IMKTextInput) -> Bool)?
     private var consumedGeneratedKey: UInt16?
     private var generationTask: Task<Void, Never>?
@@ -428,7 +428,10 @@ final class InputController: IMKInputController {
             if session?.preedit.text.isEmpty != false { frozenPrediction = nil }
         }
     }
-    deinit { focusIndicatorTask?.cancel(); generationTask?.cancel(); recommendationTask?.cancel(); rankingTask?.cancel(); expansionTask?.cancel() }
+    deinit {
+        focusIndicatorTask?.cancel(); generationTask?.cancel(); recommendationTask?.cancel(); rankingTask?.cancel(); expansionTask?.cancel()
+        InputOverlays.shared.deactivate(self)
+    }
     private var rightControlTap = RightControlTap()
     private var capsLockSwitch = CapsLockSwitch()
     private var rightControlHeld = false
@@ -441,6 +444,7 @@ final class InputController: IMKInputController {
         InputScheme(rawValue: UserDefaults.standard.string(forKey: "scheme") ?? "") ?? .full
     }
     override func activateServer(_ sender: Any!) {
+        InputOverlays.shared.activate(self)
         invalidateRecommendation(clearContext: true)
         rightControlTap.reset()
         rightControlHeld = false
@@ -475,6 +479,7 @@ final class InputController: IMKInputController {
         capsLockHeld = false
         commitComposition(sender)
         candidatesPanel.hide()
+        InputOverlays.shared.deactivate(self)
     }
     override func recognizedEvents(_ sender: Any!) -> Int {
         Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]).rawValue)
@@ -1001,6 +1006,34 @@ final class InputController: IMKInputController {
         }
         guard let anchor = lastCaret else { modeIndicator.hide(); return }
         modeIndicator.show(ascii: ascii, caret: anchor, clientLevel: Int(textClient.windowLevel()), untilInput: keepFocusIndicator)
+    }
+
+    static func verifySharedOverlays(server: IMKServer) throws {
+        guard let first = InputController(server: server, delegate: nil, client: nil),
+              let second = InputController(server: server, delegate: nil, client: nil) else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        InputOverlays.shared.activate(first)
+        let sharedWindowCount = NSApp.windows.count
+        first.modeIndicator.show(ascii: false, caret: NSRect(x: 200, y: 300, width: 1, height: 20), untilInput: true)
+        guard first.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+
+        InputOverlays.shared.activate(second)
+        second.modeIndicator.show(ascii: true, caret: NSRect(x: 300, y: 400, width: 1, height: 20), untilInput: true)
+        first.modeIndicator.hide()
+        first.candidatesPanel.show(texts: ["旧控制器"], highlight: 0,
+                                   caret: NSRect(x: 200, y: 300, width: 1, height: 20))
+        guard second.modeIndicator.isVisible, second.modeIndicator.text == "英文",
+              !first.modeIndicator.isVisible, !first.candidatesPanel.isVisible,
+              NSApp.windows.count == sharedWindowCount else {
+            throw Engine.Failure.schemaUnavailable
+        }
+
+        InputOverlays.shared.deactivate(first)
+        guard second.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        InputOverlays.shared.deactivate(second)
+        guard !second.modeIndicator.isVisible else { throw Engine.Failure.schemaUnavailable }
+        print("PASS: controllers share one overlay set and stale ownership cannot mutate it")
     }
 
     static func verifyRepeatedPaging(server: IMKServer) throws {

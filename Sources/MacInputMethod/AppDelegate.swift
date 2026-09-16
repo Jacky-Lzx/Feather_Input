@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 smokeDefaults.set(InputModeMemoryPolicy.global.rawValue, forKey: "inputModeMemoryPolicy")
                 smokeDefaults.set(false, forKey: "inputModeGlobalASCII")
                 try PersistentModeIndicator.verify()
+                let windowBaseline = NSApp.windows.count
+                try InputController.verifySharedOverlays(server: server!)
                 try InputController.verifyMenuCommands(server: server!)
                 try CandidatePanel.verifyPresentation()
                 try CandidateDebugWindow.verify()
@@ -62,7 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let panel = CandidatePanel()
                 panel.show(texts: session.candidates.texts, highlight: 0, caret: NSRect(x: 300, y: 300, width: 1, height: 20))
                 panel.hide()
-                print("PASS: app startup, IMKServer, controller class, bundled engine, native candidate panel")
+                let windowCount = NSApp.windows.count
+                print("INFO: smoke AppKit windows baseline=\(windowBaseline) final=\(windowCount)")
+                guard windowCount <= windowBaseline + 30 else { throw Engine.Failure.schemaUnavailable }
+                print("PASS: app startup, IMKServer, controller class, bundled engine, native candidate panel and bounded windows")
                 session.clear()
                 try? FileManager.default.removeItem(atPath: user)
                 restoreSmokeDefaults()
