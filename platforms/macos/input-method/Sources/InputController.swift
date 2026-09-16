@@ -11,11 +11,17 @@ private enum NormalizedInput {
 @MainActor
 final class InputController: IMKInputController {
   var secureInputEnabled: () -> Bool = { IsSecureEventInputEnabled() }
+  var candidatePresenter: CandidatePresenting = CandidateWindowController()
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
+  private weak var activeClient: AnyObject?
   private var active = false
 
   override func activateServer(_ sender: Any!) {
+    activeClient = sender as AnyObject?
+    candidatePresenter.actionHandler = { [weak self] action in
+      self?.handleCandidateWindowAction(action)
+    }
     do {
       let session = try requireSession()
       currentResponse = try session.activate()
@@ -30,6 +36,9 @@ final class InputController: IMKInputController {
     guard let session else {
       active = false
       currentResponse = nil
+      activeClient = nil
+      candidatePresenter.actionHandler = nil
+      candidatePresenter.hide()
       return
     }
     do {
@@ -42,6 +51,9 @@ final class InputController: IMKInputController {
     }
     active = false
     currentResponse = nil
+    activeClient = nil
+    candidatePresenter.actionHandler = nil
+    candidatePresenter.hide()
   }
 
   override func recognizedEvents(_ sender: Any!) -> Int {
@@ -153,6 +165,45 @@ final class InputController: IMKInputController {
       selectionRange: selection,
       replacementRange: NSRange(location: NSNotFound, length: 0)
     )
+    if response.preedit.isEmpty || response.candidates.isEmpty {
+      candidatePresenter.hide()
+    } else {
+      candidatePresenter.update(
+        candidates: response.candidates,
+        highlighted: response.highlighted,
+        anchor: candidateAnchor(for: client)
+      )
+    }
+  }
+
+  private func handleCandidateWindowAction(_ action: CandidateWindowAction) {
+    guard let client = activeClient as? IMKTextInput else {
+      candidatePresenter.hide()
+      return
+    }
+    switch action {
+    case .select(let candidate):
+      do {
+        let response = try ensureActive().select(candidate)
+        guard response.handled else { return }
+        apply(response, to: client)
+      } catch {
+        report(error, operation: "select candidate")
+      }
+    case .pageUp:
+      _ = dispatch(.pageUp, to: client)
+    case .pageDown:
+      _ = dispatch(.pageDown, to: client)
+    }
+  }
+
+  private func candidateAnchor(for client: IMKTextInput) -> NSRect {
+    let range =
+      client.markedRange().location == NSNotFound
+      ? client.selectedRange()
+      : client.markedRange()
+    var actualRange = NSRange(location: NSNotFound, length: 0)
+    return client.firstRect(forCharacterRange: range, actualRange: &actualRange)
   }
 
   private func normalizedInput(for event: NSEvent) -> NormalizedInput? {
@@ -187,6 +238,7 @@ final class InputController: IMKInputController {
   private func cancelEngineComposition() {
     guard hasComposition, let session else { return }
     currentResponse = try? session.send(.escape)
+    candidatePresenter.hide()
   }
 
   private func report(_ error: Error, operation: String) {

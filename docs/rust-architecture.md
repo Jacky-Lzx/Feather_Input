@@ -130,7 +130,9 @@ Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入�
 `platforms/macos/input-method` 是第一个真实操作系统适配层。它为每个
 `IMKInputController` 持有独立 ABI session，将按键标准化后发送给核心，并把 UTF-8
 光标转换成 macOS 文本客户端使用的 UTF-16 位置。当前开发 bundle 使用隔离标识符，
-构建过程不会安装或注册输入源；候选窗口和真实客户端验收仍属于后续阶段。
+构建过程不会安装或注册输入源。每个控制器还独立持有候选窗口，窗口只呈现 ABI 快照
+并将候选 ID 或翻页动作传回控制器，不在 Swift 中复制输入法状态机；真实客户端验收仍
+属于后续阶段。
 
 `feather-trace` 使用严格 JSON 场景记录平台无关的输入事件和语义断言。Runner 在
 运行时解析不透明候选 ID，并自动验证 revision、ID 唯一性、UTF-8 光标和高亮范围。

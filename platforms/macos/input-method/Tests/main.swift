@@ -46,6 +46,8 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.controllerCreation
     }
     controller.secureInputEnabled = { false }
+    let presenter = SmokeCandidatePresenter()
+    controller.candidatePresenter = presenter
     let client = SmokeTextClient()
     controller.activateServer(client)
 
@@ -64,12 +66,46 @@ struct InputMethodSmokeMain {
     guard candidates.contains("你好") else {
       throw SmokeFailure.expectation("候选中缺少“你好”")
     }
+    guard presenter.candidates.contains(where: { $0.text == "你好" }) else {
+      throw SmokeFailure.expectation("候选窗口没有收到“你好”")
+    }
+    guard presenter.anchor == NSRect(x: 100, y: 100, width: 1, height: 20) else {
+      throw SmokeFailure.expectation("候选窗口锚点错误")
+    }
+    let updateCountBeforeNavigation = presenter.updateCount
+    guard controller.handle(key("", code: 125), client: client) else {
+      throw SmokeFailure.expectation("向下键没有移动候选高亮")
+    }
+    guard controller.handle(key("", code: 126), client: client) else {
+      throw SmokeFailure.expectation("向上键没有移动候选高亮")
+    }
+    guard presenter.updateCount >= updateCountBeforeNavigation + 2 else {
+      throw SmokeFailure.expectation("候选高亮变化没有刷新窗口")
+    }
 
-    guard controller.handle(key(" ", code: 49), client: client), client.committed == "你好" else {
-      throw SmokeFailure.expectation("空格没有提交“你好”")
+    presenter.select(text: "你好")
+    guard client.committed == "你好" else {
+      throw SmokeFailure.expectation("点击候选没有提交“你好”")
     }
     guard client.marked.isEmpty else {
       throw SmokeFailure.expectation("提交后 marked text 没有清空")
+    }
+    guard presenter.candidates.isEmpty else {
+      throw SmokeFailure.expectation("提交后候选窗口没有隐藏")
+    }
+
+    for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("拼音按键没有被处理：\(character)")
+      }
+    }
+    let updateCountBeforePaging = presenter.updateCount
+    presenter.pageDown()
+    guard presenter.updateCount > updateCountBeforePaging else {
+      throw SmokeFailure.expectation("候选翻页动作没有刷新窗口")
+    }
+    guard controller.handle(key("", code: 53), client: client) else {
+      throw SmokeFailure.expectation("Escape 没有取消翻页后的组合")
     }
 
     guard controller.handle(key("A", code: 0, modifiers: .shift), client: client),

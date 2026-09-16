@@ -48,6 +48,7 @@ swiftc \
     -Xlinker -rpath \
     -Xlinker @executable_path/../Frameworks \
     "$shared_root"/Sources/*.swift \
+    "$source_root"/Sources/CandidateWindowController.swift \
     "$source_root"/Sources/FeatherInputEnvironment.swift \
     "$source_root"/Sources/InputController.swift \
     "$source_root"/Sources/TextCoordinates.swift \
