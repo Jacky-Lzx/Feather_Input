@@ -1,0 +1,8 @@
+.build/
+.deps/
+dist/
+.DS_Store
+.swiftpm/
+.venv-mlx/
+__pycache__/
+rust/target/
