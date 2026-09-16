@@ -90,4 +90,14 @@ final class LocalRecommendationTests: XCTestCase {
         XCTAssertThrowsError(try LocalRecommendation.parseGenerated(reply("孤鹜", score: 1)))
     }
 
+    func testBusyRetryOnlyHandlesBoundedMLXBusyResponses() throws {
+        let busy = try JSONSerialization.data(withJSONObject: ["error": "busy"])
+        XCTAssertEqual(LocalRecommendation.busyRetryDelayMS(status: 503, data: busy, port: 1235, attempt: 0), 40)
+        XCTAssertEqual(LocalRecommendation.busyRetryDelayMS(status: 503, data: busy, port: 1235, attempt: 5), 300)
+        XCTAssertNil(LocalRecommendation.busyRetryDelayMS(status: 503, data: busy, port: 1235, attempt: 6))
+        XCTAssertNil(LocalRecommendation.busyRetryDelayMS(status: 500, data: busy, port: 1235, attempt: 0))
+        XCTAssertNil(LocalRecommendation.busyRetryDelayMS(status: 503, data: busy, port: 1234, attempt: 0))
+        XCTAssertNil(LocalRecommendation.busyRetryDelayMS(status: 503, data: Data("{}".utf8), port: 1235, attempt: 0))
+    }
+
 }

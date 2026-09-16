@@ -275,8 +275,7 @@ final class InputController: IMKInputController {
                       self.recommendationVersion == version, self.recentContext == context, self.scoringSettings == settings,
                       self.session?.preedit.text == preedit, self.session?.candidates.texts == candidates,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
-                      NSEqualRanges(client.selectedRange(), range), delay <= timing.responseLimitMS,
-                      !self.candidatesPanel.contains(NSEvent.mouseLocation) else { return }
+                      NSEqualRanges(client.selectedRange(), range), delay <= timing.responseLimitMS else { return }
                 self.scoredPreedit = preedit
                 self.scoredOriginal = candidates
                 self.scoredContext = context
@@ -306,6 +305,9 @@ final class InputController: IMKInputController {
         let range = client.selectedRange()
         let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let count = UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5
+        let continuationBackend = UserDefaults.standard.string(forKey: "aiContinuationBackend")
+        let continuationModel = UserDefaults.standard.string(forKey: "aiModel")
+        let continuationVersion = recommendationVersion
         let request = requestRanking
         rankingTask = Task { @MainActor [weak self, weak client] in
             do {
@@ -322,6 +324,15 @@ final class InputController: IMKInputController {
                       NSEqualRanges(client.selectedRange(), range) else { return }
                 self.cachedPrediction = tokens
                 self.cachedPredictionDelayMS = delayMS
+                guard continuationBackend == "mlx", UserDefaults.standard.bool(forKey: "aiContinuationEnabled") else { return }
+                let remainingDelayMS = max(0, 400 - delayMS)
+                if remainingDelayMS > 0 {
+                    try await Task.sleep(nanoseconds: UInt64(remainingDelayMS) * 1_000_000)
+                }
+                try Task.checkCancellation()
+                self.presentContinuation(tokens.map(\.text), client: client, context: context,
+                    version: continuationVersion, range: range, foreground: foreground,
+                    savedModel: continuationModel, backend: continuationBackend, candidateCount: count)
             } catch { /* A missing prediction leaves Rime order unchanged. */ }
         }
     }
@@ -341,6 +352,40 @@ final class InputController: IMKInputController {
     }
     private var requestRecommendation: (String, String, String, String, [String]) async throws -> Int = {
         try await LocalRecommendation.recommend(model: $0, token: $1, context: $2, preedit: $3, candidates: $4)
+    }
+    private func presentContinuation(_ texts: [String], client: IMKTextInput, context: String, version: UUID,
+                                     range: NSRange, foreground: pid_t?, savedModel: String?, backend: String?,
+                                     candidateCount: Int) {
+        guard let text = texts.first, !bypassSecureInput(), isActive, !ascii,
+              recommendationVersion == version, recentContext == context,
+              session?.preedit.text.isEmpty == true,
+              UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
+              UserDefaults.standard.string(forKey: "aiModel") == savedModel,
+              UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
+              (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+              NSEqualRanges(client.selectedRange(), range) else { return }
+        var caret = NSRect.zero
+        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
+        let anchor = caret.height > 0 && caret.origin.x.isFinite && caret.origin.y.isFinite ? caret : lastCaret
+        guard let anchor else { return }
+        continuationText = text
+        candidatesPanel.show(texts: texts, highlight: -1, caret: anchor,
+            clientLevel: Int(client.windowLevel()), continuation: true) { [weak self, weak client] index in
+                guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii,
+                      self.recommendationVersion == version, self.continuationText == text,
+                      self.session?.preedit.text.isEmpty == true,
+                      UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
+                      UserDefaults.standard.string(forKey: "aiModel") == savedModel,
+                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
+                      (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+                      NSEqualRanges(client.selectedRange(), range), texts.indices.contains(index) else { return }
+                let selected = texts[index]
+                self.invalidateRecommendation()
+                client.insertText(selected, replacementRange: NSRange(location: NSNotFound, length: 0))
+                self.recentContext = String((context + selected).suffix(80))
+            }
     }
     // Query after the host has processed navigation/deletion, before creating marked text.
     private func restoreContextBeforeComposition(_ client: IMKTextInput) {
@@ -740,9 +785,12 @@ final class InputController: IMKInputController {
             if preedit.text.isEmpty {
                 frozenPrediction = nil
                 if let committed, !committed.isEmpty {
-                    if scoringEnabled { /* Wait for Rime candidates. */ }
-                    else if rankingEnabled { scheduleRanking(client) }
-                    else { scheduleContinuation(client) }
+                    if !scoringEnabled && rankingEnabled { scheduleRanking(client) }
+                    let backend = UserDefaults.standard.string(forKey: "aiContinuationBackend")
+                    if UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
+                       !(!scoringEnabled && rankingEnabled && backend == "mlx") {
+                        scheduleContinuation(client)
+                    }
                 }
             }
             return
@@ -844,37 +892,11 @@ final class InputController: IMKInputController {
                       UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
                       (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount else { return }
                 let texts = try await request(model, token, context)
-                guard let text = texts.first else { return }
                 try Task.checkCancellation()
-                guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii,
-                      self.recommendationVersion == version, self.recentContext == context,
-                      self.session?.preedit.text.isEmpty == true,
-                      UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
-                      UserDefaults.standard.string(forKey: "aiModel") == savedModel,
-                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
-                      (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount,
-                      NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
-                      NSEqualRanges(client.selectedRange(), range) else { return }
-                var caret = NSRect.zero
-                _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
-                let anchor = caret.height > 0 && caret.origin.x.isFinite && caret.origin.y.isFinite ? caret : self.lastCaret
-                guard let anchor else { return }
-                self.continuationText = text
-                self.candidatesPanel.show(texts: texts, highlight: -1, caret: anchor, clientLevel: Int(client.windowLevel()), continuation: true) { [weak self, weak client] index in
-                    guard let self, let client, !self.bypassSecureInput(), self.isActive, !self.ascii, self.recommendationVersion == version,
-                          self.continuationText == text, self.session?.preedit.text.isEmpty == true,
-                          UserDefaults.standard.bool(forKey: "aiContinuationEnabled"),
-                          UserDefaults.standard.string(forKey: "aiModel") == savedModel,
-                      UserDefaults.standard.string(forKey: "aiContinuationBackend") == backend,
-                      (UserDefaults.standard.object(forKey: "aiCandidateCount") as? Int ?? 5) == candidateCount,
-                          NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
-                          NSEqualRanges(client.selectedRange(), range) else { return }
-                    guard texts.indices.contains(index) else { return }
-                    let selected = texts[index]
-                    self.invalidateRecommendation()
-                    client.insertText(selected, replacementRange: NSRange(location: NSNotFound, length: 0))
-                    self.recentContext = String((context + selected).suffix(80))
-                }
+                guard let self, let client else { return }
+                self.presentContinuation(texts, client: client, context: context, version: version,
+                    range: range, foreground: foreground, savedModel: savedModel,
+                    backend: backend, candidateCount: candidateCount)
             } catch { /* A continuation is optional; failures never affect committed text. */ }
         }
     }
@@ -1209,7 +1231,7 @@ final class InputController: IMKInputController {
                 _ = controller.handle(event, client: client)
             }
             for c in "guwu" { key(String(c)) }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.45))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.6))
             guard receivedInput == "guwu", controller.generatedPanel.isVisible, controller.generatedPanel.verifyClick(on: 0), client.committed == "菰鹜",
                   client.marked.isEmpty, controller.session?.rawInput.isEmpty == true else { throw Engine.Failure.schemaUnavailable }
             func option(_ pressed: Bool) {
@@ -1220,7 +1242,7 @@ final class InputController: IMKInputController {
             for (code, expected) in [(UInt16(18), "菰鹜"), (UInt16(19), "罛鹜"), (UInt16(20), "蓇鹜")] {
                 controller.recentContext = "落霞与"
                 for c in "guwu" { key(String(c)) }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.45))
+                RunLoop.current.run(until: Date().addingTimeInterval(0.6))
                 option(true)
                 guard controller.generatedPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
                 let before = client.committed
@@ -1352,13 +1374,19 @@ final class InputController: IMKInputController {
 
     static func verifyRankingLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard
-        let saved = ["aiRerankingEnabled", "scheme"].map { ($0, defaults.object(forKey: $0)) }
+        let keys = ["aiRerankingEnabled", "aiCandidateScoringEnabled", "aiContinuationEnabled",
+                    "aiContinuationBackend", "aiCandidateCount", "scheme"]
+        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
             for (key, value) in saved {
                 if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
             }
         }
         defaults.set(true, forKey: "aiRerankingEnabled")
+        defaults.set(false, forKey: "aiCandidateScoringEnabled")
+        defaults.set(true, forKey: "aiContinuationEnabled")
+        defaults.set("mlx", forKey: "aiContinuationBackend")
+        defaults.set(5, forKey: "aiCandidateCount")
         defaults.set(InputScheme.full.rawValue, forKey: "scheme")
         let client = SmokeTextClient()
         guard let controller = InputController(server: server, delegate: nil, client: nil),
@@ -1413,21 +1441,33 @@ final class InputController: IMKInputController {
         RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         guard controller.displayedOrder == order, controller.frozenPrediction == [],
               controller.cachedPrediction.isEmpty else { throw Engine.Failure.schemaUnavailable }
+        session.clear()
+        controller.frozenPrediction = nil
+        controller.recentContext = "我们"
+        controller.requestRanking = { _ in [.init(text: "继续", rank: 1), .init(text: "完成", rank: 2)] }
+        controller.scheduleRanking(client)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        guard controller.cachedPrediction.map(\.text) == ["继续", "完成"],
+              controller.continuationText == "继续" else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(client)
-        print("PASS: cached exact ranking, mapped space/digit/click/arrows, frozen order and late prediction rejection")
+        print("PASS: shared MLX ranking/continuation, mapped selection, frozen order and late prediction rejection")
     }
 
     static func verifyContinuationLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard
-        let oldEnabled = defaults.object(forKey: "aiContinuationEnabled")
-        let oldModel = defaults.object(forKey: "aiModel")
+        let keys = ["aiContinuationEnabled", "aiContinuationBackend", "aiModel",
+                    "aiCandidateScoringEnabled", "aiRerankingEnabled"]
+        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
-            for (key, value) in [("aiContinuationEnabled", oldEnabled), ("aiModel", oldModel)] {
+            for (key, value) in saved {
                 if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
             }
         }
         defaults.set(true, forKey: "aiContinuationEnabled")
+        defaults.set("lmstudio", forKey: "aiContinuationBackend")
         defaults.set("test-model", forKey: "aiModel")
+        defaults.set(true, forKey: "aiCandidateScoringEnabled")
+        defaults.set(true, forKey: "aiRerankingEnabled")
         let client = SmokeTextClient()
         guard let controller = InputController(server: server, delegate: nil, client: nil) else { throw Engine.Failure.schemaUnavailable }
         controller.activateServer(client)
@@ -1453,7 +1493,7 @@ final class InputController: IMKInputController {
         RunLoop.current.run(until: Date().addingTimeInterval(0.65))
         guard controller.continuationText == nil else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(client)
-        print("PASS: post-commit continuation, click-only insertion, cancelled reply and changed selection rejection")
+        print("PASS: post-commit continuation alongside scoring, click-only insertion, cancellation and selection rejection")
     }
 
     static func verifyRecommendationLifecycle(server: IMKServer) throws {

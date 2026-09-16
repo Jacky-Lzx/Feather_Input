@@ -218,18 +218,35 @@ public enum LocalRecommendation {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["context": String(context.suffix(80)), "input": input, "scheme": scheme, "count": 3])
         return try await traced(request: request, token: "", parse: parseGenerated)
     }
+    static func busyRetryDelayMS(status: Int?, data: Data?, port: Int?, attempt: Int) -> Int? {
+        let delays = [40, 60, 100, 160, 240, 300]
+        guard status == 503, port == 1235, delays.indices.contains(attempt), let data,
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              payload["error"] == "busy" else { return nil }
+        return delays[attempt]
+    }
     private static func traced<T>(request: URLRequest, token: String, parse: (Data) throws -> T) async throws -> T {
         let id = await LLMDebugLog.shared.begin(request: request, token: token)
         var body: Data?
         var status: Int?
+        var busyRetries = 0
         do {
-            let (data, response) = try await session.data(for: request)
-            body = data
-            status = (response as? HTTPURLResponse)?.statusCode
-            try validate(response)
-            let result = try parse(data)
-            await LLMDebugLog.shared.finish(id, data: body, status: status, outcome: "成功（返回已解析）", token: token)
-            return result
+            while true {
+                try Task.checkCancellation()
+                let (data, response) = try await session.data(for: request)
+                body = data
+                status = (response as? HTTPURLResponse)?.statusCode
+                if let delay = busyRetryDelayMS(status: status, data: data, port: request.url?.port, attempt: busyRetries) {
+                    busyRetries += 1
+                    try await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+                    continue
+                }
+                try validate(response)
+                let result = try parse(data)
+                let outcome = busyRetries == 0 ? "成功（返回已解析）" : "成功（后端繁忙，重试 \(busyRetries) 次）"
+                await LLMDebugLog.shared.finish(id, data: body, status: status, outcome: outcome, token: token)
+                return result
+            }
         } catch {
             let outcome: String
             if error is CancellationError || (error as? URLError)?.code == .cancelled { outcome = "已取消（输入可能已变化）" }
