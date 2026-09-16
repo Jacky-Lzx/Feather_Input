@@ -74,13 +74,13 @@ struct InputMethodSmokeMain {
     }
     let initialHighlight = presenter.highlighted
     let updateCountBeforeNavigation = presenter.updateCount
-    guard controller.handle(key("", code: 125), client: client) else {
+    guard controller.handle(key("", code: 125, modifiers: .function), client: client) else {
       throw SmokeFailure.expectation("向下键没有移动候选高亮")
     }
     guard presenter.highlighted != initialHighlight else {
       throw SmokeFailure.expectation("向下键被处理，但候选高亮没有变化")
     }
-    guard controller.handle(key("", code: 126), client: client) else {
+    guard controller.handle(key("", code: 126, modifiers: .function), client: client) else {
       throw SmokeFailure.expectation("向上键没有移动候选高亮")
     }
     guard presenter.highlighted == initialHighlight else {

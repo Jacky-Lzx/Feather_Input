@@ -76,9 +76,7 @@ final class InputController: IMKInputController {
       cancelEngineComposition()
       return false
     }
-    let shortcutModifiers = event.modifierFlags.intersection([
-      .command, .control, .option, .function,
-    ])
+    let shortcutModifiers = event.modifierFlags.intersection([.command, .control, .option])
     guard shortcutModifiers.isEmpty, let input = normalizedInput(for: event) else {
       return false
     }
