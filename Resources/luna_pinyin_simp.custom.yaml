@@ -6,5 +6,6 @@ patch:
   feather_english:
     __include: feather_english.schema:/translator
     initial_quality: -1
+  recognizer/patterns/feather_english: "^[A-Za-z]{3,}$"
   recognizer/patterns/uppercase: ""
   speller/alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA

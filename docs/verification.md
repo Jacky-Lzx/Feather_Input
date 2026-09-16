@@ -6,7 +6,7 @@ Passed:
 
 - Debug and release compilation of the Swift application and C bridge.
 - `swift test`: UTF-8 byte cursor → UTF-16 client cursor conversion, including Chinese and non-BMP text.
-- Real bundled-engine integration: full pinyin `nihao` and Flypy `nihc` both produce and commit `你好`; both schemas also produce and commit the dictionary-backed canonical English candidate `GitHub` from `github`. Escape, Backspace, five-entry pages, Page Down/Up, numeric candidate selection, Chinese comma, independent client sessions and ASCII handling are covered.
+- Real bundled-engine integration: full pinyin `nihao` and Flypy `nihc` both produce and commit `你好`; both schemas hide `GitHub` below a configured five-character English threshold, then produce and commit it after the fifth character. Escape, Backspace, five-entry pages, Page Down/Up, numeric candidate selection, Chinese comma, independent client sessions and ASCII handling are covered.
 - Packaging: recursive dylib closure relocation, bundled OpenCC data and upstream license files, pinned schema/dictionary revisions, precompiled dictionaries.
 - `codesign --verify --deep --strict dist/FeatherInput.app`.
 - Packaged executable `--smoke-test`: actual NSApplication startup, IMKServer creation, Objective-C controller class lookup, bundled precompiled data loading and native candidate panel creation/display/hide. This does not prove client-to-input-method event routing.

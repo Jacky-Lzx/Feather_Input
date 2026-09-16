@@ -24,6 +24,7 @@ private struct SettingsView: View {
     @AppStorage("scheme") private var scheme = InputScheme.full.rawValue
     @AppStorage("candidateFontSize") private var fontSize = 17.0
     @AppStorage("candidateCount") private var candidateCount = 5
+    @AppStorage("englishCandidateMinimum") private var englishCandidateMinimum = 3
     @AppStorage("aiCandidateCount") private var aiCandidateCount = 5
     @AppStorage("candidateLayout") private var layout = "vertical"
     @AppStorage("focusModeUntilInput") private var focusModeUntilInput = true
@@ -74,6 +75,9 @@ private struct SettingsView: View {
                 }
                 Stepper("拼音每页候选：\(candidateCount)", value: $candidateCount, in: 1...9)
                 Text("完成当前拼音后生效，无需重启。").font(.footnote).foregroundStyle(.secondary)
+                Stepper("英文候选最少输入：\(englishCandidateMinimum) 个字符", value: $englishCandidateMinimum, in: 1...12)
+                Text("输入达到该长度后才会出现英文候选；完成当前组合后生效。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 HStack {
                     Text("候选字号")
                     Slider(value: $fontSize, in: 14...24, step: 1)

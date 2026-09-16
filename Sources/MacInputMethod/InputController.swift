@@ -413,6 +413,7 @@ final class InputController: IMKInputController {
         ascii = InputModeMemory.shared.activate(application: activeApplication)
         if session == nil { session = try? AppDelegate.engine?.session(scheme) }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
+        session?.setEnglishCandidateMinimum(UserDefaults.standard.object(forKey: "englishCandidateMinimum") as? Int ?? 3)
         session?.select(scheme)
         activeScheme = scheme
         session?.setASCII(ascii)
@@ -489,6 +490,7 @@ final class InputController: IMKInputController {
         if expandedTexts != nil, [.leftMouseDown, .rightMouseDown, .scrollWheel].contains(event.type), candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         if event.type == .leftMouseDown, continuationText != nil, candidatesPanel.contains(NSEvent.mouseLocation) { return false }
         session?.setCandidateCount(UserDefaults.standard.object(forKey: "candidateCount") as? Int ?? 5)
+        session?.setEnglishCandidateMinimum(UserDefaults.standard.object(forKey: "englishCandidateMinimum") as? Int ?? 3)
         let composing = session?.preedit.text.isEmpty == false
         let clearsComposition = event.type == .keyDown && composing && event.keyCode == 13 &&
             shortcutFlags.contains(.control) && shortcutFlags.intersection([.command, .option]).isEmpty

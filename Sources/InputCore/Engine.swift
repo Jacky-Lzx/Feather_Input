@@ -26,6 +26,7 @@ public final class Session {
     private let engine: Engine
     private var scheme: InputScheme
     public private(set) var candidateCount = 5
+    public private(set) var englishCandidateMinimum = 3
     fileprivate init(id: UInt, engine: Engine, scheme: InputScheme) { self.id = id; self.engine = engine; self.scheme = scheme }
     @discardableResult public func setCandidateCount(_ count: Int) -> Bool {
         let count = min(9, max(1, count))
@@ -34,6 +35,15 @@ public final class Session {
         guard feather_page_size(scheme.rawValue, Int32(count)) != 0,
               feather_select(id, scheme.rawValue) != 0 else { return false }
         candidateCount = count
+        return true
+    }
+    @discardableResult public func setEnglishCandidateMinimum(_ count: Int) -> Bool {
+        let count = min(12, max(1, count))
+        guard preedit.text.isEmpty else { return false }
+        guard count != englishCandidateMinimum else { return true }
+        guard feather_english_min_length(scheme.rawValue, Int32(count)) != 0,
+              feather_select(id, scheme.rawValue) != 0 else { return false }
+        englishCandidateMinimum = count
         return true
     }
     deinit { feather_destroy(id) }
@@ -49,6 +59,7 @@ public final class Session {
     public func setASCII(_ enabled: Bool) { feather_ascii(id, enabled ? 1 : 0) }
     @discardableResult public func select(_ scheme: InputScheme) -> Bool {
         _ = feather_page_size(scheme.rawValue, Int32(candidateCount))
+        _ = feather_english_min_length(scheme.rawValue, Int32(englishCandidateMinimum))
         guard feather_select(id, scheme.rawValue) != 0 else { return false }
         self.scheme = scheme
         return true

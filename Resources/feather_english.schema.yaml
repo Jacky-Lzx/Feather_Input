@@ -32,6 +32,7 @@ speller:
   delimiter: " '"
 
 translator:
+  tag: feather_english
   dictionary: feather_english
   enable_completion: true
   enable_sentence: false

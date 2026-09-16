@@ -1,6 +1,7 @@
 #include "bridge.h"
 #include "rime_api.h"
 #include <dlfcn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 static RimeApi *api;
@@ -67,6 +68,17 @@ int feather_page_size(const char *schema, int count) {
   RimeConfig config = {0};
   if (!api->schema_open(schema, &config)) return 0;
   int ok = api->config_set_int(&config, "menu/page_size", count);
+  api->config_close(&config);
+  return ok;
+}
+
+int feather_english_min_length(const char *schema, int count) {
+  if (!api || count < 1 || count > 12 || !RIME_PROVIDED(api, config_set_string)) return 0;
+  char pattern[32];
+  if (snprintf(pattern, sizeof(pattern), "^[A-Za-z]{%d,}$", count) < 0) return 0;
+  RimeConfig config = {0};
+  if (!api->schema_open(schema, &config)) return 0;
+  int ok = api->config_set_string(&config, "recognizer/patterns/feather_english", pattern);
   api->config_close(&config);
   return ok;
 }
