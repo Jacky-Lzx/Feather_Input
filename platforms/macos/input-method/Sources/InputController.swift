@@ -126,13 +126,25 @@ final class InputController: IMKInputController {
   }
 
   private func dispatch(_ key: FeatherKey, to client: IMKTextInput) -> Bool {
+    let wasComposing = hasComposition
     do {
       let response = try ensureActive().send(key)
-      guard response.handled else { return false }
+      guard response.handled else {
+        return wasComposing && isCandidateNavigation(key)
+      }
       apply(response, to: client)
       return true
     } catch {
       report(error, operation: "key \(key)")
+      return false
+    }
+  }
+
+  private func isCandidateNavigation(_ key: FeatherKey) -> Bool {
+    switch key {
+    case .left, .right, .up, .down, .pageUp, .pageDown:
+      return true
+    default:
       return false
     }
   }
@@ -211,8 +223,8 @@ final class InputController: IMKInputController {
     case 49: return .key(.space)
     case 36, 76: return .key(.enter)
     case 53: return .key(.escape)
-    case 123: return .key(.left)
-    case 124: return .key(.right)
+    case 123: return .key(.pageUp)
+    case 124: return .key(.pageDown)
     case 125: return .key(.down)
     case 126: return .key(.up)
     case 116: return .key(.pageUp)

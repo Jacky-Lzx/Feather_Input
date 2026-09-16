@@ -72,6 +72,13 @@ struct InputMethodSmokeMain {
     guard presenter.anchor == NSRect(x: 100, y: 100, width: 1, height: 20) else {
       throw SmokeFailure.expectation("候选窗口锚点错误")
     }
+    let markedBeforeBoundaryPaging = client.marked
+    guard controller.handle(key("", code: 123, modifiers: .function), client: client) else {
+      throw SmokeFailure.expectation("第一页的向左翻页键没有被输入法消费")
+    }
+    guard client.marked == markedBeforeBoundaryPaging, !presenter.candidates.isEmpty else {
+      throw SmokeFailure.expectation("第一页按左键不应取消组合或隐藏候选窗口")
+    }
     let initialHighlight = presenter.highlighted
     let updateCountBeforeNavigation = presenter.updateCount
     guard controller.handle(key("", code: 125, modifiers: .function), client: client) else {
@@ -107,9 +114,18 @@ struct InputMethodSmokeMain {
       }
     }
     let updateCountBeforePaging = presenter.updateCount
-    presenter.pageDown()
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client) else {
+      throw SmokeFailure.expectation("向右键没有触发候选下一页")
+    }
     guard presenter.updateCount > updateCountBeforePaging else {
-      throw SmokeFailure.expectation("候选翻页动作没有刷新窗口")
+      throw SmokeFailure.expectation("向右翻页没有刷新候选窗口")
+    }
+    let updateCountBeforePreviousPage = presenter.updateCount
+    guard controller.handle(key("", code: 123, modifiers: .function), client: client) else {
+      throw SmokeFailure.expectation("向左键没有触发候选上一页")
+    }
+    guard presenter.updateCount > updateCountBeforePreviousPage else {
+      throw SmokeFailure.expectation("向左翻页没有刷新候选窗口")
     }
     guard controller.handle(key("", code: 53), client: client) else {
       throw SmokeFailure.expectation("Escape 没有取消翻页后的组合")
