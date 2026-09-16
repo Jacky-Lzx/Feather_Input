@@ -18,7 +18,7 @@ Swift/InputMethodKit 应用并行存在：当前应用继续作为行为基准�
 cargo test --manifest-path rust/Cargo.toml
 ```
 
-运行与提交前 hook 相同的完整检查：
+运行与提交前 hook 相同的格式和代码检查：
 
 ```sh
 scripts/check-rust.sh

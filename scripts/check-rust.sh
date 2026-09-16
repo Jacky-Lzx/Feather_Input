@@ -14,6 +14,3 @@ cargo clippy \
     --all-targets \
     -- \
     -D warnings
-
-echo "正在运行 Rust 测试……"
-cargo test --manifest-path rust/Cargo.toml

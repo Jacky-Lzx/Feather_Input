@@ -16,7 +16,7 @@ Rust 编写，并通过稳定的 C ABI 服务于 macOS、Windows 和 Linux 平�
 scripts/install-git-hooks.sh
 ```
 
-启用后，每次提交都会自动格式化 Rust 代码，并运行格式检查、Clippy 和完整测试。
+启用后，每次提交都会自动格式化 Rust 代码，并运行格式检查和严格 Clippy。
 如果格式化产生修改，提交会中止，以便先审核并重新暂存格式化结果。
 
 也可以手动运行：
