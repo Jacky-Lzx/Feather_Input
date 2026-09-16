@@ -8,6 +8,7 @@ xcrun swift-format format \
     --in-place \
     --recursive \
     platforms/macos/shared/Sources \
+    platforms/macos/client-acceptance/Sources \
     platforms/macos/dev-harness/Sources \
     platforms/macos/input-method/Sources \
     platforms/macos/input-method/Tests \

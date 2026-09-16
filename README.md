@@ -11,6 +11,7 @@ Bundle ID 的 InputMethodKit 开发适配层。
 - [Rust workspace](rust/README.md)
 - [macOS 开发调试壳](platforms/macos/dev-harness/README.md)
 - [macOS InputMethodKit 开发输入法](platforms/macos/input-method/README.md)
+- [macOS 真实客户端验收应用](platforms/macos/client-acceptance/README.md)
 
 构建、安装并注册隔离的 InputMethodKit 开发输入法：
 

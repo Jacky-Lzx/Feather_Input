@@ -72,8 +72,12 @@ scripts/uninstall-macos-input-method.sh
 
 ## 真实客户端验收
 
-安装后在系统设置中手动添加“Feather Rust Dev”，只在验收期间切换到该输入源。至少
+安装并启用后，从菜单栏选择“Feather Rust Dev”，只在验收期间切换到该输入源。至少
 检查以下行为：
+
+```sh
+scripts/run-macos-client-acceptance.sh
+```
 
 1. 在 TextEdit 输入 `shijie`，确认出现预编辑和“世界”候选；
 2. 使用上下键改变高亮，使用翻页键切换候选页；

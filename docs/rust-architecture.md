@@ -134,6 +134,11 @@ Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入�
 并将候选 ID 或翻页动作传回控制器，不在 Swift 中复制输入法状态机；真实客户端验收仍
 属于后续阶段。
 
+`platforms/macos/client-acceptance` 是不链接 Feather 核心的普通 AppKit 客户端。它通过
+系统 Text Input Services 使用已安装的开发输入法，为普通文本、密码输入和快捷键放行
+提供可重复的人工验收界面。该应用能够验证真实进程边界，但不把人工观察伪装成自动
+测试，也不能替代 TextEdit、终端、浏览器和代码编辑器的兼容性验收。
+
 `feather-trace` 使用严格 JSON 场景记录平台无关的输入事件和语义断言。Runner 在
 运行时解析不透明候选 ID，并自动验证 revision、ID 唯一性、UTF-8 光标和高亮范围。
 通用场景可以由参考词典、librime 适配器和未来原生 Rust 引擎共同执行。
