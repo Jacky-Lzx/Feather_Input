@@ -689,6 +689,20 @@ final class InputController: IMKInputController {
         else if let chars = characters, chars.unicodeScalars.count == 1,
                 let scalar = chars.unicodeScalars.first, scalar.value < 128 { key = Int32(scalar.value) }
         else { return false }
+        if !ascii, candidatesPanel.isVisible, let symbol = characters,
+           RawSymbolCommit.shouldCommit(rawInput: session.rawInput, symbol: symbol) {
+            let text = session.rawInput + symbol
+            session.clear()
+            _ = session.takeCommit()
+            invalidateRecommendation()
+            frozenPrediction = nil
+            scoredPreedit = ""; scoredOriginal = []; scoredContext = ""
+            scoringLockedPreedit = ""; scoringLockedOriginal = []
+            recentContext = String((recentContext + text).suffix(80))
+            client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+            refresh(client)
+            return true
+        }
         if let texts = expandedTexts {
             if [0xff51, 0xff53, 0xff52, 0xff54].contains(key) {
                 expandedIndex = CandidateGrid.move(index: expandedIndex, count: texts.count, rows: expandedRows,
@@ -1086,6 +1100,65 @@ final class InputController: IMKInputController {
         }
         controller.deactivateServer(client)
         print("PASS: Ctrl-W clears active pinyin without reaching the host and passes through when idle")
+    }
+
+    static func verifyRawSymbolCommit(server: IMKServer) throws {
+        let defaults = UserDefaults.standard
+        let keys = ["scheme", "englishCandidateMinimum", "aiCandidateScoringEnabled",
+                    "aiRerankingEnabled", "aiRecommendationEnabled", "aiPinyinGenerationEnabled"]
+        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in saved {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(5, forKey: "englishCandidateMinimum")
+        for key in ["aiCandidateScoringEnabled", "aiRerankingEnabled", "aiRecommendationEnabled", "aiPinyinGenerationEnabled"] {
+            defaults.set(false, forKey: key)
+        }
+        for mode in InputScheme.allCases {
+            defaults.set(mode.rawValue, forKey: "scheme")
+            let client = SmokeTextClient()
+            guard let controller = InputController(server: server, delegate: nil, client: nil) else {
+                throw Engine.Failure.schemaUnavailable
+            }
+            controller.secureInputEnabled = { false }
+            controller.activateServer(client)
+            func key(_ text: String, flags: NSEvent.ModifierFlags = []) -> Bool {
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                    timestamp: 0, windowNumber: 0, context: nil, characters: text,
+                    charactersIgnoringModifiers: text, isARepeat: false, keyCode: 0)!
+                return controller.handle(event, client: client)
+            }
+            for (symbol, flags) in [(".", NSEvent.ModifierFlags()), ("@", .shift),
+                                    ("/", NSEvent.ModifierFlags()), ("-", NSEvent.ModifierFlags())] {
+                for character in "github" { _ = key(String(character)) }
+                guard controller.candidatesPanel.isVisible,
+                      controller.session?.candidates.texts.contains("GitHub") == true,
+                      key(symbol, flags: flags), client.committed.hasSuffix("github" + symbol),
+                      controller.session?.rawInput.isEmpty == true,
+                      !controller.candidatesPanel.isVisible else { throw Engine.Failure.schemaUnavailable }
+            }
+            controller.deactivateServer(client)
+        }
+        defaults.set(InputScheme.full.rawValue, forKey: "scheme")
+        let client = SmokeTextClient()
+        guard let controller = InputController(server: server, delegate: nil, client: nil) else {
+            throw Engine.Failure.schemaUnavailable
+        }
+        controller.secureInputEnabled = { false }
+        controller.activateServer(client)
+        func chineseKey(_ text: String) -> Bool {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
+                isARepeat: false, keyCode: 0)!
+            return controller.handle(event, client: client)
+        }
+        _ = chineseKey("n"); _ = chineseKey("i")
+        guard controller.session?.candidates.texts.isEmpty == false,
+              chineseKey(","), client.committed == "ni," else { throw Engine.Failure.schemaUnavailable }
+        controller.deactivateServer(client)
+        print("PASS: symbols commit raw letter input for English and Chinese compositions in full/Flypy")
     }
 
     static func verifyFocusIndicator(server: IMKServer) throws {

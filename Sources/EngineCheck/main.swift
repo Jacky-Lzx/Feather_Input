@@ -61,6 +61,10 @@ for (scheme, input) in [(InputScheme.full, "nihao"), (.flypy, "nihc")] {
     session.process(117)
     let english = session.candidateSlice(offset: 0)
     check(english.contains("GitHub"), "\(scheme.title): English prefix completion")
+    check(RawSymbolCommit.shouldCommit(rawInput: "github", symbol: "."),
+          "\(scheme.title): English symbol commit detection")
+    check(RawSymbolCommit.shouldCommit(rawInput: "nihao", symbol: ","),
+          "\(scheme.title): Pinyin symbol commit detection")
     check(session.selectGlobalCandidate(at: english.firstIndex(of: "GitHub")!), "select English completion")
     check(session.takeCommit() == "GitHub", "\(scheme.title): English commit")
     check(session.setEnglishCandidateMinimum(3), "restore English minimum length")
