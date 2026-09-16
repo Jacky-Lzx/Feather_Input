@@ -1,5 +1,38 @@
 import AppKit
 
+@MainActor
+private final class CandidateRowButton: NSButton {
+  var candidateHighlighted = false {
+    didSet { needsDisplay = true }
+  }
+
+  override var wantsUpdateLayer: Bool { true }
+
+  override func updateLayer() {
+    super.updateLayer()
+    guard let layer else { return }
+    let darkAppearance =
+      effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    let background =
+      candidateHighlighted
+      ? (darkAppearance
+        ? NSColor.selectedContentBackgroundColor
+        : NSColor.unemphasizedSelectedContentBackgroundColor)
+      : NSColor.clear
+    let foreground: NSColor =
+      candidateHighlighted && darkAppearance ? .selectedControlTextColor : .labelColor
+    layer.backgroundColor = background.cgColor
+    layer.cornerRadius = 6
+    attributedTitle = NSAttributedString(
+      string: title,
+      attributes: [
+        .font: NSFont.systemFont(ofSize: 16),
+        .foregroundColor: foreground,
+      ]
+    )
+  }
+}
+
 enum CandidateWindowAction {
   case select(FeatherCandidateValue)
   case pageUp
@@ -150,18 +183,17 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     }
 
     for (index, candidate) in candidates.enumerated() {
-      let button = NSButton(
+      let button = CandidateRowButton(
         title: "\(index + 1).  \(candidate.text)",
         target: self,
         action: #selector(selectCandidate(_:))
       )
       button.tag = index
       button.alignment = .left
-      button.bezelStyle = .roundRect
       button.setButtonType(.momentaryPushIn)
-      button.isBordered = highlighted == index
-      button.font = .systemFont(ofSize: 16)
-      button.contentTintColor = .labelColor
+      button.isBordered = false
+      button.candidateHighlighted = highlighted == index
+      button.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
       candidateStack.addArrangedSubview(button)
     }
   }
