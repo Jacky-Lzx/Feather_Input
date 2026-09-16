@@ -94,6 +94,10 @@ final class HarnessWindowController: NSWindowController, NSTableViewDataSource, 
     outputView.isEditable = false
     outputView.isRichText = false
     outputView.font = .systemFont(ofSize: 18)
+    outputView.drawsBackground = true
+    outputView.backgroundColor = .textBackgroundColor
+    outputView.textColor = .labelColor
+    outputView.insertionPointColor = .labelColor
     outputView.textContainerInset = NSSize(width: 8, height: 8)
     let outputScroll = NSScrollView()
     outputScroll.documentView = outputView
@@ -225,8 +229,7 @@ final class HarnessWindowController: NSWindowController, NSTableViewDataSource, 
   private func apply(_ response: FeatherResponseValue, operation: String) {
     currentResponse = response
     if let commit = response.commit {
-      outputView.textStorage?.append(NSAttributedString(string: commit))
-      outputView.scrollToEndOfDocument(nil)
+      appendOutput(commit)
     }
     preeditLabel.stringValue = markedPreedit(response.preedit, cursorUTF8: response.cursorUTF8)
     let highlighted = response.highlighted.map { String($0 + 1) } ?? "无"
@@ -247,7 +250,20 @@ final class HarnessWindowController: NSWindowController, NSTableViewDataSource, 
 
   private func appendDirectFallback(for operation: String) {
     guard currentResponse?.directMode == true, operation.hasPrefix("text ") else { return }
-    outputView.textStorage?.append(NSAttributedString(string: String(operation.dropFirst(5))))
+    appendOutput(String(operation.dropFirst(5)))
+  }
+
+  private func appendOutput(_ text: String) {
+    outputView.textStorage?.append(
+      NSAttributedString(
+        string: text,
+        attributes: [
+          .font: NSFont.systemFont(ofSize: 18),
+          .foregroundColor: NSColor.labelColor,
+        ]
+      )
+    )
+    outputView.scrollToEndOfDocument(nil)
   }
 
   private func markedPreedit(_ text: String, cursorUTF8: Int) -> String {
