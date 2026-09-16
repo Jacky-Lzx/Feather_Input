@@ -5,8 +5,7 @@ use feather_core::{
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 const CANDIDATE_CAPACITY: usize = 64;
 const CANDIDATE_CAPACITY_C: c_int = 64;
@@ -19,7 +18,7 @@ const KEY_PAGE_UP: c_int = 0xff55;
 const KEY_PAGE_DOWN: c_int = 0xff56;
 const KEY_DELETE: c_int = 0xffff;
 
-static RUNTIME_ACTIVE: AtomicBool = AtomicBool::new(false);
+static RUNTIME_REGISTRY: OnceLock<Mutex<RuntimeRegistry>> = OnceLock::new();
 
 unsafe extern "C" {
     fn feather_rime_initialize(shared: *const c_char, user: *const c_char) -> c_int;
@@ -58,28 +57,116 @@ impl RimePaths {
     }
 }
 
-struct RuntimeInner {
-    gate: Mutex<()>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RuntimeConfig {
+    shared_data: PathBuf,
+    user_data: PathBuf,
 }
 
-impl RuntimeInner {
-    fn lock(&self) -> Result<MutexGuard<'_, ()>, EngineError> {
-        self.gate
-            .lock()
-            .map_err(|_| EngineError::new("librime 运行时锁已损坏"))
+impl RuntimeConfig {
+    fn prepare(paths: &RimePaths) -> Result<Self, EngineError> {
+        if !paths.shared_data.is_dir() {
+            return Err(EngineError::new(format!(
+                "Rime 共享数据目录不存在：{}",
+                paths.shared_data.display()
+            )));
+        }
+        std::fs::create_dir_all(&paths.user_data).map_err(|error| {
+            EngineError::new(format!(
+                "无法创建 Rime 用户数据目录 {}：{error}",
+                paths.user_data.display()
+            ))
+        })?;
+        let shared_data = paths.shared_data.canonicalize().map_err(|error| {
+            EngineError::new(format!(
+                "无法解析 Rime 共享数据目录 {}：{error}",
+                paths.shared_data.display()
+            ))
+        })?;
+        let user_data = paths.user_data.canonicalize().map_err(|error| {
+            EngineError::new(format!(
+                "无法解析 Rime 用户数据目录 {}：{error}",
+                paths.user_data.display()
+            ))
+        })?;
+        Ok(Self {
+            shared_data,
+            user_data,
+        })
     }
 }
 
-impl Drop for RuntimeInner {
+#[derive(Debug)]
+struct ActiveRuntime {
+    id: u64,
+    config: RuntimeConfig,
+    owners: usize,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeRegistry {
+    active: Option<ActiveRuntime>,
+    next_id: u64,
+}
+
+fn runtime_conflict(active: &ActiveRuntime, requested: &RuntimeConfig) -> EngineError {
+    EngineError::new(format!(
+        "当前进程的 librime 运行时使用不同的数据目录：当前 shared={} user={}，请求 shared={} user={}",
+        active.config.shared_data.display(),
+        active.config.user_data.display(),
+        requested.shared_data.display(),
+        requested.user_data.display()
+    ))
+}
+
+fn runtime_registry() -> &'static Mutex<RuntimeRegistry> {
+    RUNTIME_REGISTRY.get_or_init(|| Mutex::new(RuntimeRegistry::default()))
+}
+
+struct RuntimeLease {
+    id: u64,
+}
+
+impl RuntimeLease {
+    fn lock(&self) -> Result<MutexGuard<'static, RuntimeRegistry>, EngineError> {
+        let registry = runtime_registry()
+            .lock()
+            .map_err(|_| EngineError::new("librime 运行时注册表已损坏"))?;
+        let is_active = registry
+            .active
+            .as_ref()
+            .is_some_and(|active| active.id == self.id);
+        if !is_active {
+            return Err(EngineError::new("librime 运行时已经失效"));
+        }
+        Ok(registry)
+    }
+}
+
+impl Drop for RuntimeLease {
     fn drop(&mut self) {
-        unsafe { feather_rime_finalize() };
-        RUNTIME_ACTIVE.store(false, Ordering::Release);
+        let mut registry = match runtime_registry().lock() {
+            Ok(registry) => registry,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let Some(active) = registry
+            .active
+            .as_mut()
+            .filter(|active| active.id == self.id)
+        else {
+            return;
+        };
+        active.owners = active.owners.saturating_sub(1);
+        if active.owners == 0 {
+            unsafe { feather_rime_finalize() };
+            registry.active = None;
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct RimeRuntime {
-    inner: Arc<RuntimeInner>,
+    lease: Arc<RuntimeLease>,
 }
 
 impl RimeRuntime {
@@ -87,45 +174,43 @@ impl RimeRuntime {
     ///
     /// # Errors
     ///
-    /// Returns an error when another runtime is active, a path is invalid, or
-    /// librime cannot initialize its shared and user data directories.
+    /// Reuses the active process-wide runtime when its paths match. Returns an
+    /// error when the active runtime uses different paths, a path is invalid,
+    /// or librime cannot initialize its data directories.
     pub fn initialize(paths: &RimePaths) -> Result<Self, EngineError> {
-        if RUNTIME_ACTIVE
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Err(EngineError::new("当前进程已经存在一个 librime 运行时"));
+        let config = RuntimeConfig::prepare(paths)?;
+        let shared = path_to_cstring(&config.shared_data)?;
+        let user = path_to_cstring(&config.user_data)?;
+        let mut registry = runtime_registry()
+            .lock()
+            .map_err(|_| EngineError::new("librime 运行时注册表已损坏"))?;
+
+        if let Some(active) = registry.active.as_mut() {
+            if active.config != config {
+                return Err(runtime_conflict(active, &config));
+            }
+            active.owners = active
+                .owners
+                .checked_add(1)
+                .ok_or_else(|| EngineError::new("librime 运行时引用计数溢出"))?;
+            return Ok(Self {
+                lease: Arc::new(RuntimeLease { id: active.id }),
+            });
         }
 
-        let result = (|| {
-            if !paths.shared_data.is_dir() {
-                return Err(EngineError::new(format!(
-                    "Rime 共享数据目录不存在：{}",
-                    paths.shared_data.display()
-                )));
-            }
-            std::fs::create_dir_all(&paths.user_data).map_err(|error| {
-                EngineError::new(format!(
-                    "无法创建 Rime 用户数据目录 {}：{error}",
-                    paths.user_data.display()
-                ))
-            })?;
-            let shared = path_to_cstring(&paths.shared_data)?;
-            let user = path_to_cstring(&paths.user_data)?;
-            if unsafe { feather_rime_initialize(shared.as_ptr(), user.as_ptr()) } == 0 {
-                return Err(EngineError::new("librime 初始化失败"));
-            }
-            Ok(Self {
-                inner: Arc::new(RuntimeInner {
-                    gate: Mutex::new(()),
-                }),
-            })
-        })();
-
-        if result.is_err() {
-            RUNTIME_ACTIVE.store(false, Ordering::Release);
+        if unsafe { feather_rime_initialize(shared.as_ptr(), user.as_ptr()) } == 0 {
+            return Err(EngineError::new("librime 初始化失败"));
         }
-        result
+        registry.next_id = registry.next_id.wrapping_add(1).max(1);
+        let id = registry.next_id;
+        registry.active = Some(ActiveRuntime {
+            id,
+            config,
+            owners: 1,
+        });
+        Ok(Self {
+            lease: Arc::new(RuntimeLease { id }),
+        })
     }
 
     /// Creates a session using one deployed Rime schema.
@@ -137,7 +222,7 @@ impl RimeRuntime {
     pub fn create_engine(&self, schema: &str) -> Result<RimeEngine, EngineError> {
         let schema =
             CString::new(schema).map_err(|_| EngineError::new("Rime schema 名称包含 NUL 字符"))?;
-        let _guard = self.inner.lock()?;
+        let _registry = self.lease.lock()?;
         let session = unsafe { feather_rime_create_session(schema.as_ptr()) };
         if session == 0 {
             return Err(EngineError::new(format!(
@@ -146,7 +231,7 @@ impl RimeRuntime {
             )));
         }
         Ok(RimeEngine {
-            runtime: Arc::clone(&self.inner),
+            lease: Arc::clone(&self.lease),
             session,
             revision: 1,
         })
@@ -154,14 +239,14 @@ impl RimeRuntime {
 }
 
 pub struct RimeEngine {
-    runtime: Arc<RuntimeInner>,
+    lease: Arc<RuntimeLease>,
     session: usize,
     revision: u64,
 }
 
 impl RimeEngine {
     fn process_key(&mut self, key: c_int) -> Result<bool, EngineError> {
-        let _guard = self.runtime.lock()?;
+        let _registry = self.lease.lock()?;
         let handled = unsafe { feather_rime_process_key(self.session, key, 0) } != 0;
         if handled {
             self.revision = next_revision(self.revision);
@@ -170,13 +255,13 @@ impl RimeEngine {
     }
 
     fn take_commit(&self) -> Result<Option<String>, EngineError> {
-        let _guard = self.runtime.lock()?;
+        let _registry = self.lease.lock()?;
         let text = unsafe { feather_rime_take_commit(self.session) };
         Ok(unsafe { take_string(text) })
     }
 
     fn select_candidate(&mut self, id: EngineCandidateId) -> Result<bool, EngineError> {
-        let _guard = self.runtime.lock()?;
+        let _registry = self.lease.lock()?;
         let handled = unsafe { feather_rime_select_candidate(self.session, id.0) } != 0;
         if handled {
             self.revision = next_revision(self.revision);
@@ -187,7 +272,7 @@ impl RimeEngine {
 
 impl Drop for RimeEngine {
     fn drop(&mut self) {
-        if let Ok(_guard) = self.runtime.gate.lock() {
+        if let Ok(_registry) = self.lease.lock() {
             unsafe { feather_rime_destroy_session(self.session) };
         }
     }
@@ -195,7 +280,7 @@ impl Drop for RimeEngine {
 
 impl InputEngine for RimeEngine {
     fn reset(&mut self) {
-        if let Ok(_guard) = self.runtime.gate.lock() {
+        if let Ok(_registry) = self.lease.lock() {
             unsafe { feather_rime_clear(self.session) };
             self.revision = next_revision(self.revision);
         }
@@ -230,7 +315,7 @@ impl InputEngine for RimeEngine {
     }
 
     fn snapshot(&self) -> Result<EngineSnapshot, EngineError> {
-        let _guard = self.runtime.lock()?;
+        let _registry = self.lease.lock()?;
         let mut cursor = 0_usize;
         let preedit = unsafe { take_string(feather_rime_preedit(self.session, &raw mut cursor)) }
             .unwrap_or_default();
@@ -310,9 +395,33 @@ mod tests {
     use feather_core::{InputCoordinator, InputEffect, InputEvent, Key};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn type_text(core: &mut InputCoordinator, text: &str) {
+        for character in text.chars() {
+            core.dispatch(InputEvent::Key(Key::Text(character.to_string())))
+                .unwrap();
+        }
+    }
+
+    fn select_text(core: &mut InputCoordinator, text: &str) {
+        let candidate = core
+            .presentation()
+            .unwrap()
+            .candidates
+            .iter()
+            .find(|candidate| candidate.text == text)
+            .unwrap_or_else(|| panic!("真实 Rime 候选应该包含{text}"))
+            .id;
+        let result = core
+            .dispatch(InputEvent::SelectCandidate(candidate))
+            .unwrap();
+        assert!(result
+            .effects
+            .contains(&InputEffect::CommitText(text.into())));
+    }
+
     #[test]
     #[ignore = "需要 FEATHER_RIME_SHARED_DATA_DIR 指向已经部署的 Rime 数据"]
-    fn real_full_pinyin_session_commits_nihao() {
+    fn real_runtime_supports_overlapping_sessions_and_reinitialization() {
         let shared = std::env::var_os("FEATHER_RIME_SHARED_DATA_DIR")
             .expect("需要 FEATHER_RIME_SHARED_DATA_DIR");
         let suffix = SystemTime::now()
@@ -320,29 +429,55 @@ mod tests {
             .unwrap()
             .as_nanos();
         let user = std::env::temp_dir().join(format!("feather-rime-rust-{suffix}"));
-        let runtime = RimeRuntime::initialize(&RimePaths::new(shared, &user)).unwrap();
-        let engine = runtime.create_engine("luna_pinyin_simp").unwrap();
-        let mut core = InputCoordinator::new(engine);
-        core.dispatch(InputEvent::Activate).unwrap();
-        for character in "nihao".chars() {
-            core.dispatch(InputEvent::Key(Key::Text(character.to_string())))
-                .unwrap();
-        }
-        let presentation = core.presentation().unwrap();
-        let candidate = presentation
+        let paths = RimePaths::new(&shared, &user);
+        let runtime_a = RimeRuntime::initialize(&paths).unwrap();
+        let runtime_b = RimeRuntime::initialize(&paths).unwrap();
+        let mut core_a =
+            InputCoordinator::new(runtime_a.create_engine("luna_pinyin_simp").unwrap());
+        let mut core_b =
+            InputCoordinator::new(runtime_b.create_engine("luna_pinyin_simp").unwrap());
+        core_a.dispatch(InputEvent::Activate).unwrap();
+        core_b.dispatch(InputEvent::Activate).unwrap();
+
+        type_text(&mut core_a, "nihao");
+        type_text(&mut core_b, "shijie");
+        assert!(core_a
+            .presentation()
+            .unwrap()
             .candidates
             .iter()
-            .find(|candidate| candidate.text == "你好")
-            .expect("真实 Rime 候选应该包含你好")
-            .id;
-        let result = core
-            .dispatch(InputEvent::SelectCandidate(candidate))
-            .unwrap();
-        assert!(result
-            .effects
-            .contains(&InputEffect::CommitText("你好".into())));
-        drop(core);
-        drop(runtime);
+            .any(|candidate| candidate.text == "你好"));
+        assert!(core_b
+            .presentation()
+            .unwrap()
+            .candidates
+            .iter()
+            .any(|candidate| candidate.text == "世界"));
+
+        select_text(&mut core_a, "你好");
+        drop(core_a);
+        drop(runtime_a);
+        select_text(&mut core_b, "世界");
+
+        let conflicting_user =
+            std::env::temp_dir().join(format!("feather-rime-rust-conflict-{suffix}"));
+        let conflict = RimeRuntime::initialize(&RimePaths::new(&shared, &conflicting_user));
+        assert!(conflict
+            .err()
+            .expect("不同用户目录必须被拒绝")
+            .to_string()
+            .contains("使用不同的数据目录"));
+
+        drop(core_b);
+        drop(runtime_b);
         std::fs::remove_dir_all(user).unwrap();
+        std::fs::remove_dir_all(&conflicting_user).unwrap();
+
+        let next_user = std::env::temp_dir().join(format!("feather-rime-rust-next-{suffix}"));
+        let next_runtime = RimeRuntime::initialize(&RimePaths::new(&shared, &next_user)).unwrap();
+        let next_engine = next_runtime.create_engine("luna_pinyin_simp").unwrap();
+        drop(next_engine);
+        drop(next_runtime);
+        std::fs::remove_dir_all(next_user).unwrap();
     }
 }

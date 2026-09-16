@@ -14,6 +14,7 @@ const CAP_RIME_ENGINE: u64 = 1 << 0;
 const CAP_OPAQUE_CANDIDATE_ID: u64 = 1 << 1;
 const CAP_EXPLICIT_CLOSE: u64 = 1 << 2;
 const CAP_STRUCTURED_ERROR: u64 = 1 << 3;
+const CAP_MULTI_SESSION: u64 = 1 << 4;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -336,7 +337,11 @@ pub extern "C" fn feather_ime_abi_version() -> u32 {
 
 #[no_mangle]
 pub extern "C" fn feather_ime_capabilities() -> u64 {
-    CAP_RIME_ENGINE | CAP_OPAQUE_CANDIDATE_ID | CAP_EXPLICIT_CLOSE | CAP_STRUCTURED_ERROR
+    CAP_RIME_ENGINE
+        | CAP_OPAQUE_CANDIDATE_ID
+        | CAP_EXPLICIT_CLOSE
+        | CAP_STRUCTURED_ERROR
+        | CAP_MULTI_SESSION
 }
 
 #[no_mangle]
@@ -623,12 +628,70 @@ mod tests {
             .into_owned()
     }
 
+    unsafe fn new_rime(shared: &CString, user: &CString, schema: &CString) -> *mut FeatherIme {
+        let mut ime = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let status = unsafe {
+            feather_ime_new_rime(
+                shared.as_ptr(),
+                user.as_ptr(),
+                schema.as_ptr(),
+                &raw mut ime,
+                &raw mut error,
+            )
+        };
+        assert_eq!(status, StatusCode::Ok.value());
+        assert!(error.is_null());
+        ime
+    }
+
+    unsafe fn activate(ime: *mut FeatherIme) {
+        let mut response = ptr::null_mut();
+        assert_eq!(
+            unsafe { feather_ime_activate(ime, &raw mut response, ptr::null_mut()) },
+            StatusCode::Ok.value()
+        );
+        unsafe { feather_ime_response_free(response) };
+    }
+
+    unsafe fn type_ascii(ime: *mut FeatherIme, text: &[u8]) {
+        for byte in text {
+            let (response, error, status) = unsafe { call_key(ime, 1, byte, 1) };
+            assert_eq!(status, StatusCode::Ok.value());
+            assert!(error.is_null());
+            unsafe { feather_ime_response_free(response) };
+        }
+    }
+
+    unsafe fn commit_highlighted(ime: *mut FeatherIme) -> String {
+        let (response, error, status) = unsafe { call_key(ime, 4, ptr::null(), 0) };
+        assert_eq!(status, StatusCode::Ok.value());
+        assert!(error.is_null());
+        let committed = unsafe { CStr::from_ptr((*response).commit) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { feather_ime_response_free(response) };
+        committed
+    }
+
+    unsafe fn close_and_free(ime: *mut FeatherIme) {
+        assert_eq!(
+            unsafe { feather_ime_close(ime, ptr::null_mut()) },
+            StatusCode::Ok.value()
+        );
+        unsafe { feather_ime_free(ime) };
+    }
+
     #[test]
     fn c_abi_v2_publishes_version_and_capabilities() {
         assert_eq!(feather_ime_abi_version(), 2);
         assert_eq!(
             feather_ime_capabilities(),
-            CAP_RIME_ENGINE | CAP_OPAQUE_CANDIDATE_ID | CAP_EXPLICIT_CLOSE | CAP_STRUCTURED_ERROR
+            CAP_RIME_ENGINE
+                | CAP_OPAQUE_CANDIDATE_ID
+                | CAP_EXPLICIT_CLOSE
+                | CAP_STRUCTURED_ERROR
+                | CAP_MULTI_SESSION
         );
     }
 
@@ -746,7 +809,7 @@ mod tests {
 
     #[test]
     #[ignore = "需要 FEATHER_RIME_SHARED_DATA_DIR 指向已经部署的 Rime 数据"]
-    fn c_abi_v2_constructs_real_rime_engine() {
+    fn c_abi_v2_supports_overlapping_rime_sessions() {
         let shared = std::env::var("FEATHER_RIME_SHARED_DATA_DIR")
             .expect("需要 FEATHER_RIME_SHARED_DATA_DIR");
         let suffix = SystemTime::now()
@@ -758,45 +821,42 @@ mod tests {
         let user_string = user.to_string_lossy();
         let user_argument = CString::new(user_string.as_bytes()).unwrap();
         let schema = CString::new("luna_pinyin_simp").unwrap();
-        let mut ime = ptr::null_mut();
+        let ime = unsafe { new_rime(&shared, &user_argument, &schema) };
+        let other_ime = unsafe { new_rime(&shared, &user_argument, &schema) };
+        unsafe {
+            activate(ime);
+            activate(other_ime);
+            type_ascii(ime, b"nihao");
+            type_ascii(other_ime, b"shijie");
+        }
+
+        let conflicting_user =
+            std::env::temp_dir().join(format!("feather-rime-ffi-conflict-{suffix}"));
+        let conflicting_user_string = conflicting_user.to_string_lossy();
+        let conflicting_user_argument = CString::new(conflicting_user_string.as_bytes()).unwrap();
+        let mut conflicting_ime = ptr::null_mut();
         let mut error = ptr::null_mut();
         let status = unsafe {
             feather_ime_new_rime(
                 shared.as_ptr(),
-                user_argument.as_ptr(),
+                conflicting_user_argument.as_ptr(),
                 schema.as_ptr(),
-                &raw mut ime,
+                &raw mut conflicting_ime,
                 &raw mut error,
             )
         };
-        assert_eq!(status, StatusCode::Ok.value());
-        assert!(error.is_null());
+        assert_eq!(status, StatusCode::EngineInitializationFailed.value());
+        assert!(conflicting_ime.is_null());
+        assert!(unsafe { error_message(error) }.contains("使用不同的数据目录"));
+        unsafe { feather_error_free(error) };
 
-        let mut active = ptr::null_mut();
-        assert_eq!(
-            unsafe { feather_ime_activate(ime, &raw mut active, ptr::null_mut()) },
-            StatusCode::Ok.value()
-        );
-        unsafe { feather_ime_response_free(active) };
-        for byte in b"nihao" {
-            let (response, error, status) = unsafe { call_key(ime, 1, byte, 1) };
-            assert_eq!(status, StatusCode::Ok.value());
-            assert!(error.is_null());
-            unsafe { feather_ime_response_free(response) };
-        }
-        let (response, error, status) = unsafe { call_key(ime, 4, ptr::null(), 0) };
-        assert_eq!(status, StatusCode::Ok.value());
-        assert!(error.is_null());
-        let committed = unsafe { CStr::from_ptr((*response).commit) };
-        assert_eq!(committed.to_str().unwrap(), "你好");
         unsafe {
-            feather_ime_response_free(response);
-            assert_eq!(
-                feather_ime_close(ime, ptr::null_mut()),
-                StatusCode::Ok.value()
-            );
-            feather_ime_free(ime);
+            assert_eq!(commit_highlighted(ime), "你好");
+            close_and_free(ime);
+            assert_eq!(commit_highlighted(other_ime), "世界");
+            close_and_free(other_ime);
         }
         std::fs::remove_dir_all(user).unwrap();
+        std::fs::remove_dir_all(conflicting_user).unwrap();
     }
 }

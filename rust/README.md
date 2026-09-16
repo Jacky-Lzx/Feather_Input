@@ -10,7 +10,8 @@ Swift/InputMethodKit 应用并行存在：当前应用继续作为行为基准�
 - `feather-engine-lexicon`：一个小型纯 Rust 参考引擎，用来验证不依赖 librime 的
   完整组合、候选和上屏链路。
 - `feather-engine-rime`：隔离的 librime 适配器，通过相同的 `InputEngine` 接口
-  提供真实方案、候选和上屏行为。
+  提供真实方案、候选和上屏行为；相同数据目录的多个引擎共享进程级 runtime，并
+  使用相互隔离的 Rime session。
 - `feather-ffi`：面向 Swift、Windows TSF 和 Linux 输入法适配层的 C ABI v2，提供
   参考引擎和 librime 构造器、结构化错误与显式生命周期。
 - `feather-trace`：平台无关的 JSON 行为场景和执行器，用于让参考引擎、librime 和
@@ -34,7 +35,15 @@ scripts/check-rust.sh
 ```sh
 FEATHER_RIME_SHARED_DATA_DIR=/absolute/path/to/rime \
   cargo test --manifest-path rust/Cargo.toml \
-  -p feather-engine-rime -- --ignored
+  -p feather-engine-rime -- --ignored --test-threads=1
+```
+
+验证 ABI 层的重叠 Rime session：
+
+```sh
+FEATHER_RIME_SHARED_DATA_DIR=/absolute/path/to/rime \
+  cargo test --manifest-path rust/Cargo.toml \
+  -p feather-ffi -- --ignored --test-threads=1
 ```
 
 参考词典有意保持很小。它是用于验证架构的可执行样例，不用于替代现有 Rime 词库。

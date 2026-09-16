@@ -65,7 +65,7 @@ enum FeatherKey: UInt32 {
 @MainActor
 final class FeatherSession {
   private static let expectedABI: UInt32 = 2
-  private static let requiredCapabilities: UInt64 = 0b1111
+  private static let requiredCapabilities: UInt64 = 0b1_1111
 
   private var handle: OpaquePointer?
 

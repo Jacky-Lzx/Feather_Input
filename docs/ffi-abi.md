@@ -53,6 +53,11 @@ free（仅一次）
 接口会把跨线程调用报告为 `FEATHER_STATUS_WRONG_THREAD`。`free` 没有错误返回值，因此
 调用方必须在进入它之前保证线程正确。
 
+多个 `new_rime` 会话可以同时存在。使用相同规范化共享数据目录和用户数据目录的会话
+在进程内共享一个 librime runtime，但组合状态、候选和 revision 由各自的 Rime
+session 独立持有。关闭一个 ABI session 不会关闭其他 session。只要已有会话仍然
+存活，使用不同数据目录创建会话就会返回引擎初始化错误。
+
 ## 响应所有权
 
 每次成功的业务调用都会返回独立的 `FeatherResponse`：
@@ -73,7 +78,8 @@ ABI v2 当前公开以下能力：
 - `FEATHER_CAP_RIME_ENGINE`：可以创建 librime 会话；
 - `FEATHER_CAP_OPAQUE_CANDIDATE_ID`：候选使用 revision 与不透明 ID；
 - `FEATHER_CAP_EXPLICIT_CLOSE`：支持显式、幂等关闭；
-- `FEATHER_CAP_STRUCTURED_ERROR`：支持结构化状态和错误对象。
+- `FEATHER_CAP_STRUCTURED_ERROR`：支持结构化状态和错误对象；
+- `FEATHER_CAP_MULTI_SESSION`：相同数据目录的 Rime 会话可以重叠存活并相互隔离。
 
 平台层只应要求自身实际依赖的能力。新增可选能力时增加新的位，不改变已有位的含义。
 

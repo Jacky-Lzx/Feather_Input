@@ -115,7 +115,9 @@ Rime 按键事件和候选迭代操作。未来的 Rust 实现可以使用解析
 `feather-engine-rime` 已作为第一个真实引擎适配器接入。它负责 librime 的全局
 生命周期、session、方案选择、按键映射、候选快照和全局候选选择。Rime 的 C 类型
 与候选索引不会越过该 crate；核心和平台层只接触 `InputEngine`、revision 和不透明
-候选 ID。
+候选 ID。进程内使用相同数据目录的多个适配器会共享一个 librime runtime，但各自
+持有独立的 Rime session；关闭其中一个不会影响其他 session。不同数据目录不能在
+同一 runtime 生命周期内混用，调用方会收到明确的初始化错误。
 
 `feather-ffi` 当前提供 ABI v2：显式输出指针、结构化错误、能力查询、同线程检查和
 幂等关闭。公开头文件同时接受 C11 与 C++17 语法检查。

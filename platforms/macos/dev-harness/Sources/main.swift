@@ -105,24 +105,49 @@ struct FeatherDevHarnessMain {
     do {
       let (paths, temporaryRoot) = try HarnessPaths.smokeTest()
       defer { try? FileManager.default.removeItem(at: temporaryRoot) }
-      let session = try FeatherSession(
+      let firstSession = try FeatherSession(
         sharedData: paths.sharedData,
         userData: paths.userData,
         schema: paths.schema
       )
-      defer { try? session.close() }
-      _ = try session.activate()
+      defer { try? firstSession.close() }
+      let secondSession = try FeatherSession(
+        sharedData: paths.sharedData,
+        userData: paths.userData,
+        schema: paths.schema
+      )
+      defer { try? secondSession.close() }
+      _ = try firstSession.activate()
+      _ = try secondSession.activate()
       for character in "nihao" {
-        _ = try session.send(text: String(character))
+        _ = try firstSession.send(text: String(character))
       }
-      let response = try session.send(.space)
-      guard response.commit == "你好" else {
+      for character in "shijie" {
+        _ = try secondSession.send(text: String(character))
+      }
+      let firstResponse = try firstSession.send(.space)
+      guard firstResponse.commit == "你好" else {
         FileHandle.standardError.write(
-          Data("Smoke test 失败：预期提交“你好”，实际为 \(response.commit ?? "nil")\n".utf8)
+          Data(
+            "Smoke test 失败：第一会话预期提交“你好”，实际为 \(firstResponse.commit ?? "nil")\n"
+              .utf8
+          )
         )
         return 1
       }
-      print("Smoke test 通过：Swift → C ABI → Rust → librime 提交“你好”")
+      try firstSession.close()
+
+      let secondResponse = try secondSession.send(.space)
+      guard secondResponse.commit == "世界" else {
+        FileHandle.standardError.write(
+          Data(
+            "Smoke test 失败：第二会话预期提交“世界”，实际为 \(secondResponse.commit ?? "nil")\n"
+              .utf8
+          )
+        )
+        return 1
+      }
+      print("Smoke test 通过：两个 Swift 会话共享 runtime，并分别提交“你好”和“世界”")
       return 0
     } catch {
       FileHandle.standardError.write(Data("Smoke test 失败：\(error.localizedDescription)\n".utf8))

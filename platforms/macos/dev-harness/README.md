@@ -43,6 +43,9 @@ FEATHER_RIME_SHARED_DATA_DIR=/absolute/path/to/rime \
 scripts/test-macos-dev-harness.sh
 ```
 
+Smoke Test 会同时创建两个 Swift/ABI/Rime 会话，分别保留组合状态；关闭第一个会话后，
+第二个仍须能够提交文字。
+
 手动运行普通应用：
 
 ```sh
