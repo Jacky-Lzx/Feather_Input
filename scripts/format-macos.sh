@@ -10,4 +10,5 @@ xcrun swift-format format \
     platforms/macos/shared/Sources \
     platforms/macos/dev-harness/Sources \
     platforms/macos/input-method/Sources \
-    platforms/macos/input-method/Tests
+    platforms/macos/input-method/Tests \
+    platforms/macos/input-method/Tools

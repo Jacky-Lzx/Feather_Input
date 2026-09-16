@@ -12,6 +12,13 @@ Bundle ID 的 InputMethodKit 开发适配层。
 - [macOS 开发调试壳](platforms/macos/dev-harness/README.md)
 - [macOS InputMethodKit 开发输入法](platforms/macos/input-method/README.md)
 
+构建、安装并注册隔离的 InputMethodKit 开发输入法：
+
+```sh
+scripts/install-macos-input-method.sh
+scripts/status-macos-input-method.sh
+```
+
 Feather Input 是一个从零开始设计的跨平台输入法项目。
 
 `main-human` 是人工审核后的稳定主线。新实现必须从独立实现分支提交，经人工审核后

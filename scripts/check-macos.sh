@@ -12,7 +12,8 @@ xcrun swift-format lint \
     platforms/macos/shared/Sources \
     platforms/macos/dev-harness/Sources \
     platforms/macos/input-method/Sources \
-    platforms/macos/input-method/Tests
+    platforms/macos/input-method/Tests \
+    platforms/macos/input-method/Tools
 
 echo "正在检查 Harness Swift 类型……"
 mkdir -p "$module_cache"
@@ -37,6 +38,14 @@ swiftc \
     platforms/macos/shared/Sources/*.swift \
     platforms/macos/input-method/Sources/*.swift
 
+echo "正在检查输入源管理工具类型……"
+swiftc \
+    -typecheck \
+    -parse-as-library \
+    -module-cache-path "$module_cache" \
+    -framework Carbon \
+    platforms/macos/input-method/Tools/*.swift
+
 echo "正在检查 C ABI 头文件……"
 xcrun clang \
     -std=c11 \
@@ -54,6 +63,10 @@ echo "正在检查 shell 脚本……"
 sh -n \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
+    scripts/build-macos-input-source-manager.sh \
+    scripts/install-macos-input-method.sh \
+    scripts/status-macos-input-method.sh \
+    scripts/uninstall-macos-input-method.sh \
     scripts/test-macos-dev-harness.sh \
     scripts/test-macos-input-method.sh \
     scripts/test-rime-traces.sh \
@@ -62,6 +75,10 @@ sh -n \
 shellcheck \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
+    scripts/build-macos-input-source-manager.sh \
+    scripts/install-macos-input-method.sh \
+    scripts/status-macos-input-method.sh \
+    scripts/uninstall-macos-input-method.sh \
     scripts/test-macos-dev-harness.sh \
     scripts/test-macos-input-method.sh \
     scripts/test-rime-traces.sh \
@@ -80,5 +97,15 @@ development_identifier=$(
 )
 if [ "$development_identifier" != "im.feather.inputmethod.rustdev.FeatherInput" ]; then
     echo "InputMethodKit 开发包必须使用隔离的 Bundle ID。" >&2
+    exit 1
+fi
+
+development_default_state=$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :ComponentInputModeDict:tsInputModeListKey:im.feather.inputmethod.rustdev.FeatherInput.Hans:tsInputModeDefaultStateKey' \
+        platforms/macos/input-method/Info.plist
+)
+if [ "$development_default_state" != false ]; then
+    echo "InputMethodKit 开发输入模式必须默认为禁用。" >&2
     exit 1
 fi
