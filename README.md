@@ -1,5 +1,14 @@
 # Feather Input
 
+Feather Input 正在以跨平台 Rust 核心重新实现。当前代码包含平台无关核心、librime
+适配器、稳定 C ABI，以及一个不会注册系统输入源的 macOS AppKit 开发调试壳。
+
+主要文档：
+
+- [Rust 架构](docs/rust-architecture.md)
+- [Rust workspace](rust/README.md)
+- [macOS 开发调试壳](platforms/macos/dev-harness/README.md)
+
 Feather Input 是一个从零开始设计的跨平台输入法项目。
 
 `main-human` 是人工审核后的稳定主线。新实现必须从独立实现分支提交，经人工审核后
@@ -18,10 +27,14 @@ scripts/install-git-hooks.sh
 
 启用后，每次提交都会自动格式化 Rust 代码，并运行格式检查和严格 Clippy。
 如果格式化产生修改，提交会中止，以便先审核并重新暂存格式化结果。
+存在 macOS Swift 源码时，hook 也会运行 `swift-format`、Swift 类型检查、shellcheck
+和 Info.plist 检查。提交前 hook 不运行测试。
 
 也可以手动运行：
 
 ```sh
 scripts/format-rust.sh
 scripts/check-rust.sh
+scripts/format-macos.sh
+scripts/check-macos.sh
 ```

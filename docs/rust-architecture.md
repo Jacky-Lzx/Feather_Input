@@ -110,3 +110,8 @@ Rime 按键事件和候选迭代操作。未来的 Rust 实现可以使用解析
 生命周期、session、方案选择、按键映射、候选快照和全局候选选择。Rime 的 C 类型
 与候选索引不会越过该 crate；核心和平台层只接触 `InputEngine`、revision 和不透明
 候选 ID。
+
+`platforms/macos/dev-harness` 提供普通 AppKit 调试应用，用来验证 Swift、C ABI、
+Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入源，使用独立用户
+数据目录，并在界面中显示预编辑、候选、revision 和候选 ID。它是 macOS 平台适配
+层的前置验证工具，不承担正式输入法客户端兼容性。

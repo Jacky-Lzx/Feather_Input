@@ -4,15 +4,17 @@ set -eu
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-if ! git diff --quiet -- rust; then
-    echo "提交前检查失败：rust/ 中存在未暂存修改。" >&2
+scope="rust platforms/macos/dev-harness scripts/build-macos-dev-harness.sh scripts/test-macos-dev-harness.sh scripts/format-macos.sh scripts/check-macos.sh"
+
+if ! git diff --quiet -- $scope; then
+    echo "提交前检查失败：本次代码范围中存在未暂存修改。" >&2
     echo "请先暂存、还原或移动这些修改，避免格式化扩大提交范围。" >&2
     exit 1
 fi
 
-untracked=$(git ls-files --others --exclude-standard -- rust)
+untracked=$(git ls-files --others --exclude-standard -- $scope)
 if [ -n "$untracked" ]; then
-    echo "提交前检查失败：rust/ 中存在未跟踪文件：" >&2
+    echo "提交前检查失败：本次代码范围中存在未跟踪文件：" >&2
     echo "$untracked" >&2
     echo "请先决定是否将它们加入本次提交。" >&2
     exit 1
@@ -21,10 +23,20 @@ fi
 echo "正在格式化 Rust 代码……"
 cargo fmt --manifest-path rust/Cargo.toml --all
 
-if ! git diff --quiet -- rust; then
-    echo "cargo fmt 已修改文件，本次提交已中止。" >&2
+if [ "$(uname -s)" = "Darwin" ]; then
+    echo "正在格式化 Swift 代码……"
+    scripts/format-macos.sh
+fi
+
+if ! git diff --quiet -- $scope; then
+    echo "代码格式化工具已修改文件，本次提交已中止。" >&2
     echo "请审核格式化结果，重新 git add 后再次提交。" >&2
     exit 1
 fi
 
-exec scripts/check-rust.sh
+scripts/check-rust.sh
+if [ "$(uname -s)" = "Darwin" ]; then
+    exec scripts/check-macos.sh
+fi
+
+echo "非 macOS 环境：跳过 macOS Swift 检查。"

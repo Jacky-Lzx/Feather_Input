@@ -1,0 +1,4 @@
+module FeatherIME {
+    umbrella header "FeatherIME.h"
+    export *
+}
