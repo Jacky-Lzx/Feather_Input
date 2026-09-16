@@ -11,6 +11,8 @@ final class SmokeTextClient: NSObject, IMKTextInput {
     var documentSelection: NSRange?
     var selectionUnavailable = false
     var textInputUnavailable = false
+    var unicodeSupported = true
+    var clientBundleIdentifier = "im.feather.smoke-client"
     func insertText(_ string: Any!, replacementRange: NSRange) { committed += string as? String ?? ""; marked = "" }
     func setMarkedText(_ string: Any!, selectionRange: NSRange, replacementRange: NSRange) { if !ignoresMarkedText { marked = string as? String ?? "" } }
     func selectedRange() -> NSRange {
@@ -32,8 +34,8 @@ final class SmokeTextClient: NSObject, IMKTextInput {
     func validAttributesForMarkedText() -> [Any]! { [] }
     func overrideKeyboard(withKeyboardNamed name: String!) {}
     func selectMode(_ modeIdentifier: String!) {}
-    func supportsUnicode() -> Bool { true }
-    func bundleIdentifier() -> String! { "im.feather.smoke-client" }
+    func supportsUnicode() -> Bool { unicodeSupported }
+    func bundleIdentifier() -> String! { clientBundleIdentifier }
     func windowLevel() -> CGWindowLevel { 0 }
     func supportsProperty(_ property: TSMDocumentPropertyTag) -> Bool { false }
     func uniqueClientIdentifierString() -> String! { "feather-smoke-client" }

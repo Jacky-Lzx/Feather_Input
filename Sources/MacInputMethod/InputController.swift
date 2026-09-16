@@ -762,6 +762,12 @@ final class InputController: IMKInputController {
     }
 
     private func textInputAvailable(_ client: IMKTextInput) -> Bool {
+        let identifier = client.bundleIdentifier() ?? "unknown"
+        // Eudic's menu-bar quick-search field is a real editable NSTextField,
+        // but its helper's IMK proxy reports no selection/caret and can report
+        // supportsUnicode=false. Those capability values describe the proxy,
+        // not the focused search field, so allow only this known helper here.
+        if identifier == "com.eusoft.eudic.LightPeek" { return true }
         guard client.supportsUnicode() else { return false }
         let range = client.selectedRange()
         if range.location != NSNotFound, range.location >= 0, range.length >= 0 { return true }
@@ -1287,9 +1293,12 @@ final class InputController: IMKInputController {
         controller.deactivateServer(client)
         print("PASS: non-text clients do not open composition; Escape and candidate windows remain app-owned")
     }
-    static func verifySelectionlessTextField(server: IMKServer) throws {
+    static func verifyEudicPopoverTextField(server: IMKServer) throws {
         let client = SmokeTextClient()
         client.selectionUnavailable = true
+        client.caretRectangle = .zero
+        client.unicodeSupported = false
+        client.clientBundleIdentifier = "com.eusoft.eudic.LightPeek"
         guard let controller = InputController(server: server, delegate: nil, client: nil) else {
             throw Engine.Failure.schemaUnavailable
         }
@@ -1306,7 +1315,7 @@ final class InputController: IMKInputController {
               key(" ", code: 49), !client.committed.isEmpty,
               controller.session?.rawInput.isEmpty == true else { throw Engine.Failure.schemaUnavailable }
         controller.deactivateServer(client)
-        print("PASS: selectionless popover text fields accept composition when caret geometry is available")
+        print("PASS: Eudic LightPeek accepts composition despite incomplete IMK proxy capabilities")
     }
     static func verifyGenerationLifecycle(server: IMKServer) throws {
         let defaults = UserDefaults.standard

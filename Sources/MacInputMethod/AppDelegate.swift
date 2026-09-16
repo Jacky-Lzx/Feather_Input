@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try InputController.verifyGenerationLifecycle(server: server!)
                 try InputController.verifyCompositionFallback(server: server!)
                 try InputController.verifyFocusIndicator(server: server!)
-                try InputController.verifySelectionlessTextField(server: server!)
+                try InputController.verifyEudicPopoverTextField(server: server!)
                 try InputController.verifyNoTextField(server: server!)
                 let session = try Self.engine!.session(.full)
                 for key in "nihao".utf8 { session.process(Int32(key)) }
