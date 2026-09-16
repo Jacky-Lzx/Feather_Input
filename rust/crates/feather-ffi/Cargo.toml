@@ -11,6 +11,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 feather-core = { path = "../feather-core" }
 feather-engine-lexicon = { path = "../feather-engine-lexicon" }
+feather-engine-rime = { path = "../feather-engine-rime" }
 
 [lints]
 workspace = true

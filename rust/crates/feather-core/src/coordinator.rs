@@ -29,9 +29,13 @@ impl InputCoordinator {
         self.mode
     }
 
-    #[must_use]
-    pub fn presentation(&self) -> CandidatePresentation {
-        self.engine.snapshot().into()
+    /// Reads the current platform-independent presentation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when a consistent snapshot is unavailable.
+    pub fn presentation(&self) -> Result<CandidatePresentation, EngineError> {
+        Ok(self.engine.snapshot()?.into())
     }
 
     /// Dispatches one normalized platform event.
@@ -83,7 +87,7 @@ impl InputCoordinator {
         if !self.active || self.mode == InputMode::Direct {
             return Ok(DispatchResult::default());
         }
-        let snapshot = self.engine.snapshot();
+        let snapshot = self.engine.snapshot()?;
         if id.revision != snapshot.revision
             || !snapshot
                 .candidates
@@ -133,7 +137,7 @@ impl InputCoordinator {
             return Ok(DispatchResult::default());
         }
 
-        let presentation: CandidatePresentation = self.engine.snapshot().into();
+        let presentation: CandidatePresentation = self.engine.snapshot()?.into();
         let mut effects = Vec::with_capacity(3);
         if let Some(commit) = response.commit {
             effects.push(InputEffect::CommitText(commit));

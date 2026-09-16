@@ -59,8 +59,8 @@ mod tests {
             })
         }
 
-        fn snapshot(&self) -> EngineSnapshot {
-            EngineSnapshot {
+        fn snapshot(&self) -> Result<EngineSnapshot, EngineError> {
+            Ok(EngineSnapshot {
                 revision: self.revision,
                 preedit: self.text.clone(),
                 cursor_utf8: self.text.len(),
@@ -73,7 +73,7 @@ mod tests {
                     .into_iter()
                     .collect(),
                 highlighted: (!self.text.is_empty()).then_some(0),
-            }
+            })
         }
     }
 
@@ -103,7 +103,7 @@ mod tests {
         core.dispatch(InputEvent::Activate).unwrap();
         core.dispatch(InputEvent::Key(Key::Text("n".into())))
             .unwrap();
-        let old = core.presentation().candidates[0].id;
+        let old = core.presentation().unwrap().candidates[0].id;
         core.dispatch(InputEvent::Key(Key::Text("i".into())))
             .unwrap();
         assert!(

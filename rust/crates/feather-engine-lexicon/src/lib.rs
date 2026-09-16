@@ -181,9 +181,9 @@ impl InputEngine for LexiconEngine {
         Ok(response)
     }
 
-    fn snapshot(&self) -> EngineSnapshot {
+    fn snapshot(&self) -> Result<EngineSnapshot, EngineError> {
         let candidates = self.candidates();
-        EngineSnapshot {
+        Ok(EngineSnapshot {
             revision: self.revision,
             preedit: self.input.clone(),
             cursor_utf8: self.input.len(),
@@ -196,7 +196,7 @@ impl InputEngine for LexiconEngine {
                     annotation: Some(entry.code.to_owned()),
                 })
                 .collect(),
-        }
+        })
     }
 }
 
@@ -213,14 +213,14 @@ mod tests {
             core.dispatch(InputEvent::Key(Key::Text(character.to_string())))
                 .unwrap();
         }
-        let presentation = core.presentation();
+        let presentation = core.presentation().unwrap();
         assert_eq!(presentation.preedit, "nihao");
         assert_eq!(presentation.candidates[0].text, "你好");
         let result = core.dispatch(InputEvent::Key(Key::Space)).unwrap();
         assert!(result
             .effects
             .contains(&InputEffect::CommitText("你好".into())));
-        assert!(core.presentation().preedit.is_empty());
+        assert!(core.presentation().unwrap().preedit.is_empty());
     }
 
     #[test]
@@ -229,7 +229,7 @@ mod tests {
         core.dispatch(InputEvent::Activate).unwrap();
         core.dispatch(InputEvent::Key(Key::Text("ni".into())))
             .unwrap();
-        let second = core.presentation().candidates[1].id;
+        let second = core.presentation().unwrap().candidates[1].id;
         let result = core.dispatch(InputEvent::SelectCandidate(second)).unwrap();
         assert!(result
             .effects
@@ -249,6 +249,6 @@ mod tests {
         core.dispatch(InputEvent::Key(Key::Text("ni".into())))
             .unwrap();
         core.dispatch(InputEvent::Key(Key::Escape)).unwrap();
-        assert!(core.presentation().preedit.is_empty());
+        assert!(core.presentation().unwrap().preedit.is_empty());
     }
 }

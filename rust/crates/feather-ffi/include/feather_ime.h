@@ -49,6 +49,9 @@ enum FeatherKeyKind {
 
 uint32_t feather_ime_abi_version(void);
 FeatherIme *feather_ime_new(void);
+FeatherIme *feather_ime_new_rime(const char *shared_data,
+                                 const char *user_data,
+                                 const char *schema);
 void feather_ime_free(FeatherIme *ime);
 FeatherResponse *feather_ime_activate(FeatherIme *ime);
 FeatherResponse *feather_ime_deactivate(FeatherIme *ime);

@@ -2,6 +2,7 @@
 members = [
     "crates/feather-core",
     "crates/feather-engine-lexicon",
+    "crates/feather-engine-rime",
     "crates/feather-ffi",
 ]
 resolver = "2"

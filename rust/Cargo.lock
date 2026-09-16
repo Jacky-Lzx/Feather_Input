@@ -14,9 +14,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "feather-engine-rime"
+version = "0.1.0"
+dependencies = [
+ "feather-core",
+]
+
+[[package]]
 name = "feather-ffi"
 version = "0.1.0"
 dependencies = [
  "feather-core",
  "feather-engine-lexicon",
+ "feather-engine-rime",
 ]

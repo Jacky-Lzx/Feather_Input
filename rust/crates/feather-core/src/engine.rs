@@ -56,5 +56,11 @@ pub trait InputEngine: Send {
     /// processing the command. Unsupported commands should instead return an
     /// `EngineResponse` with `handled` set to false.
     fn handle(&mut self, command: EngineCommand) -> Result<EngineResponse, EngineError>;
-    fn snapshot(&self) -> EngineSnapshot;
+    /// Reads an immutable view of the current engine state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the engine session can no longer provide a
+    /// consistent composition and candidate snapshot.
+    fn snapshot(&self) -> Result<EngineSnapshot, EngineError>;
 }

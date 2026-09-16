@@ -2,7 +2,9 @@ use feather_core::{
     CandidateId, DispatchResult, InputCoordinator, InputEffect, InputEvent, InputMode, Key,
 };
 use feather_engine_lexicon::LexiconEngine;
-use std::ffi::{c_char, c_void, CString};
+use feather_engine_rime::{RimePaths, RimeRuntime};
+use std::ffi::{c_char, c_void, CStr, CString};
+use std::path::PathBuf;
 use std::ptr;
 use std::slice;
 
@@ -43,8 +45,8 @@ fn cstring(value: &str) -> CString {
     CString::new(value.replace('\0', "\u{fffd}")).expect("replacement removes interior nulls")
 }
 
-fn response(ime: &FeatherIme, result: &DispatchResult) -> *mut FeatherResponse {
-    let presentation = ime.core.presentation();
+fn response(ime: &FeatherIme, result: &DispatchResult) -> Option<*mut FeatherResponse> {
+    let presentation = ime.core.presentation().ok()?;
     let commit = result.effects.iter().find_map(|effect| match effect {
         InputEffect::CommitText(text) => Some(cstring(text)),
         _ => None,
@@ -91,10 +93,10 @@ fn response(ime: &FeatherIme, result: &DispatchResult) -> *mut FeatherResponse {
         storage: ptr::null_mut(),
     };
     let storage = Box::into_raw(storage);
-    Box::into_raw(Box::new(FeatherResponse {
+    Some(Box::into_raw(Box::new(FeatherResponse {
         storage: storage.cast(),
         ..response
-    }))
+    })))
 }
 
 fn dispatch(ime: *mut FeatherIme, event: InputEvent) -> *mut FeatherResponse {
@@ -102,7 +104,7 @@ fn dispatch(ime: *mut FeatherIme, event: InputEvent) -> *mut FeatherResponse {
         return ptr::null_mut();
     };
     match ime.core.dispatch(event) {
-        Ok(result) => response(ime, &result),
+        Ok(result) => response(ime, &result).unwrap_or(ptr::null_mut()),
         Err(_) => ptr::null_mut(),
     }
 }
@@ -116,6 +118,39 @@ pub extern "C" fn feather_ime_abi_version() -> u32 {
 pub extern "C" fn feather_ime_new() -> *mut FeatherIme {
     Box::into_raw(Box::new(FeatherIme {
         core: InputCoordinator::new(LexiconEngine::default()),
+    }))
+}
+
+#[no_mangle]
+/// Creates an input session backed by a deployed librime schema.
+///
+/// # Safety
+///
+/// All three arguments must point to valid, NUL-terminated UTF-8 strings for
+/// the duration of the call. Only one process-wide Rime runtime may be active.
+pub unsafe extern "C" fn feather_ime_new_rime(
+    shared_data: *const c_char,
+    user_data: *const c_char,
+    schema: *const c_char,
+) -> *mut FeatherIme {
+    let Some(shared_data) = (unsafe { utf8_argument(shared_data) }) else {
+        return ptr::null_mut();
+    };
+    let Some(user_data) = (unsafe { utf8_argument(user_data) }) else {
+        return ptr::null_mut();
+    };
+    let Some(schema) = (unsafe { utf8_argument(schema) }) else {
+        return ptr::null_mut();
+    };
+    let paths = RimePaths::new(PathBuf::from(shared_data), PathBuf::from(user_data));
+    let Ok(runtime) = RimeRuntime::initialize(&paths) else {
+        return ptr::null_mut();
+    };
+    let Ok(engine) = runtime.create_engine(schema) else {
+        return ptr::null_mut();
+    };
+    Box::into_raw(Box::new(FeatherIme {
+        core: InputCoordinator::new(engine),
     }))
 }
 
@@ -226,10 +261,18 @@ pub unsafe extern "C" fn feather_ime_response_free(response: *mut FeatherRespons
     }
 }
 
+unsafe fn utf8_argument<'a>(value: *const c_char) -> Option<&'a str> {
+    if value.is_null() {
+        return None;
+    }
+    unsafe { CStr::from_ptr(value) }.to_str().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::ffi::CStr;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn c_abi_composes_and_commits() {
@@ -249,5 +292,41 @@ mod tests {
             feather_ime_response_free(response);
             feather_ime_free(ime);
         }
+    }
+
+    #[test]
+    #[ignore = "需要 FEATHER_RIME_SHARED_DATA_DIR 指向已经部署的 Rime 数据"]
+    fn c_abi_constructs_real_rime_engine() {
+        let shared = std::env::var("FEATHER_RIME_SHARED_DATA_DIR")
+            .expect("需要 FEATHER_RIME_SHARED_DATA_DIR");
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let user = std::env::temp_dir().join(format!("feather-rime-ffi-{suffix}"));
+        let shared = CString::new(shared).unwrap();
+        let user_string = user.to_string_lossy();
+        let user_argument = CString::new(user_string.as_bytes()).unwrap();
+        let schema = CString::new("luna_pinyin_simp").unwrap();
+        let ime = unsafe {
+            feather_ime_new_rime(shared.as_ptr(), user_argument.as_ptr(), schema.as_ptr())
+        };
+        assert!(!ime.is_null());
+        let active = feather_ime_activate(ime);
+        unsafe { feather_ime_response_free(active) };
+        for byte in b"nihao" {
+            let response = unsafe { feather_ime_key(ime, 1, byte, 1) };
+            assert!(!response.is_null());
+            unsafe { feather_ime_response_free(response) };
+        }
+        let response = unsafe { feather_ime_key(ime, 4, ptr::null(), 0) };
+        assert!(!response.is_null());
+        let committed = unsafe { CStr::from_ptr((*response).commit) };
+        assert_eq!(committed.to_str().unwrap(), "你好");
+        unsafe {
+            feather_ime_response_free(response);
+            feather_ime_free(ime);
+        }
+        std::fs::remove_dir_all(user).unwrap();
     }
 }
