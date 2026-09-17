@@ -65,7 +65,7 @@ final class AcceptanceWindowController: NSWindowController {
       font: .systemFont(ofSize: 24, weight: .semibold)
     )
     let instructions = label(
-      "先从菜单栏切换到 Feather Rust Dev。在下方输入 shijie 检查基本候选；输入 shi 检查全词候选。单击右 Control 或按 Control + Shift + Space 检查中英文切换。这个应用不链接 Rust 或 librime。",
+      "先从菜单栏切换到 Feather Rust Dev。用全拼输入 shijie、用小鹤双拼输入 uijp，确认都能得到“世界”；输入 shi 检查全词候选。单击右 Control 或按 Control + Shift + Space 检查中英文切换。这个应用不链接 Rust 或 librime。",
       font: .systemFont(ofSize: 14)
     )
     instructions.textColor = .secondaryLabelColor
@@ -124,6 +124,8 @@ final class AcceptanceWindowController: NSWindowController {
       "浅色与深色模式下候选内容均清晰可见",
       "右 Control 单击会切换中英文并显示状态提示",
       "Control + Shift + Space 会切换模式并取消现有组合",
+      "小鹤双拼输入 uijp 时出现“世界”候选",
+      "输入方案切换不会改变当前中英文模式",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
     let itemsPerColumn = (checklistItems.count + 1) / 2

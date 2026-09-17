@@ -145,6 +145,10 @@ Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入�
 macOS 适配层通过核心已有的 `Native`/`Direct` 状态实现中英文切换：右 Control 单击、
 `Control + Shift + Space` 和输入法菜单都发送同一个平台无关事件。模式切换会清除组合，
 英文直输时按键继续交给宿主客户端。模式记忆与共享状态提示属于平台策略，不进入引擎。
+全拼/小鹤双拼作为独立于中英文模式的输入方案，通过 `SetSchema` 核心事件和带能力查询的
+C ABI 在同一 librime session 内切换。FFI 只接受已打包的 `luna_pinyin_simp` 与
+`double_pinyin_flypy`；成功切换会清除组合并推进 revision，使旧候选 ID 失效。macOS
+菜单负责显示和持久化当前方案，但不直接操作 librime 状态。
 
 `platforms/macos/client-acceptance` 是不链接 Feather 核心的普通 AppKit 客户端。它通过
 系统 Text Input Services 使用已安装的开发输入法，为普通文本、密码输入和快捷键放行

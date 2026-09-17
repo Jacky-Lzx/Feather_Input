@@ -16,6 +16,7 @@ const CAP_EXPLICIT_CLOSE: u64 = 1 << 2;
 const CAP_STRUCTURED_ERROR: u64 = 1 << 3;
 const CAP_MULTI_SESSION: u64 = 1 << 4;
 const CAP_CANDIDATE_SLICES: u64 = 1 << 5;
+const CAP_SCHEMA_SELECTION: u64 = 1 << 6;
 const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
 
 #[repr(u32)]
@@ -366,6 +367,16 @@ unsafe fn utf8_argument<'a>(value: *const c_char, name: &str) -> Result<&'a str,
     })
 }
 
+fn supported_schema(schema: &str) -> Result<&str, FfiFailure> {
+    match schema {
+        "luna_pinyin_simp" | "double_pinyin_flypy" => Ok(schema),
+        _ => Err(FfiFailure::new(
+            StatusCode::InvalidArgument,
+            format!("不支持的输入方案：{schema}"),
+        )),
+    }
+}
+
 unsafe fn key_from(kind: u32, text: *const u8, text_length: usize) -> Result<Key, FfiFailure> {
     match kind {
         1 => {
@@ -416,6 +427,7 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_STRUCTURED_ERROR
         | CAP_MULTI_SESSION
         | CAP_CANDIDATE_SLICES
+        | CAP_SCHEMA_SELECTION
 }
 
 #[no_mangle]
@@ -580,6 +592,28 @@ pub unsafe extern "C" fn feather_ime_set_mode(
                 }
             };
             dispatch_impl(ime, InputEvent::SetMode(mode))
+        })
+    }
+}
+
+#[no_mangle]
+/// Selects one supported Rime schema without replacing the session handle.
+///
+/// # Safety
+///
+/// `ime` must be a live handle used on its owner thread. `schema` must point
+/// to a valid NUL-terminated UTF-8 string. Output pointers follow
+/// `feather_ime_new`.
+pub unsafe extern "C" fn feather_ime_set_schema(
+    ime: *mut FeatherIme,
+    schema: *const c_char,
+    out_response: *mut *mut FeatherResponse,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        output_call(out_response, out_error, || {
+            let schema = supported_schema(utf8_argument(schema, "schema")?)?;
+            dispatch_impl(ime, InputEvent::SetSchema(schema.to_owned()))
         })
     }
 }
@@ -778,6 +812,18 @@ mod tests {
         }
     }
 
+    unsafe fn set_schema(ime: *mut FeatherIme, schema: &CString) {
+        let mut response = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let status = unsafe {
+            feather_ime_set_schema(ime, schema.as_ptr(), &raw mut response, &raw mut error)
+        };
+        assert_eq!(status, StatusCode::Ok.value());
+        assert!(error.is_null());
+        assert_eq!(unsafe { (*response).handled }, 1);
+        unsafe { feather_ime_response_free(response) };
+    }
+
     unsafe fn commit_highlighted(ime: *mut FeatherIme) -> String {
         let (response, error, status) = unsafe { call_key(ime, 4, ptr::null(), 0) };
         assert_eq!(status, StatusCode::Ok.value());
@@ -808,6 +854,7 @@ mod tests {
                 | CAP_STRUCTURED_ERROR
                 | CAP_MULTI_SESSION
                 | CAP_CANDIDATE_SLICES
+                | CAP_SCHEMA_SELECTION
         );
     }
 
@@ -922,6 +969,17 @@ mod tests {
         assert_eq!(status, StatusCode::InvalidKey.value());
         assert!(response.is_null());
         assert!(unsafe { error_message(error) }.contains("未知按键"));
+        unsafe { feather_error_free(error) };
+
+        let mut response = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let unsupported = CString::new("unsupported_schema").unwrap();
+        let status = unsafe {
+            feather_ime_set_schema(ime, unsupported.as_ptr(), &raw mut response, &raw mut error)
+        };
+        assert_eq!(status, StatusCode::InvalidArgument.value());
+        assert!(response.is_null());
+        assert!(unsafe { error_message(error) }.contains("不支持的输入方案"));
         unsafe {
             feather_error_free(error);
             feather_ime_free(ime);
@@ -1017,6 +1075,10 @@ mod tests {
         unsafe {
             assert_eq!(commit_highlighted(ime), "你好");
             close_and_free(ime);
+            assert_eq!(commit_highlighted(other_ime), "世界");
+            let flypy = CString::new("double_pinyin_flypy").unwrap();
+            set_schema(other_ime, &flypy);
+            type_ascii(other_ime, b"uijp");
             assert_eq!(commit_highlighted(other_ime), "世界");
             close_and_free(other_ime);
         }

@@ -107,6 +107,7 @@ pub enum InputEvent {
     Key(Key),
     SelectCandidate(CandidateId),
     SetMode(InputMode),
+    SetSchema(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +118,7 @@ pub enum InputEffect {
     ShowCandidates(CandidatePresentation),
     HideCandidates,
     ModeChanged(InputMode),
+    SchemaChanged(String),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

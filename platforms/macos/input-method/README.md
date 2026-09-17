@@ -52,6 +52,17 @@ Page Down 前往下一页。
 处理逻辑。所有 InputMethodKit 控制器共享一个模式提示窗口，避免客户端增多时累积隐藏
 面板。
 
+## 全拼与小鹤双拼
+
+输入法菜单可以在“全拼”和“小鹤双拼”之间切换，当前方案带有勾选标记。全拼使用
+`luna_pinyin_simp`，小鹤双拼使用 `double_pinyin_flypy`；选择会持久化，并在下一次创建
+输入控制器时恢复。输入方案与中英文模式互相独立，因此在英文直输状态切换方案不会
+自动回到中文。
+
+方案切换由 Rust 核心和 C ABI 原子执行：现有组合会被取消，候选 revision 随即推进，
+切换前取得的不透明候选 ID 不能用于新方案。C ABI 只接受上述两个已打包 schema，不允许
+平台层传入任意 schema 名称或路径。
+
 构建脚本会递归收集 librime 的非系统动态库依赖到 `Contents/Frameworks`，并将加载路径
 改为 `@rpath`，同时把每项依赖的许可证复制到 `Resources/ThirdPartyLicenses`。生成的
 bundle 不再要求目标 Mac 安装 Homebrew；当前产物仍只包含构建主机的单一 CPU 架构，

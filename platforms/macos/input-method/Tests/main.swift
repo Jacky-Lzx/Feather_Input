@@ -43,6 +43,7 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("UTF-8 到 UTF-16 光标转换错误")
     }
     try verifyInputModeMemory()
+    try verifyInputSchemeMemory()
     try verifyCandidateOverlayOwnership()
     try verifyModeIndicatorOwnership()
     guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
@@ -59,6 +60,7 @@ struct InputMethodSmokeMain {
     controller.candidatePresenter = presenter
     controller.modePresenter = modePresenter
     controller.modeMemory = InputModeMemory(defaults: modeDefaults)
+    controller.schemeMemory = InputSchemeMemory(defaults: modeDefaults)
     let client = SmokeTextClient()
     controller.activateServer(client)
 
@@ -171,6 +173,39 @@ struct InputMethodSmokeMain {
       modePresenter.directMode == false
     else {
       throw SmokeFailure.expectation("组合过程中切换模式没有清除预编辑和候选")
+    }
+
+    guard controller.selectInputScheme(.flypy, for: client), client.marked.isEmpty,
+      presenter.candidates.isEmpty
+    else {
+      throw SmokeFailure.expectation("切换小鹤双拼时没有清除组合状态")
+    }
+    let flypyMenu = controller.menu()
+    guard flypyMenu?.item(withTitle: "全拼")?.state == .off,
+      flypyMenu?.item(withTitle: "小鹤双拼")?.state == .on
+    else {
+      throw SmokeFailure.expectation("输入法菜单没有标记当前小鹤双拼方案")
+    }
+    for character in "uijp" {
+      guard controller.handle(key(String(character), code: 0), client: client) else {
+        throw SmokeFailure.expectation("小鹤双拼按键没有被处理：\(character)")
+      }
+    }
+    guard (controller.candidates(client) as? [String])?.contains("世界") == true else {
+      throw SmokeFailure.expectation("小鹤双拼 uijp 的候选中缺少“世界”")
+    }
+    guard controller.handle(key("", code: 53), client: client) else {
+      throw SmokeFailure.expectation("小鹤双拼组合无法取消")
+    }
+    guard
+      controller.handle(
+        key(" ", code: 49, modifiers: [.control, .shift]), client: client),
+      controller.selectInputScheme(.fullPinyin, for: client),
+      !controller.handle(key("n", code: 45), client: client),
+      controller.handle(
+        key(" ", code: 49, modifiers: [.control, .shift]), client: client)
+    else {
+      throw SmokeFailure.expectation("切换输入方案意外改变了中英文模式")
     }
 
     for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
@@ -343,6 +378,22 @@ struct InputMethodSmokeMain {
     memory.update(directMode: true, application: "app.one")
     guard !memory.activate(application: "app.two"), memory.activate(application: "app.one") else {
       throw SmokeFailure.expectation("没有按应用保存中英文模式")
+    }
+  }
+
+  private static func verifyInputSchemeMemory() throws {
+    let suiteName = "FeatherInputSchemeMemory-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+      throw SmokeFailure.expectation("无法创建输入方案记忆测试设置")
+    }
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let memory = InputSchemeMemory(defaults: defaults)
+    guard memory.load() == .fullPinyin else {
+      throw SmokeFailure.expectation("新设置没有默认使用全拼")
+    }
+    memory.update(.flypy)
+    guard memory.load() == .flypy else {
+      throw SmokeFailure.expectation("没有持久化小鹤双拼方案")
     }
   }
 

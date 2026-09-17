@@ -74,6 +74,7 @@ final class FeatherSession {
   private static let expectedABI: UInt32 = 2
   private static let requiredCapabilities: UInt64 = 0b1_1111
   private static let candidateSlicesCapability: UInt64 = 1 << 5
+  private static let schemaSelectionCapability: UInt64 = 1 << 6
 
   private var handle: OpaquePointer?
   private let capabilities: UInt64
@@ -158,6 +159,18 @@ final class FeatherSession {
   func setMode(direct: Bool) throws -> FeatherResponseValue {
     try perform("set mode") { handle, response, error in
       feather_ime_set_mode(handle, direct ? 1 : 0, &response, &error)
+    }
+  }
+
+  func setSchema(_ schema: String) throws -> FeatherResponseValue {
+    let missing = Self.schemaSelectionCapability & ~capabilities
+    guard missing == 0 else {
+      throw FeatherBridgeError.missingCapabilities(missing)
+    }
+    return try perform("set schema") { handle, response, error in
+      schema.withCString { schemaName in
+        feather_ime_set_schema(handle, schemaName, &response, &error)
+      }
     }
   }
 

@@ -2,7 +2,6 @@ import Foundation
 
 @MainActor
 enum FeatherInputEnvironment {
-  static let schema = "luna_pinyin_simp"
   static var sharedDataOverride: URL?
   static var userDataOverride: URL?
 

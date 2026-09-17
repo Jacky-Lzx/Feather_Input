@@ -15,6 +15,7 @@ pub enum EngineCommand {
     PagePrevious,
     PageNext,
     Select(EngineCandidateId),
+    SelectSchema(String),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

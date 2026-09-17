@@ -42,6 +42,14 @@ uintptr_t feather_rime_create_session(const char *schema) {
   return session;
 }
 
+int feather_rime_select_schema(uintptr_t session, const char *schema) {
+  if (api == NULL || session == 0 || schema == NULL) return 0;
+  if (!api->select_schema(session, schema)) return 0;
+  api->clear_composition(session);
+  api->set_option(session, "simplification", True);
+  return 1;
+}
+
 void feather_rime_destroy_session(uintptr_t session) {
   if (api != NULL && session != 0) api->destroy_session(session);
 }

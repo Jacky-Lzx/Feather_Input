@@ -19,6 +19,12 @@ int main(void) {
     if (status == FEATHER_STATUS_OK) {
         status = activate_session(ime, &response, &error);
     }
+    if (status == FEATHER_STATUS_OK) {
+        feather_ime_response_free(response);
+        response = NULL;
+        status = feather_ime_set_schema(ime, "luna_pinyin_simp",
+                                        &response, &error);
+    }
     FeatherCandidateSlice *slice = NULL;
     if (status == FEATHER_STATUS_OK) {
         status = feather_ime_candidate_slice(ime, response->revision, 0, 8,

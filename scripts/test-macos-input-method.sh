@@ -52,6 +52,7 @@ swiftc \
     "$source_root"/Sources/CandidateWindowController.swift \
     "$source_root"/Sources/FeatherInputEnvironment.swift \
     "$source_root"/Sources/InputModeMemory.swift \
+    "$source_root"/Sources/InputScheme.swift \
     "$source_root"/Sources/InputController.swift \
     "$source_root"/Sources/InputOverlays.swift \
     "$source_root"/Sources/ModeIndicatorController.swift \

@@ -32,6 +32,7 @@ final class InputController: IMKInputController {
     set { injectedModePresenter = newValue }
   }
   var modeMemory = InputModeMemory.shared
+  var schemeMemory = InputSchemeMemory.shared
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
   private var expandedCandidates: ExpandedCandidateState?
@@ -39,6 +40,7 @@ final class InputController: IMKInputController {
   private var active = false
   private var lastCaret: NSRect?
   private var activeApplication = "unknown"
+  private var activeScheme = InputScheme.fullPinyin
   private var rightControlTap = RightControlTap()
 
   override func activateServer(_ sender: Any!) {
@@ -62,8 +64,10 @@ final class InputController: IMKInputController {
       self?.handleCandidateWindowAction(action)
     }
     do {
+      activeScheme = schemeMemory.load()
       let session = try requireSession()
       _ = try session.activate()
+      _ = try session.setSchema(activeScheme.rawValue)
       currentResponse = try session.setMode(
         direct: modeMemory.activate(application: activeApplication)
       )
@@ -195,6 +199,16 @@ final class InputController: IMKInputController {
 
   override func menu() -> NSMenu! {
     let menu = NSMenu()
+    for scheme in InputScheme.allCases {
+      let action =
+        scheme == .fullPinyin
+        ? #selector(selectFullPinyin(_:)) : #selector(selectFlypy(_:))
+      let item = NSMenuItem(title: scheme.title, action: action, keyEquivalent: "")
+      item.target = self
+      item.state = scheme == activeScheme ? .on : .off
+      menu.addItem(item)
+    }
+    menu.addItem(.separator())
     let title = currentResponse?.directMode == true ? "切换到中文" : "切换到英文"
     let toggle = NSMenuItem(
       title: title,
@@ -215,7 +229,7 @@ final class InputController: IMKInputController {
     let session = try FeatherSession(
       sharedData: FeatherInputEnvironment.sharedData(),
       userData: FeatherInputEnvironment.userData(),
-      schema: FeatherInputEnvironment.schema
+      schema: activeScheme.rawValue
     )
     self.session = session
     return session
@@ -481,6 +495,36 @@ final class InputController: IMKInputController {
       return
     }
     _ = toggleInputMode(for: client)
+  }
+
+  @objc private func selectFullPinyin(_ sender: Any?) {
+    selectInputScheme(.fullPinyin, sender: sender)
+  }
+
+  @objc private func selectFlypy(_ sender: Any?) {
+    selectInputScheme(.flypy, sender: sender)
+  }
+
+  private func selectInputScheme(_ scheme: InputScheme, sender: Any?) {
+    let senderClient = (sender as? NSDictionary)?[kIMKCommandClientName as String]
+    guard let client = (senderClient as? IMKTextInput) ?? (activeClient as? IMKTextInput) else {
+      return
+    }
+    _ = selectInputScheme(scheme, for: client)
+  }
+
+  func selectInputScheme(_ scheme: InputScheme, for client: IMKTextInput) -> Bool {
+    do {
+      let response = try ensureActive().setSchema(scheme.rawValue)
+      guard response.handled else { return false }
+      activeScheme = scheme
+      schemeMemory.update(scheme)
+      apply(response, to: client)
+      return true
+    } catch {
+      report(error, operation: "select schema \(scheme.rawValue)")
+      return false
+    }
   }
 
   private func toggleInputMode(for client: IMKTextInput) -> Bool {

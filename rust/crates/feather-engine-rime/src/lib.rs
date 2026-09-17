@@ -24,6 +24,7 @@ unsafe extern "C" {
     fn feather_rime_initialize(shared: *const c_char, user: *const c_char) -> c_int;
     fn feather_rime_finalize();
     fn feather_rime_create_session(schema: *const c_char) -> usize;
+    fn feather_rime_select_schema(session: usize, schema: *const c_char) -> c_int;
     fn feather_rime_destroy_session(session: usize);
     fn feather_rime_process_key(session: usize, key: c_int, modifiers: c_int) -> c_int;
     fn feather_rime_clear(session: usize);
@@ -254,6 +255,21 @@ pub struct RimeEngine {
 }
 
 impl RimeEngine {
+    fn select_schema(&mut self, schema: &str) -> Result<bool, EngineError> {
+        let schema =
+            CString::new(schema).map_err(|_| EngineError::new("Rime schema 名称包含 NUL 字符"))?;
+        let _registry = self.lease.lock()?;
+        let handled = unsafe { feather_rime_select_schema(self.session, schema.as_ptr()) } != 0;
+        if !handled {
+            return Err(EngineError::new(format!(
+                "无法选择 Rime schema：{}",
+                schema.to_string_lossy()
+            )));
+        }
+        self.revision = next_revision(self.revision);
+        Ok(true)
+    }
+
     fn process_key(&mut self, key: c_int) -> Result<bool, EngineError> {
         let _registry = self.lease.lock()?;
         let handled = unsafe { feather_rime_process_key(self.session, key, 0) } != 0;
@@ -318,6 +334,7 @@ impl InputEngine for RimeEngine {
             EngineCommand::PagePrevious => self.process_key(KEY_PAGE_UP)?,
             EngineCommand::PageNext => self.process_key(KEY_PAGE_DOWN)?,
             EngineCommand::Select(id) => self.select_candidate(id)?,
+            EngineCommand::SelectSchema(schema) => self.select_schema(&schema)?,
         };
         let commit = if handled { self.take_commit()? } else { None };
         Ok(EngineResponse { handled, commit })
@@ -442,7 +459,7 @@ unsafe fn take_string(text: *mut c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use feather_core::{InputCoordinator, InputEffect, InputEvent, Key};
+    use feather_core::{InputCoordinator, InputEffect, InputEvent, InputMode, Key};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn type_text(core: &mut InputCoordinator, text: &str) {
@@ -523,6 +540,35 @@ mod tests {
         type_text(&mut core_b, "shijie");
 
         select_text(&mut core_a, "你好");
+        type_text(&mut core_a, "shijie");
+        let stale_candidate = core_a.presentation().unwrap().candidates[0].id;
+        let revision_before_switch = core_a.presentation().unwrap().revision;
+        core_a
+            .dispatch(InputEvent::SetMode(InputMode::Direct))
+            .unwrap();
+        let switched = core_a
+            .dispatch(InputEvent::SetSchema("double_pinyin_flypy".into()))
+            .unwrap();
+        assert!(switched
+            .effects
+            .contains(&InputEffect::SchemaChanged("double_pinyin_flypy".into())));
+        assert_eq!(core_a.mode(), InputMode::Direct);
+        assert!(core_a.presentation().unwrap().preedit.is_empty());
+        assert_ne!(
+            core_a.presentation().unwrap().revision,
+            revision_before_switch
+        );
+        core_a
+            .dispatch(InputEvent::SetMode(InputMode::Native))
+            .unwrap();
+        assert!(
+            !core_a
+                .dispatch(InputEvent::SelectCandidate(stale_candidate))
+                .unwrap()
+                .handled
+        );
+        type_text(&mut core_a, "uijp");
+        select_text(&mut core_a, "世界");
         drop(core_a);
         drop(runtime_a);
         select_text(&mut core_b, "世界");

@@ -100,6 +100,7 @@ impl InputCoordinator {
                 })
             }
             InputEvent::SetMode(mode) => self.set_mode(mode),
+            InputEvent::SetSchema(schema) => self.set_schema(schema),
             InputEvent::SelectCandidate(id) => self.select_candidate(id),
             InputEvent::Key(key) => self.handle_key(key),
         }
@@ -117,6 +118,23 @@ impl InputCoordinator {
                 InputEffect::ClearMarkedText,
                 InputEffect::HideCandidates,
                 InputEffect::ModeChanged(mode),
+            ],
+        })
+    }
+
+    fn set_schema(&mut self, schema: String) -> Result<DispatchResult, EngineError> {
+        let response = self
+            .engine
+            .handle(EngineCommand::SelectSchema(schema.clone()))?;
+        if !response.handled {
+            return Ok(DispatchResult::default());
+        }
+        Ok(DispatchResult {
+            handled: true,
+            effects: vec![
+                InputEffect::ClearMarkedText,
+                InputEffect::HideCandidates,
+                InputEffect::SchemaChanged(schema),
             ],
         })
     }

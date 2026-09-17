@@ -118,6 +118,10 @@ FeatherStatus feather_ime_set_mode(FeatherIme *ime,
                                    uint8_t mode,
                                    FeatherResponse **out_response,
                                    FeatherError **out_error);
+FeatherStatus feather_ime_set_schema(FeatherIme *ime,
+                                     const char *schema,
+                                     FeatherResponse **out_response,
+                                     FeatherError **out_error);
 FeatherStatus feather_ime_key(FeatherIme *ime,
                               uint32_t kind,
                               const uint8_t *text,
