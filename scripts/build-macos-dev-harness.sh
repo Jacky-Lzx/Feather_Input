@@ -81,7 +81,14 @@ echo "正在收集便携动态库……"
     "$resources/ThirdPartyLicenses"
 
 echo "正在复制 Rime 共享数据……"
-ditto "$shared_data" "$resources/rime"
+"$repo_root/scripts/stage-rime-data.sh" "$shared_data" "$resources/rime"
+rime_licenses=${FEATHER_RIME_LICENSES_DIR:-"$(dirname "$shared_data")/licenses"}
+if [ ! -f "$rime_licenses/rime-easy-en.txt" ]; then
+    echo "缺少 easy_en 词表许可证：$rime_licenses/rime-easy-en.txt" >&2
+    exit 1
+fi
+cp "$rime_licenses/rime-easy-en.txt" \
+    "$resources/ThirdPartyLicenses/rime-easy-en.txt"
 
 find "$frameworks" -type f -name '*.dylib' -exec codesign --force --sign - {} \; >/dev/null
 "$repo_root/scripts/check-macos-bundle-dependencies.sh" "$app"

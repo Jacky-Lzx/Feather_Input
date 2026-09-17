@@ -1,0 +1,10 @@
+patch:
+  schema/dependencies/@next: feather_english
+  engine/translators/@next: table_translator@feather_english
+  # Keep ordinary lowercase Shuangpin ahead of English completions.
+  feather_english:
+    __include: feather_english.schema:/translator
+    initial_quality: -1
+  recognizer/patterns/feather_english: "^[A-Za-z]{5,}$"
+  recognizer/patterns/uppercase: ""
+  speller/alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA

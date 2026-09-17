@@ -17,6 +17,7 @@ pub enum EngineCommand {
     Select(EngineCandidateId),
     SelectSchema(String),
     SetPageSize(usize),
+    SetEnglishCandidateMinimum(usize),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

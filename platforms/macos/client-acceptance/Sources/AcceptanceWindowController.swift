@@ -132,6 +132,8 @@ final class AcceptanceWindowController: NSWindowController {
       "焦点状态提示按设置自动消失或保持到开始输入",
       "修改拼音每页候选后，下一次组合的页大小与翻页边界同步变化",
       "横排超宽时回退竖排，键盘语义与实际排列一致",
+      "全拼和小鹤双拼的中文模式都能输入 GitHub 英文候选",
+      "英文候选最少输入阈值在当前组合结束后生效",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
     let itemsPerColumn = (checklistItems.count + 1) / 2

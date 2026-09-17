@@ -175,4 +175,17 @@ mod tests {
         assert!(result.handled);
         assert_eq!(result.effects, vec![InputEffect::PageSizeChanged(7)]);
     }
+
+    #[test]
+    fn english_candidate_minimum_is_dispatched_as_an_engine_setting() {
+        let mut core = InputCoordinator::new(FakeEngine::default());
+        let result = core
+            .dispatch(InputEvent::SetEnglishCandidateMinimum(5))
+            .unwrap();
+        assert!(result.handled);
+        assert_eq!(
+            result.effects,
+            vec![InputEffect::EnglishCandidateMinimumChanged(5)]
+        );
+    }
 }

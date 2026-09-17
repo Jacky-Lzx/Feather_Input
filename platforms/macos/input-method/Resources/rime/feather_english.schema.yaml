@@ -1,0 +1,41 @@
+# Rime schema
+# encoding: utf-8
+schema:
+  schema_id: feather_english
+  name: Feather English
+  version: "0.1"
+
+switches:
+  - name: ascii_mode
+    reset: 0
+    states: [ASCII-OFF, ASCII-ON]
+
+engine:
+  processors:
+    - ascii_composer
+    - key_binder
+    - speller
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - ascii_segmentor
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - table_translator
+  filters:
+    - uniquifier
+
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA
+  delimiter: " '"
+
+translator:
+  tag: feather_english
+  dictionary: feather_english
+  enable_completion: true
+  enable_sentence: false
+  enable_user_dict: true
+  comment_format:
+    - xform/^.+$//

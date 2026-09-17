@@ -66,6 +66,8 @@ struct InputMethodSmokeMain {
     controller.focusIndicatorSettings = FocusIndicatorSettings(defaults: modeDefaults)
     let candidatePageSettings = CandidatePageSettings(defaults: modeDefaults)
     controller.candidatePageSettings = candidatePageSettings
+    let englishCandidateSettings = EnglishCandidateSettings(defaults: modeDefaults)
+    controller.englishCandidateSettings = englishCandidateSettings
     controller.focusIndicatorRetryDelaysMilliseconds = []
     let client = SmokeTextClient()
     controller.activateServer(client)
@@ -233,6 +235,17 @@ struct InputMethodSmokeMain {
     guard controller.handle(key("", code: 53), client: client) else {
       throw SmokeFailure.expectation("小鹤双拼组合无法取消")
     }
+    for character in "githu" {
+      guard controller.handle(key(String(character), code: 0), client: client) else {
+        throw SmokeFailure.expectation("小鹤双拼英文候选按键没有被处理：\(character)")
+      }
+    }
+    guard (controller.candidates(client) as? [String])?.contains("GitHub") == true else {
+      throw SmokeFailure.expectation("小鹤双拼中文模式中缺少 GitHub 英文候选")
+    }
+    guard controller.handle(key("", code: 53), client: client) else {
+      throw SmokeFailure.expectation("小鹤双拼英文候选组合无法取消")
+    }
     guard
       controller.handle(
         key(" ", code: 49, modifiers: [.control, .shift]), client: client),
@@ -242,6 +255,50 @@ struct InputMethodSmokeMain {
         key(" ", code: 49, modifiers: [.control, .shift]), client: client)
     else {
       throw SmokeFailure.expectation("切换输入方案意外改变了中英文模式")
+    }
+
+    for character in "gith" {
+      guard controller.handle(key(String(character), code: 0), client: client) else {
+        throw SmokeFailure.expectation("英文候选阈值测试按键没有被处理：\(character)")
+      }
+    }
+    guard (controller.candidates(client) as? [String])?.contains("GitHub") != true else {
+      throw SmokeFailure.expectation("英文候选在默认 5 字符阈值前提前出现")
+    }
+    guard controller.handle(key("u", code: 0), client: client),
+      (controller.candidates(client) as? [String])?.contains("GitHub") == true
+    else {
+      throw SmokeFailure.expectation("全拼中文模式达到默认阈值后没有出现 GitHub 英文候选")
+    }
+    guard controller.handle(key("", code: 53), client: client) else {
+      throw SmokeFailure.expectation("全拼英文候选组合无法取消")
+    }
+    englishCandidateSettings.updateMinimumInputLength(6)
+    for character in "githu" {
+      guard controller.handle(key(String(character), code: 0), client: client) else {
+        throw SmokeFailure.expectation("提高英文候选阈值后按键没有被处理：\(character)")
+      }
+    }
+    guard (controller.candidates(client) as? [String])?.contains("GitHub") != true else {
+      throw SmokeFailure.expectation("GitHub 在提高到 6 字符阈值后仍然出现")
+    }
+    guard controller.handle(key("", code: 53), client: client) else {
+      throw SmokeFailure.expectation("提高阈值后的英文候选组合无法取消")
+    }
+    englishCandidateSettings.updateMinimumInputLength(5)
+    for character in "githu" {
+      guard controller.handle(key(String(character), code: 0), client: client) else {
+        throw SmokeFailure.expectation("恢复英文候选阈值后按键没有被处理：\(character)")
+      }
+    }
+    let restoredEnglishCandidates = controller.candidates(client) as? [String] ?? []
+    guard restoredEnglishCandidates.contains("GitHub") else {
+      throw SmokeFailure.expectation(
+        "GitHub 没有在恢复 5 字符阈值后重新出现：\(restoredEnglishCandidates)"
+      )
+    }
+    guard controller.handle(key("", code: 53), client: client) else {
+      throw SmokeFailure.expectation("恢复阈值后的英文候选组合无法取消")
     }
 
     for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
@@ -498,14 +555,17 @@ struct InputMethodSmokeMain {
       schemeMemory: schemeMemory,
       focusIndicatorSettings: FocusIndicatorSettings(defaults: defaults),
       candidatePageSettings: CandidatePageSettings(defaults: defaults),
-      candidateLayoutSettings: CandidateLayoutSettings(defaults: defaults)
+      candidateLayoutSettings: CandidateLayoutSettings(defaults: defaults),
+      englishCandidateSettings: EnglishCandidateSettings(defaults: defaults)
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
     let candidatePageSettings = CandidatePageSettings(defaults: defaults)
     let candidateLayoutSettings = CandidateLayoutSettings(defaults: defaults)
+    let englishCandidateSettings = EnglishCandidateSettings(defaults: defaults)
     guard !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
       candidatePageSettings.count == CandidatePageSettings.defaultCount,
-      candidateLayoutSettings.layout == .vertical
+      candidateLayoutSettings.layout == .vertical,
+      englishCandidateSettings.minimumInputLength == EnglishCandidateSettings.defaultMinimum
     else {
       throw SmokeFailure.expectation("设置窗口的焦点提示或每页候选默认值错误")
     }
@@ -515,9 +575,11 @@ struct InputMethodSmokeMain {
     settings.selectFocusIndicatorDuration(2.4)
     settings.selectCandidateCount(8)
     settings.selectCandidateLayout(.horizontal)
+    settings.selectEnglishCandidateMinimum(6)
     guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
       focusSettings.waitsUntilInput, focusSettings.duration == 2.4,
-      candidatePageSettings.count == 8, candidateLayoutSettings.layout == .horizontal
+      candidatePageSettings.count == 8, candidateLayoutSettings.layout == .horizontal,
+      englishCandidateSettings.minimumInputLength == 6
     else {
       throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
     }

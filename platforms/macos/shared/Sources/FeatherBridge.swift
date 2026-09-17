@@ -76,6 +76,7 @@ final class FeatherSession {
   private static let candidateSlicesCapability: UInt64 = 1 << 5
   private static let schemaSelectionCapability: UInt64 = 1 << 6
   private static let pageSizeCapability: UInt64 = 1 << 7
+  private static let englishCandidateMinimumCapability: UInt64 = 1 << 8
 
   private var handle: OpaquePointer?
   private let capabilities: UInt64
@@ -182,6 +183,16 @@ final class FeatherSession {
     }
     return try perform("set page size") { handle, response, error in
       feather_ime_set_page_size(handle, pageSize, &response, &error)
+    }
+  }
+
+  func setEnglishCandidateMinimum(_ minimum: Int) throws -> FeatherResponseValue {
+    let missing = Self.englishCandidateMinimumCapability & ~capabilities
+    guard missing == 0 else {
+      throw FeatherBridgeError.missingCapabilities(missing)
+    }
+    return try perform("set English candidate minimum") { handle, response, error in
+      feather_ime_set_english_candidate_minimum(handle, minimum, &response, &error)
     }
   }
 

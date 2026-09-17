@@ -109,6 +109,7 @@ pub enum InputEvent {
     SetMode(InputMode),
     SetSchema(String),
     SetPageSize(usize),
+    SetEnglishCandidateMinimum(usize),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,6 +122,7 @@ pub enum InputEffect {
     ModeChanged(InputMode),
     SchemaChanged(String),
     PageSizeChanged(usize),
+    EnglishCandidateMinimumChanged(usize),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

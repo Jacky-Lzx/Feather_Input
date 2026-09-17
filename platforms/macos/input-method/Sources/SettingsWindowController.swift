@@ -7,7 +7,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     schemeMemory: .shared,
     focusIndicatorSettings: .shared,
     candidatePageSettings: .shared,
-    candidateLayoutSettings: .shared
+    candidateLayoutSettings: .shared,
+    englishCandidateSettings: .shared
   )
 
   private let modeMemory: InputModeMemory
@@ -15,6 +16,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private let focusIndicatorSettings: FocusIndicatorSettings
   private let candidatePageSettings: CandidatePageSettings
   private let candidateLayoutSettings: CandidateLayoutSettings
+  private let englishCandidateSettings: EnglishCandidateSettings
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
   private weak var policyPopup: NSPopUpButton?
@@ -24,19 +26,23 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var candidateCountValue: NSTextField?
   private weak var candidateCountStepper: NSStepper?
   private weak var candidateLayoutPopup: NSPopUpButton?
+  private weak var englishCandidateMinimumValue: NSTextField?
+  private weak var englishCandidateMinimumStepper: NSStepper?
 
   init(
     modeMemory: InputModeMemory,
     schemeMemory: InputSchemeMemory,
     focusIndicatorSettings: FocusIndicatorSettings,
     candidatePageSettings: CandidatePageSettings,
-    candidateLayoutSettings: CandidateLayoutSettings
+    candidateLayoutSettings: CandidateLayoutSettings,
+    englishCandidateSettings: EnglishCandidateSettings
   ) {
     self.modeMemory = modeMemory
     self.schemeMemory = schemeMemory
     self.focusIndicatorSettings = focusIndicatorSettings
     self.candidatePageSettings = candidatePageSettings
     self.candidateLayoutSettings = candidateLayoutSettings
+    self.englishCandidateSettings = englishCandidateSettings
   }
 
   func show() {
@@ -81,11 +87,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func selectEnglishCandidateMinimum(_ minimum: Int) {
+    englishCandidateSettings.updateMinimumInputLength(minimum)
+    refreshControls()
+  }
+
   private func requireWindow() -> NSWindow {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 510),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 590),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -198,11 +209,39 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateLayoutPopup.action = #selector(candidateLayoutChanged(_:))
     self.candidateLayoutPopup = candidateLayoutPopup
 
+    let englishCandidateMinimumValue = NSTextField(labelWithString: "")
+    englishCandidateMinimumValue.alignment = .right
+    englishCandidateMinimumValue.font = .monospacedDigitSystemFont(
+      ofSize: 13,
+      weight: .regular
+    )
+    self.englishCandidateMinimumValue = englishCandidateMinimumValue
+    let englishCandidateMinimumStepper = NSStepper()
+    englishCandidateMinimumStepper.minValue = Double(EnglishCandidateSettings.minimumValue)
+    englishCandidateMinimumStepper.maxValue = Double(EnglishCandidateSettings.maximumValue)
+    englishCandidateMinimumStepper.increment = 1
+    englishCandidateMinimumStepper.target = self
+    englishCandidateMinimumStepper.action = #selector(englishCandidateMinimumChanged(_:))
+    self.englishCandidateMinimumStepper = englishCandidateMinimumStepper
+    let englishCandidateMinimumControls = NSStackView(views: [
+      englishCandidateMinimumValue, englishCandidateMinimumStepper,
+    ])
+    englishCandidateMinimumControls.orientation = .horizontal
+    englishCandidateMinimumControls.alignment = .centerY
+    englishCandidateMinimumControls.spacing = 8
+
+    let englishCandidateMinimumHelp = NSTextField(
+      wrappingLabelWithString: "输入达到该长度后才会出现英文候选；完成当前组合后生效。"
+    )
+    englishCandidateMinimumHelp.font = .systemFont(ofSize: 12)
+    englishCandidateMinimumHelp.textColor = .secondaryLabelColor
+
     let emptyPolicyHelp = NSTextField(labelWithString: "")
     let emptyFocusToggle = NSTextField(labelWithString: "")
     let emptyFocusHelp = NSTextField(labelWithString: "")
     let emptyDurationHelp = NSTextField(labelWithString: "")
     let emptyCandidateCountHelp = NSTextField(labelWithString: "")
+    let emptyEnglishCandidateMinimumHelp = NSTextField(labelWithString: "")
 
     let grid = NSGridView(views: [
       [schemeLabel, schemePopup],
@@ -215,6 +254,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [candidateLayoutLabel, candidateLayoutPopup],
       [NSTextField(labelWithString: "拼音每页候选"), candidateCountControls],
       [emptyCandidateCountHelp, candidateCountHelp],
+      [NSTextField(labelWithString: "英文候选最少输入"), englishCandidateMinimumControls],
+      [emptyEnglishCandidateMinimumHelp, englishCandidateMinimumHelp],
     ])
     grid.column(at: 0).xPlacement = .trailing
     grid.column(at: 1).xPlacement = .fill
@@ -233,6 +274,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     focusDurationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     candidateCountHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    englishCandidateMinimumHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
       stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
@@ -259,6 +301,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusDurationStepper?.isEnabled = !waitsUntilInput
     candidateCountValue?.stringValue = "\(candidatePageSettings.count)"
     candidateCountStepper?.integerValue = candidatePageSettings.count
+    englishCandidateMinimumValue?.stringValue =
+      "\(englishCandidateSettings.minimumInputLength) 个字符"
+    englishCandidateMinimumStepper?.integerValue = englishCandidateSettings.minimumInputLength
     if let index = CandidateLayout.allCases.firstIndex(of: candidateLayoutSettings.layout) {
       candidateLayoutPopup?.selectItem(at: index)
     }
@@ -295,5 +340,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       let layout = CandidateLayout(rawValue: rawValue)
     else { return }
     selectCandidateLayout(layout)
+  }
+
+  @objc private func englishCandidateMinimumChanged(_ sender: NSStepper) {
+    selectEnglishCandidateMinimum(sender.integerValue)
   }
 }

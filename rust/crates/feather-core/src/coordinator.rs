@@ -102,6 +102,9 @@ impl InputCoordinator {
             InputEvent::SetMode(mode) => self.set_mode(mode),
             InputEvent::SetSchema(schema) => self.set_schema(schema),
             InputEvent::SetPageSize(page_size) => self.set_page_size(page_size),
+            InputEvent::SetEnglishCandidateMinimum(minimum) => {
+                self.set_english_candidate_minimum(minimum)
+            }
             InputEvent::SelectCandidate(id) => self.select_candidate(id),
             InputEvent::Key(key) => self.handle_key(key),
         }
@@ -148,6 +151,22 @@ impl InputCoordinator {
         Ok(DispatchResult {
             handled: true,
             effects: vec![InputEffect::PageSizeChanged(page_size)],
+        })
+    }
+
+    fn set_english_candidate_minimum(
+        &mut self,
+        minimum: usize,
+    ) -> Result<DispatchResult, EngineError> {
+        let response = self
+            .engine
+            .handle(EngineCommand::SetEnglishCandidateMinimum(minimum))?;
+        if !response.handled {
+            return Ok(DispatchResult::default());
+        }
+        Ok(DispatchResult {
+            handled: true,
+            effects: vec![InputEffect::EnglishCandidateMinimumChanged(minimum)],
         })
     }
 

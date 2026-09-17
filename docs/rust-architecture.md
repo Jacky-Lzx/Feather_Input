@@ -151,10 +151,16 @@ C ABI 在同一 librime session 内切换。FFI 只接受已打包的 `luna_piny
 `double_pinyin_flypy`；成功切换会清除组合并推进 revision，使旧候选 ID 失效。macOS
 菜单负责显示和持久化当前方案，但不直接操作 librime 状态。
 macOS 设置窗口是进程级单例，只保存平台偏好；重新激活文本客户端时，控制器读取偏好并
-通过既有 ABI 同步 schema 和候选页大小。页大小通过平台无关的 `SetPageSize` 事件进入
-核心，再由引擎适配器更新真实分页；平台层不裁剪候选快照来模拟分页。组合期间的变更延迟
-到组合结束后应用。设置窗口不持有引擎或 session，避免设置 UI 生命周期与 InputMethodKit
-的多控制器生命周期耦合。
+通过既有 ABI 同步 schema、候选页大小和英文候选阈值。页大小与阈值分别通过平台无关的
+`SetPageSize` 和 `SetEnglishCandidateMinimum` 事件进入核心，再由引擎适配器更新真实 Rime
+配置；平台层不裁剪候选快照来模拟功能。阈值变化会保存到用户 custom 配置、重新部署当前
+schema，并只替换对应控制器的空闲 Rime session，不清理其他客户端会话。组合期间的变更
+延迟到组合结束后应用。设置窗口不持有引擎或 session，避免设置 UI 生命周期与
+InputMethodKit 的多控制器生命周期耦合。
+
+`feather_english` 作为两个中文 schema 的低优先级 `table_translator`，从 `easy_en` 导入
+英文词表。它与中文候选共用 Rime 菜单、revision 和不透明候选 ID；Rust 核心与 macOS
+候选窗口无需维护另一套候选身份或选择路径。
 紧凑候选窗的竖排／横排选择是纯 macOS 呈现策略，不进入核心或 ABI。横排只在所有当前页
 候选能够放入候选窗和当前显示器时启用，否则回退竖排。展开的全词候选跟随实际紧凑排列：
 竖排按列组织并给当前列编号，横排按行组织并给当前行编号；该策略只改变平台侧排列和键盘

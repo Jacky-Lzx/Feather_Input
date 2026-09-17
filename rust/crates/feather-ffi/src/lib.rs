@@ -18,6 +18,7 @@ const CAP_MULTI_SESSION: u64 = 1 << 4;
 const CAP_CANDIDATE_SLICES: u64 = 1 << 5;
 const CAP_SCHEMA_SELECTION: u64 = 1 << 6;
 const CAP_PAGE_SIZE: u64 = 1 << 7;
+const CAP_ENGLISH_CANDIDATE_MINIMUM: u64 = 1 << 8;
 const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
 
 #[repr(u32)]
@@ -430,6 +431,7 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_CANDIDATE_SLICES
         | CAP_SCHEMA_SELECTION
         | CAP_PAGE_SIZE
+        | CAP_ENGLISH_CANDIDATE_MINIMUM
 }
 
 #[no_mangle]
@@ -642,6 +644,32 @@ pub unsafe extern "C" fn feather_ime_set_page_size(
                 ));
             }
             dispatch_impl(ime, InputEvent::SetPageSize(page_size))
+        })
+    }
+}
+
+#[no_mangle]
+/// Changes the minimum input length required for mixed English candidates.
+///
+/// # Safety
+///
+/// `ime` must be a live handle used on its owner thread. `minimum` must be
+/// between 1 and 12. Output pointers follow `feather_ime_new`.
+pub unsafe extern "C" fn feather_ime_set_english_candidate_minimum(
+    ime: *mut FeatherIme,
+    minimum: usize,
+    out_response: *mut *mut FeatherResponse,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        output_call(out_response, out_error, || {
+            if !(1..=12).contains(&minimum) {
+                return Err(FfiFailure::new(
+                    StatusCode::InvalidArgument,
+                    format!("英文候选最少输入长度超出范围：{minimum}"),
+                ));
+            }
+            dispatch_impl(ime, InputEvent::SetEnglishCandidateMinimum(minimum))
         })
     }
 }
@@ -884,6 +912,7 @@ mod tests {
                 | CAP_CANDIDATE_SLICES
                 | CAP_SCHEMA_SELECTION
                 | CAP_PAGE_SIZE
+                | CAP_ENGLISH_CANDIDATE_MINIMUM
         );
     }
 
@@ -1018,6 +1047,16 @@ mod tests {
         assert_eq!(status, StatusCode::InvalidArgument.value());
         assert!(response.is_null());
         assert!(unsafe { error_message(error) }.contains("每页候选数量"));
+        unsafe { feather_error_free(error) };
+
+        let mut response = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let status = unsafe {
+            feather_ime_set_english_candidate_minimum(ime, 0, &raw mut response, &raw mut error)
+        };
+        assert_eq!(status, StatusCode::InvalidArgument.value());
+        assert!(response.is_null());
+        assert!(unsafe { error_message(error) }.contains("英文候选最少输入长度"));
         unsafe {
             feather_error_free(error);
             feather_ime_free(ime);

@@ -39,7 +39,8 @@ enum FeatherCapability {
     FEATHER_CAP_MULTI_SESSION = UINT64_C(1) << 4,
     FEATHER_CAP_CANDIDATE_SLICES = UINT64_C(1) << 5,
     FEATHER_CAP_SCHEMA_SELECTION = UINT64_C(1) << 6,
-    FEATHER_CAP_PAGE_SIZE = UINT64_C(1) << 7
+    FEATHER_CAP_PAGE_SIZE = UINT64_C(1) << 7,
+    FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM = UINT64_C(1) << 8
 };
 
 struct FeatherError {
@@ -128,6 +129,11 @@ FeatherStatus feather_ime_set_page_size(FeatherIme *ime,
                                         size_t page_size,
                                         FeatherResponse **out_response,
                                         FeatherError **out_error);
+FeatherStatus feather_ime_set_english_candidate_minimum(
+    FeatherIme *ime,
+    size_t minimum,
+    FeatherResponse **out_response,
+    FeatherError **out_error);
 FeatherStatus feather_ime_key(FeatherIme *ime,
                               uint32_t kind,
                               const uint8_t *text,

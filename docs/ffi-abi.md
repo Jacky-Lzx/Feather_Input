@@ -90,6 +90,7 @@ ABI v2 当前公开以下能力：
 - `FEATHER_CAP_CANDIDATE_SLICES`：支持按 revision 分批读取完整候选列表。
 - `FEATHER_CAP_SCHEMA_SELECTION`：支持在现有会话内切换已允许的输入方案；
 - `FEATHER_CAP_PAGE_SIZE`：支持将引擎的真实候选页大小设置为 1–9。
+- `FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM`：支持将混合英文候选的最少输入长度设置为 1–12。
 
 平台层只应要求自身实际依赖的能力。新增可选能力时增加新的位，不改变已有位的含义。
 

@@ -36,6 +36,7 @@ final class InputController: IMKInputController {
   var schemeMemory = InputSchemeMemory.shared
   var focusIndicatorSettings = FocusIndicatorSettings.shared
   var candidatePageSettings = CandidatePageSettings.shared
+  var englishCandidateSettings = EnglishCandidateSettings.shared
   var focusIndicatorRetryDelaysMilliseconds: [UInt64] = [80, 120, 200]
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
@@ -46,6 +47,7 @@ final class InputController: IMKInputController {
   private var activeApplication = "unknown"
   private var activeScheme = InputScheme.fullPinyin
   private var activePageSize: Int?
+  private var activeEnglishCandidateMinimum: Int?
   private var rightControlTap = RightControlTap()
   private var focusIndicatorTask: Task<Void, Never>?
   private var focusIndicatorVersion = UUID()
@@ -79,6 +81,9 @@ final class InputController: IMKInputController {
       let pageSize = candidatePageSettings.count
       _ = try session.setPageSize(pageSize)
       activePageSize = pageSize
+      let englishMinimum = englishCandidateSettings.minimumInputLength
+      _ = try session.setEnglishCandidateMinimum(englishMinimum)
+      activeEnglishCandidateMinimum = englishMinimum
       currentResponse = try session.setMode(
         direct: modeMemory.activate(application: activeApplication)
       )
@@ -164,6 +169,7 @@ final class InputController: IMKInputController {
     if event.type == .keyDown {
       modePresenter.hide()
       synchronizeCandidatePageSizeIfIdle()
+      synchronizeEnglishCandidateMinimumIfIdle()
     }
     if event.type == .flagsChanged {
       if rightControlTap.flagsChanged(
@@ -606,10 +612,14 @@ final class InputController: IMKInputController {
       let schemaResponse = try session.setSchema(scheme.rawValue)
       guard schemaResponse.handled else { return false }
       let pageSize = candidatePageSettings.count
-      let response = try session.setPageSize(pageSize)
+      let pageSizeResponse = try session.setPageSize(pageSize)
+      guard pageSizeResponse.handled else { return false }
+      let englishMinimum = englishCandidateSettings.minimumInputLength
+      let response = try session.setEnglishCandidateMinimum(englishMinimum)
       guard response.handled else { return false }
       activeScheme = scheme
       activePageSize = pageSize
+      activeEnglishCandidateMinimum = englishMinimum
       schemeMemory.update(scheme)
       apply(response, to: client)
       return true
@@ -661,6 +671,19 @@ final class InputController: IMKInputController {
       currentResponse = response
     } catch {
       report(error, operation: "set page size \(pageSize)")
+    }
+  }
+
+  private func synchronizeEnglishCandidateMinimumIfIdle() {
+    let minimum = englishCandidateSettings.minimumInputLength
+    guard !hasComposition, activeEnglishCandidateMinimum != minimum, let session else { return }
+    do {
+      let response = try session.setEnglishCandidateMinimum(minimum)
+      guard response.handled else { return }
+      activeEnglishCandidateMinimum = minimum
+      currentResponse = response
+    } catch {
+      report(error, operation: "set English candidate minimum \(minimum)")
     }
   }
 

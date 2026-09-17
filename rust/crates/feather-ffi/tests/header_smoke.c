@@ -22,6 +22,12 @@ int main(void) {
     if (status == FEATHER_STATUS_OK) {
         feather_ime_response_free(response);
         response = NULL;
+        status = feather_ime_set_english_candidate_minimum(
+            ime, 5, &response, &error);
+    }
+    if (status == FEATHER_STATUS_OK) {
+        feather_ime_response_free(response);
+        response = NULL;
         status = feather_ime_set_schema(ime, "luna_pinyin_simp",
                                         &response, &error);
     }

@@ -27,6 +27,11 @@ unsafe extern "C" {
     fn feather_rime_select_schema(session: usize, schema: *const c_char) -> c_int;
     fn feather_rime_set_page_size(session: usize, schema: *const c_char, page_size: c_int)
         -> c_int;
+    fn feather_rime_set_english_candidate_minimum(
+        session: usize,
+        schema: *const c_char,
+        minimum: c_int,
+    ) -> usize;
     fn feather_rime_destroy_session(session: usize);
     fn feather_rime_process_key(session: usize, key: c_int, modifiers: c_int) -> c_int;
     fn feather_rime_clear(session: usize);
@@ -300,6 +305,33 @@ impl RimeEngine {
         Ok(true)
     }
 
+    fn set_english_candidate_minimum(&mut self, minimum: usize) -> Result<bool, EngineError> {
+        if !(1..=12).contains(&minimum) {
+            return Err(EngineError::new(format!(
+                "英文候选最少输入长度超出范围：{minimum}"
+            )));
+        }
+        if !self.snapshot()?.preedit.is_empty() {
+            return Ok(false);
+        }
+        let schema = CString::new(self.schema.as_str())
+            .map_err(|_| EngineError::new("Rime schema 名称包含 NUL 字符"))?;
+        let minimum = c_int::try_from(minimum)
+            .map_err(|_| EngineError::new("英文候选最少输入长度无法转换为 C 整数"))?;
+        let _registry = self.lease.lock()?;
+        let replacement = unsafe {
+            feather_rime_set_english_candidate_minimum(self.session, schema.as_ptr(), minimum)
+        };
+        if replacement == 0 {
+            return Err(EngineError::new(format!(
+                "无法设置英文候选最少输入长度：{minimum}"
+            )));
+        }
+        self.session = replacement;
+        self.revision = next_revision(self.revision);
+        Ok(true)
+    }
+
     fn process_key(&mut self, key: c_int) -> Result<bool, EngineError> {
         let _registry = self.lease.lock()?;
         let handled = unsafe { feather_rime_process_key(self.session, key, 0) } != 0;
@@ -366,6 +398,9 @@ impl InputEngine for RimeEngine {
             EngineCommand::Select(id) => self.select_candidate(id)?,
             EngineCommand::SelectSchema(schema) => self.select_schema(&schema)?,
             EngineCommand::SetPageSize(page_size) => self.set_page_size(page_size)?,
+            EngineCommand::SetEnglishCandidateMinimum(minimum) => {
+                self.set_english_candidate_minimum(minimum)?
+            }
         };
         let commit = if handled { self.take_commit()? } else { None };
         Ok(EngineResponse { handled, commit })

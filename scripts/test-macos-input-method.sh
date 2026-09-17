@@ -52,6 +52,7 @@ swiftc \
     "$source_root"/Sources/CandidateWindowController.swift \
     "$source_root"/Sources/CandidatePageSettings.swift \
     "$source_root"/Sources/CandidateLayoutSettings.swift \
+    "$source_root"/Sources/EnglishCandidateSettings.swift \
     "$source_root"/Sources/FeatherInputEnvironment.swift \
     "$source_root"/Sources/FocusIndicatorSettings.swift \
     "$source_root"/Sources/InputModeMemory.swift \
@@ -70,5 +71,7 @@ install_name_tool -change "$rust_install_name" @rpath/libfeather_ffi.dylib "$exe
 codesign --force --sign - "$app" >/dev/null
 
 user_data=$(mktemp -d /tmp/feather-input-method-smoke.XXXXXX)
-trap 'rm -rf "$user_data"' EXIT HUP INT TERM
-"$executable" "$shared_data" "$user_data"
+staged_data=$(mktemp -d /tmp/feather-input-method-rime.XXXXXX)
+trap 'rm -rf "$user_data" "$staged_data"' EXIT HUP INT TERM
+"$repo_root/scripts/stage-rime-data.sh" "$shared_data" "$staged_data"
+"$executable" "$staged_data" "$user_data"

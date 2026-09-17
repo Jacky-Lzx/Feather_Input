@@ -128,7 +128,8 @@ impl InputEngine for LexiconEngine {
             }
             EngineCommand::Delete
             | EngineCommand::SelectSchema(_)
-            | EngineCommand::SetPageSize(_) => response.handled = false,
+            | EngineCommand::SetPageSize(_)
+            | EngineCommand::SetEnglishCandidateMinimum(_) => response.handled = false,
             EngineCommand::Cancel => {
                 if self.input.is_empty() {
                     response.handled = false;
