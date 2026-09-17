@@ -681,7 +681,6 @@ struct InputMethodSmokeMain {
     controller.secureInputEnabled = { false }
     controller.generationDebounceMilliseconds = 0
     controller.generationPollMilliseconds = 1
-    controller.generationContextProvider = { _ in "你好" }
     let candidatePresenter = SmokeCandidatePresenter()
     let generatedPresenter = SmokeGeneratedCandidatePresenter()
     controller.candidatePresenter = candidatePresenter
@@ -697,6 +696,7 @@ struct InputMethodSmokeMain {
     controller.modeMemory = InputModeMemory(defaults: defaults)
     let generationSettings = GenerationSettings(defaults: defaults)
     controller.generationSettings = generationSettings
+    generationSettings.updateEnabled(false)
     let schemeMemory = InputSchemeMemory(defaults: defaults)
     schemeMemory.update(.fullPinyin)
     controller.schemeMemory = schemeMemory
@@ -730,13 +730,24 @@ struct InputMethodSmokeMain {
     }
 
     let client = SmokeTextClient()
-    client.committed = "你好"
+    client.bundleIdentifierValue = "com.openai.codex"
     controller.activateServer(client)
     defer {
       generationSettings.updateEnabled(false)
       controller.deactivateServer(client)
       RunLoop.current.run(until: Date().addingTimeInterval(0.02))
     }
+    for (character, keyCode) in zip("nihao", [45, 34, 4, 0, 31]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("Codex 上下文测试无法输入拼音：\(character)")
+      }
+    }
+    guard controller.handle(key(" ", code: 49), client: client), client.committed == "你好"
+    else {
+      throw SmokeFailure.expectation("Codex 上下文测试无法先提交“你好”")
+    }
+    client.selectedRangeOverride = NSRange(location: 0, length: 0)
+    generationSettings.updateEnabled(true)
     for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
       guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
         throw SmokeFailure.expectation("MLX 请求测试无法输入拼音：\(character)")

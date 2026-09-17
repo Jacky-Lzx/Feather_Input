@@ -748,6 +748,9 @@ final class InputController: IMKInputController {
     guard selection.location != NSNotFound, selection.location >= 0 else { return }
     let count = min(selection.location, 320)
     guard count > 0 else {
+      if activeApplication == "com.openai.codex", !recentContext.isEmpty {
+        return
+      }
       recentContext = ""
       return
     }

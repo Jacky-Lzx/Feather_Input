@@ -6,6 +6,7 @@ final class SmokeTextClient: NSObject, IMKTextInput {
   var marked = ""
   var markedSelection = NSRange(location: 0, length: 0)
   var selectionAvailable = true
+  var selectedRangeOverride: NSRange?
   var bundleIdentifierValue = "im.feather.inputmethod.rustdev.smoke"
   var lastAttributesCharacterIndex: Int?
   var caretRectangle = NSRect(x: 100, y: 100, width: 1, height: 20)
@@ -25,7 +26,8 @@ final class SmokeTextClient: NSObject, IMKTextInput {
   }
 
   func selectedRange() -> NSRange {
-    selectionAvailable
+    if let selectedRangeOverride { return selectedRangeOverride }
+    return selectionAvailable
       ? NSRange(location: committed.utf16.count, length: 0)
       : NSRange(location: NSNotFound, length: 0)
   }
