@@ -74,6 +74,30 @@ scripts/package-macos-release.sh --notarize
 每个归档旁边都会生成 `.sha256` 校验文件。发布脚本只生成归档，不会安装或覆盖当前
 正式输入法。
 
+## 正式版安装与升级
+
+正式安装脚本默认只接受包含 arm64、x86_64、有效 Developer ID Application 签名、
+stapled 公证票据并通过 Gatekeeper 的 `FeatherInput.app`：
+
+```sh
+scripts/install-macos-release.sh /path/to/FeatherInput.app
+```
+
+脚本会在 `~/Library/Input Methods` 内创建同卷暂存目录，验证暂存副本后才停止旧进程；
+已有目标必须是相同正式 Bundle ID 和可执行文件名。旧 bundle 会先移动到同卷备份目录，
+新 bundle 就位并通过 Text Input Sources 注册验证后才删除备份。任何一步失败都会删除
+新 bundle、恢复并重新注册旧 bundle。用户数据始终保留在
+`~/Library/Application Support/FeatherInput/Rime`，不会把其他输入法可能使用的
+`~/Library/Rime` 自动合并进来。
+
+隔离验收可以显式允许 ad-hoc 包，并把安装根目录指向临时目录，同时跳过系统注册：
+
+```sh
+FEATHER_INSTALL_ROOT=/private/tmp/feather-install-check \
+FEATHER_SKIP_INPUT_SOURCE_REGISTRATION=true \
+scripts/install-macos-release.sh --allow-local
+```
+
 不安装 bundle 的进程内 IMK 客户端测试：
 
 ```sh

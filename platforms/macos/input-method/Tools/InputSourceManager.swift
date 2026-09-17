@@ -7,12 +7,13 @@ private enum ManagerError: LocalizedError {
   case enableFailed(identifier: String, status: OSStatus)
   case disableFailed(identifier: String, status: OSStatus)
   case queryUnavailable
+  case sourceNotFound(String)
 
   var errorDescription: String? {
     switch self {
     case .invalidArguments:
       return
-        "用法：input-source-manager register <bundle-path> | status <bundle-id> | enable <bundle-id> | disable <bundle-id>"
+        "用法：input-source-manager register <bundle-path> | status <bundle-id> | require <bundle-id> | enable <bundle-id> | disable <bundle-id>"
     case .registrationFailed(let status):
       return "注册输入源失败：OSStatus=\(status)"
     case .enableFailed(let identifier, let status):
@@ -21,6 +22,8 @@ private enum ManagerError: LocalizedError {
       return "禁用输入源失败（\(identifier)）：OSStatus=\(status)"
     case .queryUnavailable:
       return "无法连接当前图形登录会话的 Text Input Sources 服务。"
+    case .sourceNotFound(let identifier):
+      return "没有发现 Bundle ID 为 \(identifier) 的已注册输入源。"
     }
   }
 }
@@ -63,6 +66,14 @@ private enum InputSourceManager {
             "\(source.identifier)\tenabled=\(source.enabled)\tenableCapable=\(source.enableCapable)\tselectable=\(source.selectable)"
           )
         }
+      }
+    case "require":
+      let sources = try sources(bundleIdentifier: argument)
+      guard !sources.isEmpty else { throw ManagerError.sourceNotFound(argument) }
+      for source in sources {
+        print(
+          "\(source.identifier)\tenabled=\(source.enabled)\tenableCapable=\(source.enableCapable)\tselectable=\(source.selectable)"
+        )
       }
     case "enable":
       for (source, description) in try sourcePairs(bundleIdentifier: argument)

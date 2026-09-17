@@ -4,7 +4,7 @@ set -eu
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-scope="rust platforms/macos scripts/build-macos-client-acceptance.sh scripts/build-macos-dev-harness.sh scripts/build-macos-input-method.sh scripts/build-macos-input-source-manager.sh scripts/build-macos-universal.sh scripts/bundle-macos-dylibs.sh scripts/check-macos-bundle-dependencies.sh scripts/enable-macos-input-method.sh scripts/install-macos-input-method.sh scripts/merge-macos-app-slices.sh scripts/package-macos-release.sh scripts/run-macos-client-acceptance.sh scripts/status-macos-input-method.sh scripts/uninstall-macos-input-method.sh scripts/test-macos-dev-harness.sh scripts/test-macos-input-method.sh scripts/test-rime-traces.sh scripts/format-macos.sh scripts/check-macos.sh"
+scope="rust platforms/macos scripts/build-macos-client-acceptance.sh scripts/build-macos-dev-harness.sh scripts/build-macos-input-method.sh scripts/build-macos-input-source-manager.sh scripts/build-macos-universal.sh scripts/bundle-macos-dylibs.sh scripts/check-macos-bundle-dependencies.sh scripts/enable-macos-input-method.sh scripts/install-macos-input-method.sh scripts/install-macos-release.sh scripts/merge-macos-app-slices.sh scripts/package-macos-release.sh scripts/run-macos-client-acceptance.sh scripts/status-macos-input-method.sh scripts/uninstall-macos-input-method.sh scripts/test-macos-dev-harness.sh scripts/test-macos-input-method.sh scripts/test-rime-traces.sh scripts/format-macos.sh scripts/check-macos.sh"
 
 if ! git diff --quiet -- $scope; then
     echo "提交前检查失败：本次代码范围中存在未暂存修改。" >&2

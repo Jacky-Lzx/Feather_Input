@@ -79,6 +79,7 @@ sh -n \
     scripts/check-macos-bundle-dependencies.sh \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
+    scripts/install-macos-release.sh \
     scripts/merge-macos-app-slices.sh \
     scripts/package-macos-release.sh \
     scripts/run-macos-client-acceptance.sh \
@@ -99,6 +100,7 @@ shellcheck \
     scripts/check-macos-bundle-dependencies.sh \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
+    scripts/install-macos-release.sh \
     scripts/merge-macos-app-slices.sh \
     scripts/package-macos-release.sh \
     scripts/run-macos-client-acceptance.sh \
