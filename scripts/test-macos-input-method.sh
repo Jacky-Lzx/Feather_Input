@@ -51,8 +51,11 @@ swiftc \
     "$source_root"/Sources/CandidateWindowStyle.swift \
     "$source_root"/Sources/CandidateWindowController.swift \
     "$source_root"/Sources/FeatherInputEnvironment.swift \
+    "$source_root"/Sources/InputModeMemory.swift \
     "$source_root"/Sources/InputController.swift \
     "$source_root"/Sources/InputOverlays.swift \
+    "$source_root"/Sources/ModeIndicatorController.swift \
+    "$source_root"/Sources/RightControlTap.swift \
     "$source_root"/Sources/TextCoordinates.swift \
     "$source_root"/Tests/*.swift \
     -o "$executable"

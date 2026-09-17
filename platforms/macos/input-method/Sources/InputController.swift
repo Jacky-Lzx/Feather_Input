@@ -25,25 +25,48 @@ final class InputController: IMKInputController {
     get { injectedCandidatePresenter ?? ownedCandidatePresenter }
     set { injectedCandidatePresenter = newValue }
   }
+  private var injectedModePresenter: ModeIndicatorPresenting?
+  private lazy var ownedModePresenter = OwnedModeIndicatorPresenter()
+  var modePresenter: ModeIndicatorPresenting {
+    get { injectedModePresenter ?? ownedModePresenter }
+    set { injectedModePresenter = newValue }
+  }
+  var modeMemory = InputModeMemory.shared
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
   private var expandedCandidates: ExpandedCandidateState?
   private weak var activeClient: AnyObject?
   private var active = false
   private var lastCaret: NSRect?
+  private var activeApplication = "unknown"
+  private var rightControlTap = RightControlTap()
 
   override func activateServer(_ sender: Any!) {
     activeClient = sender as AnyObject?
     lastCaret = nil
+    rightControlTap.reset()
+    if let client = sender as? IMKTextInput {
+      activeApplication =
+        client.bundleIdentifier()
+        ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+    } else {
+      activeApplication = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+    }
     if injectedCandidatePresenter == nil {
       ownedCandidatePresenter.activate()
+    }
+    if injectedModePresenter == nil {
+      ownedModePresenter.activate()
     }
     candidatePresenter.actionHandler = { [weak self] action in
       self?.handleCandidateWindowAction(action)
     }
     do {
       let session = try requireSession()
-      currentResponse = try session.activate()
+      _ = try session.activate()
+      currentResponse = try session.setMode(
+        direct: modeMemory.activate(application: activeApplication)
+      )
       active = true
     } catch {
       active = false
@@ -58,10 +81,15 @@ final class InputController: IMKInputController {
       expandedCandidates = nil
       activeClient = nil
       lastCaret = nil
+      rightControlTap.reset()
       candidatePresenter.actionHandler = nil
       candidatePresenter.hide()
+      modePresenter.hide()
       if injectedCandidatePresenter == nil {
         ownedCandidatePresenter.deactivate()
+      }
+      if injectedModePresenter == nil {
+        ownedModePresenter.deactivate()
       }
       return
     }
@@ -78,19 +106,26 @@ final class InputController: IMKInputController {
     expandedCandidates = nil
     activeClient = nil
     lastCaret = nil
+    rightControlTap.reset()
     candidatePresenter.actionHandler = nil
     candidatePresenter.hide()
+    modePresenter.hide()
     if injectedCandidatePresenter == nil {
       ownedCandidatePresenter.deactivate()
+    }
+    if injectedModePresenter == nil {
+      ownedModePresenter.deactivate()
     }
   }
 
   override func recognizedEvents(_ sender: Any!) -> Int {
-    Int(NSEvent.EventTypeMask.keyDown.rawValue)
+    Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged]).rawValue)
   }
 
   override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
-    guard let event, event.type == .keyDown, let client = sender as? IMKTextInput else {
+    guard let event, [.keyDown, .flagsChanged].contains(event.type),
+      let client = sender as? IMKTextInput
+    else {
       return false
     }
     guard !secureInputEnabled() else {
@@ -101,6 +136,25 @@ final class InputController: IMKInputController {
     guard textInputAvailable(client) else {
       cancelEngineComposition()
       return false
+    }
+    if event.type == .flagsChanged {
+      if rightControlTap.flagsChanged(
+        keyCode: event.keyCode,
+        flags: event.modifierFlags.rawValue,
+        timestamp: event.timestamp > 0 ? event.timestamp : nil
+      ) {
+        return toggleInputMode(for: client)
+      }
+      return false
+    }
+    rightControlTap.cancel()
+    modePresenter.hide()
+    let modeShortcut =
+      event.keyCode == 49
+      && event.modifierFlags.contains([.control, .shift])
+      && !event.modifierFlags.contains([.command, .option])
+    if modeShortcut {
+      return toggleInputMode(for: client)
     }
     if let handled = handleExpandedEvent(event, client: client) {
       return handled
@@ -137,6 +191,19 @@ final class InputController: IMKInputController {
 
   override func candidates(_ sender: Any!) -> [Any]! {
     currentResponse?.candidates.map(\.text) ?? []
+  }
+
+  override func menu() -> NSMenu! {
+    let menu = NSMenu()
+    let title = currentResponse?.directMode == true ? "切换到中文" : "切换到英文"
+    let toggle = NSMenuItem(
+      title: title,
+      action: #selector(toggleInputModeFromMenu(_:)),
+      keyEquivalent: ""
+    )
+    toggle.target = self
+    menu.addItem(toggle)
+    return menu
   }
 
   private var hasComposition: Bool {
@@ -405,6 +472,32 @@ final class InputController: IMKInputController {
     } catch {
       expandedCandidates = nil
       report(error, operation: "select expanded candidate")
+    }
+  }
+
+  @objc private func toggleInputModeFromMenu(_ sender: Any?) {
+    let senderClient = (sender as? NSDictionary)?[kIMKCommandClientName as String]
+    guard let client = (senderClient as? IMKTextInput) ?? (activeClient as? IMKTextInput) else {
+      return
+    }
+    _ = toggleInputMode(for: client)
+  }
+
+  private func toggleInputMode(for client: IMKTextInput) -> Bool {
+    do {
+      let response = try ensureActive().send(.toggleMode)
+      guard response.handled else { return false }
+      apply(response, to: client)
+      modeMemory.update(directMode: response.directMode, application: activeApplication)
+      modePresenter.show(
+        directMode: response.directMode,
+        anchor: candidateAnchor(for: client),
+        clientLevel: Int(client.windowLevel())
+      )
+      return true
+    } catch {
+      report(error, operation: "toggle mode")
+      return false
     }
   }
 

@@ -142,6 +142,9 @@ Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入�
 可以在紧凑窗中按右方向键打开按 revision 分批加载的五列全词候选网格，网格导航只改变平台侧临时
 高亮，最终选择仍通过不透明候选 ID 交给核心和引擎。更多真实客户端验收仍属于后续阶段。
 展开状态的 `Esc` 仍发送引擎取消命令并清除组合，不作为单纯的界面收起操作。
+macOS 适配层通过核心已有的 `Native`/`Direct` 状态实现中英文切换：右 Control 单击、
+`Control + Shift + Space` 和输入法菜单都发送同一个平台无关事件。模式切换会清除组合，
+英文直输时按键继续交给宿主客户端。模式记忆与共享状态提示属于平台策略，不进入引擎。
 
 `platforms/macos/client-acceptance` 是不链接 Feather 核心的普通 AppKit 客户端。它通过
 系统 Text Input Services 使用已安装的开发输入法，为普通文本、密码输入和快捷键放行

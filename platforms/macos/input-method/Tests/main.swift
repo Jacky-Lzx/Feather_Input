@@ -42,13 +42,23 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("UTF-8 到 UTF-16 光标转换错误")
     }
+    try verifyInputModeMemory()
     try verifyCandidateOverlayOwnership()
+    try verifyModeIndicatorOwnership()
     guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
       throw SmokeFailure.controllerCreation
     }
     controller.secureInputEnabled = { false }
     let presenter = SmokeCandidatePresenter()
+    let modePresenter = SmokeModePresenter()
+    let modeDefaultsName = "FeatherInputMethodSmoke-\(UUID().uuidString)"
+    guard let modeDefaults = UserDefaults(suiteName: modeDefaultsName) else {
+      throw SmokeFailure.expectation("无法创建隔离的输入模式设置")
+    }
+    defer { modeDefaults.removePersistentDomain(forName: modeDefaultsName) }
     controller.candidatePresenter = presenter
+    controller.modePresenter = modePresenter
+    controller.modeMemory = InputModeMemory(defaults: modeDefaults)
     let client = SmokeTextClient()
     controller.activateServer(client)
 
@@ -114,6 +124,53 @@ struct InputMethodSmokeMain {
     }
     guard presenter.candidates.isEmpty else {
       throw SmokeFailure.expectation("提交后候选窗口没有隐藏")
+    }
+
+    guard
+      !controller.handle(
+        flags(code: 62, modifiers: [.control], timestamp: 1), client: client)
+    else {
+      throw SmokeFailure.expectation("按下右 Control 时不应立即切换输入模式")
+    }
+    guard controller.handle(flags(code: 62, modifiers: [], timestamp: 1.1), client: client),
+      modePresenter.directMode == true,
+      modePresenter.anchor == client.caretRectangle,
+      modePresenter.isVisible,
+      modePresenter.showCount == 1
+    else {
+      throw SmokeFailure.expectation("单击右 Control 没有切换到英文模式")
+    }
+    guard !controller.handle(key("n", code: 45), client: client), client.marked.isEmpty else {
+      throw SmokeFailure.expectation("英文模式没有把文字按键交还客户端")
+    }
+    guard
+      controller.handle(
+        key(" ", code: 49, modifiers: [.control, .shift]), client: client),
+      modePresenter.directMode == false,
+      modePresenter.showCount == 2
+    else {
+      throw SmokeFailure.expectation("Control + Shift + Space 没有切回中文模式")
+    }
+    guard
+      !controller.handle(
+        flags(code: 62, modifiers: [.control], timestamp: 2), client: client),
+      !controller.handle(key("c", code: 8, modifiers: .control), client: client),
+      !controller.handle(flags(code: 62, modifiers: [], timestamp: 2.1), client: client),
+      modePresenter.showCount == 2
+    else {
+      throw SmokeFailure.expectation("右 Control 快捷键结束后错误切换了输入模式")
+    }
+    guard controller.handle(key("n", code: 45), client: client), !client.marked.isEmpty,
+      controller.handle(
+        key(" ", code: 49, modifiers: [.control, .shift]), client: client),
+      client.marked.isEmpty,
+      presenter.candidates.isEmpty,
+      modePresenter.directMode == true,
+      controller.handle(
+        key(" ", code: 49, modifiers: [.control, .shift]), client: client),
+      modePresenter.directMode == false
+    else {
+      throw SmokeFailure.expectation("组合过程中切换模式没有清除预编辑和候选")
     }
 
     for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
@@ -272,6 +329,46 @@ struct InputMethodSmokeMain {
     }
   }
 
+  private static func verifyInputModeMemory() throws {
+    let suiteName = "FeatherInputModeMemory-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+      throw SmokeFailure.expectation("无法创建输入模式记忆测试设置")
+    }
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set(InputModeMemoryPolicy.perApplication.rawValue, forKey: "inputModeMemoryPolicy")
+    let memory = InputModeMemory(defaults: defaults)
+    guard !memory.activate(application: "app.one") else {
+      throw SmokeFailure.expectation("新应用不应默认进入英文模式")
+    }
+    memory.update(directMode: true, application: "app.one")
+    guard !memory.activate(application: "app.two"), memory.activate(application: "app.one") else {
+      throw SmokeFailure.expectation("没有按应用保存中英文模式")
+    }
+  }
+
+  @MainActor
+  private static func verifyModeIndicatorOwnership() throws {
+    let presenter = SmokeModePresenter()
+    let store = ModeIndicatorOverlayStore(presenter: presenter)
+    let first = OwnedModeIndicatorPresenter(store: store)
+    let second = OwnedModeIndicatorPresenter(store: store)
+
+    first.activate()
+    first.show(directMode: true, anchor: .zero, clientLevel: 0)
+    second.activate()
+    second.show(directMode: false, anchor: .zero, clientLevel: 0)
+    first.hide()
+    first.deactivate()
+
+    guard presenter.isVisible, presenter.directMode == false else {
+      throw SmokeFailure.expectation("旧控制器修改了新控制器持有的模式提示窗口")
+    }
+    second.deactivate()
+    guard !presenter.isVisible else {
+      throw SmokeFailure.expectation("当前控制器释放后模式提示窗口没有隐藏")
+    }
+  }
+
   @MainActor
   private static func verifySharedCandidatePanelCount() throws {
     let baseline = NSApplication.shared.windows.filter { $0 is NSPanel }.count
@@ -295,9 +392,9 @@ struct InputMethodSmokeMain {
     }
 
     let finalCount = NSApplication.shared.windows.filter { $0 is NSPanel }.count
-    guard finalCount <= baseline + 1 else {
+    guard finalCount <= baseline + 2 else {
       throw SmokeFailure.expectation(
-        "多个输入控制器创建了 \(finalCount - baseline) 个候选面板"
+        "多个输入控制器创建了 \(finalCount - baseline) 个输入浮层"
       )
     }
     withExtendedLifetime(controllers) {}
@@ -317,6 +414,25 @@ struct InputMethodSmokeMain {
       context: nil,
       characters: characters,
       charactersIgnoringModifiers: characters,
+      isARepeat: false,
+      keyCode: code
+    )!
+  }
+
+  private static func flags(
+    code: UInt16,
+    modifiers: NSEvent.ModifierFlags,
+    timestamp: TimeInterval
+  ) -> NSEvent {
+    NSEvent.keyEvent(
+      with: .flagsChanged,
+      location: .zero,
+      modifierFlags: modifiers,
+      timestamp: timestamp,
+      windowNumber: 0,
+      context: nil,
+      characters: "",
+      charactersIgnoringModifiers: "",
       isARepeat: false,
       keyCode: code
     )!

@@ -155,6 +155,12 @@ final class FeatherSession {
     }
   }
 
+  func setMode(direct: Bool) throws -> FeatherResponseValue {
+    try perform("set mode") { handle, response, error in
+      feather_ime_set_mode(handle, direct ? 1 : 0, &response, &error)
+    }
+  }
+
   func send(_ key: FeatherKey) throws -> FeatherResponseValue {
     try perform("key \(key)") { handle, response, error in
       feather_ime_key(handle, key.rawValue, nil, 0, &response, &error)

@@ -65,7 +65,7 @@ final class AcceptanceWindowController: NSWindowController {
       font: .systemFont(ofSize: 24, weight: .semibold)
     )
     let instructions = label(
-      "先从菜单栏切换到 Feather Rust Dev。在下方输入 shijie 检查基本候选；输入 shi 检查全词候选、跨列导航和超过 40 项后的继续加载。这个应用不链接 Rust 或 librime。",
+      "先从菜单栏切换到 Feather Rust Dev。在下方输入 shijie 检查基本候选；输入 shi 检查全词候选。单击右 Control 或按 Control + Shift + Space 检查中英文切换。这个应用不链接 Rust 或 librime。",
       font: .systemFont(ofSize: 14)
     )
     instructions.textColor = .secondaryLabelColor
@@ -122,13 +122,16 @@ final class AcceptanceWindowController: NSWindowController {
       "客户端能够收到 Command / Control / Option 快捷键",
       "密码框中不出现预编辑或候选窗口",
       "浅色与深色模式下候选内容均清晰可见",
+      "右 Control 单击会切换中英文并显示状态提示",
+      "Control + Shift + Space 会切换模式并取消现有组合",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
+    let itemsPerColumn = (checklistItems.count + 1) / 2
     for (index, item) in checklistItems.enumerated() {
       let button = NSButton(
         checkboxWithTitle: item, target: self, action: #selector(updateProgress(_:)))
       checks.append(button)
-      checklistColumns[index / 7].addArrangedSubview(button)
+      checklistColumns[index / itemsPerColumn].addArrangedSubview(button)
     }
     let checklist = NSStackView(views: checklistColumns)
     checklist.orientation = .horizontal
