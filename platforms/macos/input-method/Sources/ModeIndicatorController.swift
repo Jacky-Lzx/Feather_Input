@@ -3,7 +3,13 @@ import AppKit
 @MainActor
 protocol ModeIndicatorPresenting: AnyObject {
   var isVisible: Bool { get }
-  func show(directMode: Bool, anchor: NSRect, clientLevel: Int)
+  func show(
+    directMode: Bool,
+    anchor: NSRect,
+    clientLevel: Int,
+    waitsUntilInput: Bool,
+    duration: TimeInterval
+  )
   func hide()
 }
 
@@ -54,7 +60,13 @@ final class ModeIndicatorController: ModeIndicatorPresenting {
     dismissTimer?.invalidate()
   }
 
-  func show(directMode: Bool, anchor: NSRect, clientLevel: Int) {
+  func show(
+    directMode: Bool,
+    anchor: NSRect,
+    clientLevel: Int,
+    waitsUntilInput: Bool,
+    duration: TimeInterval
+  ) {
     hide()
     label.stringValue = directMode ? "英文" : "中文"
     let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main
@@ -73,7 +85,14 @@ final class ModeIndicatorController: ModeIndicatorPresenting {
     panel.setFrameOrigin(origin)
     panel.orderFrontRegardless()
 
-    let timer = Timer(timeInterval: 0.8, repeats: false) { [weak self] _ in
+    guard !waitsUntilInput else { return }
+    let interval =
+      duration.isFinite
+      ? min(
+        max(duration, FocusIndicatorSettings.minimumDuration),
+        FocusIndicatorSettings.maximumDuration)
+      : FocusIndicatorSettings.defaultDuration
+    let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
       Task { @MainActor in
         self?.hide()
       }
@@ -150,11 +169,19 @@ final class OwnedModeIndicatorPresenter: ModeIndicatorPresenting {
     store.deactivate(ownershipID)
   }
 
-  func show(directMode: Bool, anchor: NSRect, clientLevel: Int) {
+  func show(
+    directMode: Bool,
+    anchor: NSRect,
+    clientLevel: Int,
+    waitsUntilInput: Bool,
+    duration: TimeInterval
+  ) {
     store.presenter(for: ownershipID)?.show(
       directMode: directMode,
       anchor: anchor,
-      clientLevel: clientLevel
+      clientLevel: clientLevel,
+      waitsUntilInput: waitsUntilInput,
+      duration: duration
     )
   }
 

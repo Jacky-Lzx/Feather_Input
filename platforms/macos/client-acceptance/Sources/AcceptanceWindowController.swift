@@ -128,6 +128,8 @@ final class AcceptanceWindowController: NSWindowController {
       "输入方案切换不会改变当前中英文模式",
       "设置窗口会保存输入方案与模式记忆策略",
       "组合过程中打开设置不会意外上屏文字",
+      "输入框获得焦点时在插入点旁显示当前中英文状态",
+      "焦点状态提示按设置自动消失或保持到开始输入",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
     let itemsPerColumn = (checklistItems.count + 1) / 2

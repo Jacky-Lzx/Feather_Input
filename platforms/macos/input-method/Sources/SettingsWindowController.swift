@@ -4,18 +4,28 @@ import AppKit
 final class SettingsWindowController: NSObject, NSWindowDelegate {
   static let shared = SettingsWindowController(
     modeMemory: .shared,
-    schemeMemory: .shared
+    schemeMemory: .shared,
+    focusIndicatorSettings: .shared
   )
 
   private let modeMemory: InputModeMemory
   private let schemeMemory: InputSchemeMemory
+  private let focusIndicatorSettings: FocusIndicatorSettings
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
   private weak var policyPopup: NSPopUpButton?
+  private weak var focusUntilInputButton: NSButton?
+  private weak var focusDurationValue: NSTextField?
+  private weak var focusDurationStepper: NSStepper?
 
-  init(modeMemory: InputModeMemory, schemeMemory: InputSchemeMemory) {
+  init(
+    modeMemory: InputModeMemory,
+    schemeMemory: InputSchemeMemory,
+    focusIndicatorSettings: FocusIndicatorSettings
+  ) {
     self.modeMemory = modeMemory
     self.schemeMemory = schemeMemory
+    self.focusIndicatorSettings = focusIndicatorSettings
   }
 
   func show() {
@@ -40,11 +50,21 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func selectFocusIndicatorWaitsUntilInput(_ waitsUntilInput: Bool) {
+    focusIndicatorSettings.updateWaitsUntilInput(waitsUntilInput)
+    refreshControls()
+  }
+
+  func selectFocusIndicatorDuration(_ duration: TimeInterval) {
+    focusIndicatorSettings.updateDuration(duration)
+    refreshControls()
+  }
+
   private func requireWindow() -> NSWindow {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 430, height: 250),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 390),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -81,23 +101,69 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     policyPopup.action = #selector(policyChanged(_:))
     self.policyPopup = policyPopup
 
-    let help = NSTextField(
+    let policyHelp = NSTextField(
       wrappingLabelWithString:
-        "输入方案会在返回文本客户端时应用。中英文仍可通过右 Control 或 Control + Shift + Space 切换。"
+        "全局记忆会让所有应用共享最后一次状态；按应用记忆会分别保存。恢复模式仅在切换到另一个应用时重置。"
     )
-    help.font = .systemFont(ofSize: 12)
-    help.textColor = .secondaryLabelColor
+    policyHelp.font = .systemFont(ofSize: 12)
+    policyHelp.textColor = .secondaryLabelColor
+
+    let focusUntilInputButton = NSButton(
+      checkboxWithTitle: "焦点状态提示持续到开始输入",
+      target: self,
+      action: #selector(focusUntilInputChanged(_:))
+    )
+    self.focusUntilInputButton = focusUntilInputButton
+
+    let focusHelp = NSTextField(
+      wrappingLabelWithString:
+        "开启后，光标旁的中英文提示会保持到开始按键或失焦；关闭后按下方时间自动消失。下次获得焦点生效。"
+    )
+    focusHelp.font = .systemFont(ofSize: 12)
+    focusHelp.textColor = .secondaryLabelColor
+
+    let focusDurationValue = NSTextField(labelWithString: "")
+    focusDurationValue.alignment = .right
+    focusDurationValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    self.focusDurationValue = focusDurationValue
+    let focusDurationStepper = NSStepper()
+    focusDurationStepper.minValue = FocusIndicatorSettings.minimumDuration
+    focusDurationStepper.maxValue = FocusIndicatorSettings.maximumDuration
+    focusDurationStepper.increment = 0.1
+    focusDurationStepper.target = self
+    focusDurationStepper.action = #selector(focusDurationChanged(_:))
+    self.focusDurationStepper = focusDurationStepper
+    let focusDurationControls = NSStackView(views: [focusDurationValue, focusDurationStepper])
+    focusDurationControls.orientation = .horizontal
+    focusDurationControls.alignment = .centerY
+    focusDurationControls.spacing = 8
+
+    let focusDurationHelp = NSTextField(
+      wrappingLabelWithString: "仅在关闭“持续到开始输入”时生效，范围 0.1–5.0 秒。"
+    )
+    focusDurationHelp.font = .systemFont(ofSize: 12)
+    focusDurationHelp.textColor = .secondaryLabelColor
+
+    let emptyPolicyHelp = NSTextField(labelWithString: "")
+    let emptyFocusToggle = NSTextField(labelWithString: "")
+    let emptyFocusHelp = NSTextField(labelWithString: "")
+    let emptyDurationHelp = NSTextField(labelWithString: "")
 
     let grid = NSGridView(views: [
       [schemeLabel, schemePopup],
       [policyLabel, policyPopup],
+      [emptyPolicyHelp, policyHelp],
+      [emptyFocusToggle, focusUntilInputButton],
+      [emptyFocusHelp, focusHelp],
+      [NSTextField(labelWithString: "焦点提示显示"), focusDurationControls],
+      [emptyDurationHelp, focusDurationHelp],
     ])
     grid.column(at: 0).xPlacement = .trailing
     grid.column(at: 1).xPlacement = .fill
     grid.rowSpacing = 12
     grid.columnSpacing = 12
 
-    let stack = NSStackView(views: [title, grid, help])
+    let stack = NSStackView(views: [title, grid])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 18
@@ -105,7 +171,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     content.addSubview(stack)
 
     grid.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-    help.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    policyHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    focusHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    focusDurationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
       stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
@@ -125,6 +193,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     if let index = InputModeMemoryPolicy.allCases.firstIndex(of: modeMemory.policy) {
       policyPopup?.selectItem(at: index)
     }
+    let waitsUntilInput = focusIndicatorSettings.waitsUntilInput
+    focusUntilInputButton?.state = waitsUntilInput ? .on : .off
+    focusDurationValue?.stringValue = String(format: "%.1f 秒", focusIndicatorSettings.duration)
+    focusDurationStepper?.doubleValue = focusIndicatorSettings.duration
+    focusDurationStepper?.isEnabled = !waitsUntilInput
   }
 
   @objc private func schemeChanged(_ sender: NSPopUpButton) {
@@ -139,5 +212,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       let policy = InputModeMemoryPolicy(rawValue: rawValue)
     else { return }
     selectModePolicy(policy)
+  }
+
+  @objc private func focusUntilInputChanged(_ sender: NSButton) {
+    selectFocusIndicatorWaitsUntilInput(sender.state == .on)
+  }
+
+  @objc private func focusDurationChanged(_ sender: NSStepper) {
+    selectFocusIndicatorDuration(sender.doubleValue)
   }
 }

@@ -33,6 +33,8 @@ final class InputController: IMKInputController {
   }
   var modeMemory = InputModeMemory.shared
   var schemeMemory = InputSchemeMemory.shared
+  var focusIndicatorSettings = FocusIndicatorSettings.shared
+  var focusIndicatorRetryDelaysMilliseconds: [UInt64] = [80, 120, 200]
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
   private var expandedCandidates: ExpandedCandidateState?
@@ -42,8 +44,11 @@ final class InputController: IMKInputController {
   private var activeApplication = "unknown"
   private var activeScheme = InputScheme.fullPinyin
   private var rightControlTap = RightControlTap()
+  private var focusIndicatorTask: Task<Void, Never>?
+  private var focusIndicatorVersion = UUID()
 
   override func activateServer(_ sender: Any!) {
+    cancelFocusIndicator()
     activeClient = sender as AnyObject?
     lastCaret = nil
     rightControlTap.reset()
@@ -72,6 +77,9 @@ final class InputController: IMKInputController {
         direct: modeMemory.activate(application: activeApplication)
       )
       active = true
+      if let client = sender as? IMKTextInput {
+        scheduleFocusIndicator(for: client)
+      }
     } catch {
       active = false
       report(error, operation: "activate")
@@ -79,6 +87,7 @@ final class InputController: IMKInputController {
   }
 
   override func deactivateServer(_ sender: Any!) {
+    cancelFocusIndicator()
     guard let session else {
       active = false
       currentResponse = nil
@@ -133,13 +142,21 @@ final class InputController: IMKInputController {
       return false
     }
     guard !secureInputEnabled() else {
+      cancelFocusIndicator()
+      modePresenter.hide()
       cancelEngineComposition()
       return false
     }
 
     guard textInputAvailable(client) else {
+      cancelFocusIndicator()
+      modePresenter.hide()
       cancelEngineComposition()
       return false
+    }
+    cancelFocusIndicator()
+    if event.type == .keyDown {
+      modePresenter.hide()
     }
     if event.type == .flagsChanged {
       if rightControlTap.flagsChanged(
@@ -152,7 +169,6 @@ final class InputController: IMKInputController {
       return false
     }
     rightControlTap.cancel()
-    modePresenter.hide()
     let modeShortcut =
       event.keyCode == 49
       && event.modifierFlags.contains([.control, .shift])
@@ -506,6 +522,7 @@ final class InputController: IMKInputController {
   }
 
   @objc func showSettings(_ sender: Any?) {
+    cancelFocusIndicator()
     let senderClient = (sender as? NSDictionary)?[kIMKCommandClientName as String]
     if let client = (senderClient as? IMKTextInput) ?? (activeClient as? IMKTextInput),
       hasComposition
@@ -556,7 +573,9 @@ final class InputController: IMKInputController {
       modePresenter.show(
         directMode: response.directMode,
         anchor: candidateAnchor(for: client),
-        clientLevel: Int(client.windowLevel())
+        clientLevel: Int(client.windowLevel()),
+        waitsUntilInput: false,
+        duration: 0.8
       )
       return true
     } catch {
@@ -575,6 +594,60 @@ final class InputController: IMKInputController {
     }
     return lastCaret
       ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
+  }
+
+  @discardableResult
+  func showFocusIndicator(for client: IMKTextInput) -> Bool {
+    let selection = client.selectedRange()
+    guard selection.location != NSNotFound else { return false }
+    var caret = NSRect.zero
+    _ = client.attributes(
+      forCharacterIndex: selection.location,
+      lineHeightRectangle: &caret
+    )
+    guard caret.minX.isFinite, caret.minY.isFinite, caret.width.isFinite,
+      caret.height.isFinite, caret.height > 0
+    else { return false }
+    lastCaret = caret
+    modePresenter.show(
+      directMode: currentResponse?.directMode ?? false,
+      anchor: caret,
+      clientLevel: Int(client.windowLevel()),
+      waitsUntilInput: focusIndicatorSettings.waitsUntilInput,
+      duration: focusIndicatorSettings.duration
+    )
+    return true
+  }
+
+  private func scheduleFocusIndicator(for client: IMKTextInput) {
+    cancelFocusIndicator()
+    modePresenter.hide()
+    let version = focusIndicatorVersion
+    let foregroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    let delays = focusIndicatorRetryDelaysMilliseconds
+    focusIndicatorTask = Task { @MainActor [weak self, weak client] in
+      for delay in delays {
+        do {
+          try await Task.sleep(nanoseconds: delay * 1_000_000)
+        } catch {
+          return
+        }
+        guard let self, let client, !Task.isCancelled, self.active,
+          self.focusIndicatorVersion == version,
+          !self.secureInputEnabled(),
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == foregroundPID
+        else { return }
+        if self.showFocusIndicator(for: client) {
+          return
+        }
+      }
+    }
+  }
+
+  private func cancelFocusIndicator() {
+    focusIndicatorTask?.cancel()
+    focusIndicatorTask = nil
+    focusIndicatorVersion = UUID()
   }
 
   private func normalizedInput(for event: NSEvent) -> NormalizedInput? {

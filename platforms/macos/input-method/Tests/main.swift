@@ -62,8 +62,19 @@ struct InputMethodSmokeMain {
     controller.modePresenter = modePresenter
     controller.modeMemory = InputModeMemory(defaults: modeDefaults)
     controller.schemeMemory = InputSchemeMemory(defaults: modeDefaults)
+    controller.focusIndicatorSettings = FocusIndicatorSettings(defaults: modeDefaults)
+    controller.focusIndicatorRetryDelaysMilliseconds = []
     let client = SmokeTextClient()
     controller.activateServer(client)
+    guard controller.showFocusIndicator(for: client), modePresenter.isVisible,
+      modePresenter.directMode == false,
+      modePresenter.anchor == client.caretRectangle,
+      !modePresenter.waitsUntilInput,
+      modePresenter.duration == 3.0
+    else {
+      throw SmokeFailure.expectation("获得焦点时没有按默认设置显示中文模式提示")
+    }
+    let focusShowCount = modePresenter.showCount
 
     for (character, keyCode) in zip("nihao", [45, 34, 4, 0, 31]) {
       guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
@@ -139,27 +150,41 @@ struct InputMethodSmokeMain {
       modePresenter.directMode == true,
       modePresenter.anchor == client.caretRectangle,
       modePresenter.isVisible,
-      modePresenter.showCount == 1
+      modePresenter.showCount == focusShowCount + 1,
+      !modePresenter.waitsUntilInput,
+      modePresenter.duration == 0.8
     else {
       throw SmokeFailure.expectation("单击右 Control 没有切换到英文模式")
     }
-    guard !controller.handle(key("n", code: 45), client: client), client.marked.isEmpty else {
+    guard !controller.handle(key("n", code: 45), client: client), client.marked.isEmpty,
+      !modePresenter.isVisible
+    else {
       throw SmokeFailure.expectation("英文模式没有把文字按键交还客户端")
     }
     guard
       controller.handle(
         key(" ", code: 49, modifiers: [.control, .shift]), client: client),
       modePresenter.directMode == false,
-      modePresenter.showCount == 2
+      modePresenter.showCount == focusShowCount + 2
     else {
       throw SmokeFailure.expectation("Control + Shift + Space 没有切回中文模式")
+    }
+    let shortcutShowCount = modePresenter.showCount
+    guard
+      !controller.handle(
+        flags(code: 56, modifiers: [.control], timestamp: 1.2), client: client),
+      !controller.handle(flags(code: 59, modifiers: [], timestamp: 1.3), client: client),
+      modePresenter.isVisible,
+      modePresenter.showCount == shortcutShowCount
+    else {
+      throw SmokeFailure.expectation("松开 Control + Shift 修饰键时错误隐藏了模式提示")
     }
     guard
       !controller.handle(
         flags(code: 62, modifiers: [.control], timestamp: 2), client: client),
       !controller.handle(key("c", code: 8, modifiers: .control), client: client),
       !controller.handle(flags(code: 62, modifiers: [], timestamp: 2.1), client: client),
-      modePresenter.showCount == 2
+      modePresenter.showCount == focusShowCount + 2
     else {
       throw SmokeFailure.expectation("右 Control 快捷键结束后错误切换了输入模式")
     }
@@ -421,12 +446,21 @@ struct InputMethodSmokeMain {
     let schemeMemory = InputSchemeMemory(defaults: defaults)
     let settings = SettingsWindowController(
       modeMemory: modeMemory,
-      schemeMemory: schemeMemory
+      schemeMemory: schemeMemory,
+      focusIndicatorSettings: FocusIndicatorSettings(defaults: defaults)
     )
+    let focusSettings = FocusIndicatorSettings(defaults: defaults)
+    guard !focusSettings.waitsUntilInput, focusSettings.duration == 3.0 else {
+      throw SmokeFailure.expectation("焦点状态提示默认值不是关闭持续显示并保持 3.0 秒")
+    }
     settings.selectScheme(.flypy)
     settings.selectModePolicy(.perApplication)
-    guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication else {
-      throw SmokeFailure.expectation("设置窗口没有持久化输入方案或模式记忆策略")
+    settings.selectFocusIndicatorWaitsUntilInput(true)
+    settings.selectFocusIndicatorDuration(2.4)
+    guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
+      focusSettings.waitsUntilInput, focusSettings.duration == 2.4
+    else {
+      throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
     }
 
     let shared = SettingsWindowController.shared
@@ -449,9 +483,21 @@ struct InputMethodSmokeMain {
     let second = OwnedModeIndicatorPresenter(store: store)
 
     first.activate()
-    first.show(directMode: true, anchor: .zero, clientLevel: 0)
+    first.show(
+      directMode: true,
+      anchor: .zero,
+      clientLevel: 0,
+      waitsUntilInput: false,
+      duration: 0.8
+    )
     second.activate()
-    second.show(directMode: false, anchor: .zero, clientLevel: 0)
+    second.show(
+      directMode: false,
+      anchor: .zero,
+      clientLevel: 0,
+      waitsUntilInput: true,
+      duration: 3.0
+    )
     first.hide()
     first.deactivate()
 

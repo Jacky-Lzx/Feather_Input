@@ -152,6 +152,10 @@ C ABI 在同一 librime session 内切换。FFI 只接受已打包的 `luna_piny
 macOS 设置窗口是进程级单例，只保存平台偏好；重新激活文本客户端时，控制器读取偏好并
 通过既有 ABI 同步 schema。设置窗口不持有引擎或 session，避免设置 UI 生命周期与
 InputMethodKit 的多控制器生命周期耦合。
+获得文本焦点时的中英文状态提示同样属于 macOS 平台策略：控制器在光标布局完成后读取
+插入点矩形，并使用共享模式提示浮层显示核心当前模式。提示持续时间和“保持到开始输入”
+选项只保存在平台设置中；按键、安全输入、失焦和过期控制器都会取消待显示任务，核心与
+输入引擎不感知提示窗口生命周期。
 
 `platforms/macos/client-acceptance` 是不链接 Feather 核心的普通 AppKit 客户端。它通过
 系统 Text Input Services 使用已安装的开发输入法，为普通文本、密码输入和快捷键放行
