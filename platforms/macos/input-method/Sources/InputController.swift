@@ -11,7 +11,12 @@ private enum NormalizedInput {
 @MainActor
 final class InputController: IMKInputController {
   var secureInputEnabled: () -> Bool = { IsSecureEventInputEnabled() }
-  var candidatePresenter: CandidatePresenting = CandidateWindowController()
+  private var injectedCandidatePresenter: CandidatePresenting?
+  private lazy var ownedCandidatePresenter = OwnedCandidatePresenter()
+  var candidatePresenter: CandidatePresenting {
+    get { injectedCandidatePresenter ?? ownedCandidatePresenter }
+    set { injectedCandidatePresenter = newValue }
+  }
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
   private weak var activeClient: AnyObject?
@@ -19,6 +24,9 @@ final class InputController: IMKInputController {
 
   override func activateServer(_ sender: Any!) {
     activeClient = sender as AnyObject?
+    if injectedCandidatePresenter == nil {
+      ownedCandidatePresenter.activate()
+    }
     candidatePresenter.actionHandler = { [weak self] action in
       self?.handleCandidateWindowAction(action)
     }
@@ -39,6 +47,9 @@ final class InputController: IMKInputController {
       activeClient = nil
       candidatePresenter.actionHandler = nil
       candidatePresenter.hide()
+      if injectedCandidatePresenter == nil {
+        ownedCandidatePresenter.deactivate()
+      }
       return
     }
     do {
@@ -54,6 +65,9 @@ final class InputController: IMKInputController {
     activeClient = nil
     candidatePresenter.actionHandler = nil
     candidatePresenter.hide()
+    if injectedCandidatePresenter == nil {
+      ownedCandidatePresenter.deactivate()
+    }
   }
 
   override func recognizedEvents(_ sender: Any!) -> Int {

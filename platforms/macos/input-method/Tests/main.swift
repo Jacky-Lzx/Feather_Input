@@ -42,6 +42,7 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("UTF-8 到 UTF-16 光标转换错误")
     }
+    try verifyCandidateOverlayOwnership()
     guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
       throw SmokeFailure.controllerCreation
     }
@@ -155,6 +156,75 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("非文本客户端事件不应被输入法消费")
     }
     controller.deactivateServer(client)
+    try verifySharedCandidatePanelCount()
+  }
+
+  @MainActor
+  private static func verifyCandidateOverlayOwnership() throws {
+    let presenter = SmokeCandidatePresenter()
+    let store = CandidateOverlayStore(presenter: presenter)
+    let first = OwnedCandidatePresenter(store: store)
+    let second = OwnedCandidatePresenter(store: store)
+    let firstCandidate = FeatherCandidateValue(revision: 1, value: 1, text: "你好")
+    let secondCandidate = FeatherCandidateValue(revision: 2, value: 2, text: "世界")
+    var firstSelectionCount = 0
+    var secondSelectionCount = 0
+
+    first.activate()
+    first.actionHandler = { _ in firstSelectionCount += 1 }
+    first.update(candidates: [firstCandidate], highlighted: 0, anchor: .zero)
+
+    second.activate()
+    second.actionHandler = { _ in secondSelectionCount += 1 }
+    second.update(candidates: [secondCandidate], highlighted: 0, anchor: .zero)
+
+    first.actionHandler = nil
+    first.hide()
+    first.deactivate()
+    presenter.select(text: "世界")
+    guard
+      presenter.candidates == [secondCandidate],
+      firstSelectionCount == 0,
+      secondSelectionCount == 1
+    else {
+      throw SmokeFailure.expectation("旧控制器修改了新控制器持有的共享候选窗")
+    }
+
+    second.deactivate()
+    guard presenter.candidates.isEmpty else {
+      throw SmokeFailure.expectation("当前控制器释放后共享候选窗没有隐藏")
+    }
+  }
+
+  @MainActor
+  private static func verifySharedCandidatePanelCount() throws {
+    let baseline = NSApplication.shared.windows.filter { $0 is NSPanel }.count
+    var controllers: [InputController] = []
+
+    for _ in 0..<12 {
+      guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
+        throw SmokeFailure.controllerCreation
+      }
+      controller.secureInputEnabled = { false }
+      let client = SmokeTextClient()
+      controller.activateServer(client)
+      for (character, keyCode) in zip("ni", [45, 34]) {
+        guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client)
+        else {
+          throw SmokeFailure.expectation("共享候选窗测试无法输入拼音")
+        }
+      }
+      controller.deactivateServer(client)
+      controllers.append(controller)
+    }
+
+    let finalCount = NSApplication.shared.windows.filter { $0 is NSPanel }.count
+    guard finalCount <= baseline + 1 else {
+      throw SmokeFailure.expectation(
+        "多个输入控制器创建了 \(finalCount - baseline) 个候选面板"
+      )
+    }
+    withExtendedLifetime(controllers) {}
   }
 
   private static func key(
