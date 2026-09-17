@@ -11,7 +11,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateLayoutSettings: .shared,
     candidateFontSettings: .shared,
     englishCandidateSettings: .shared,
-    generationSettings: .shared
+    generationSettings: .shared,
+    generationBackendStatusCheck: { FeatherMLXBackendStatusProbe.check() }
   )
 
   private let modeMemory: InputModeMemory
@@ -23,6 +24,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private let candidateFontSettings: CandidateFontSettings
   private let englishCandidateSettings: EnglishCandidateSettings
   private let generationSettings: GenerationSettings
+  private let generationBackendStatusCheck: @Sendable () -> MLXBackendStatus
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
   private weak var policyPopup: NSPopUpButton?
@@ -38,6 +40,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var englishCandidateMinimumValue: NSTextField?
   private weak var englishCandidateMinimumStepper: NSStepper?
   private weak var generationEnabledButton: NSButton?
+  private weak var generationBackendStatusLabel: NSTextField?
+  private weak var generationBackendStatusButton: NSButton?
+  private var generationBackendStatusVersion = UUID()
 
   init(
     modeMemory: InputModeMemory,
@@ -48,7 +53,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateLayoutSettings: CandidateLayoutSettings,
     candidateFontSettings: CandidateFontSettings,
     englishCandidateSettings: EnglishCandidateSettings,
-    generationSettings: GenerationSettings
+    generationSettings: GenerationSettings,
+    generationBackendStatusCheck: @escaping @Sendable () -> MLXBackendStatus = {
+      FeatherMLXBackendStatusProbe.check()
+    }
   ) {
     self.modeMemory = modeMemory
     self.schemeMemory = schemeMemory
@@ -59,6 +67,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     self.candidateFontSettings = candidateFontSettings
     self.englishCandidateSettings = englishCandidateSettings
     self.generationSettings = generationSettings
+    self.generationBackendStatusCheck = generationBackendStatusCheck
   }
 
   func show() {
@@ -67,6 +76,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     window.center()
     window.makeKeyAndOrderFront(nil)
     NSApplication.shared.activate(ignoringOtherApps: true)
+    refreshGenerationBackendStatus()
   }
 
   func close() {
@@ -123,11 +133,31 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func refreshGenerationBackendStatus() {
+    let version = UUID()
+    generationBackendStatusVersion = version
+    generationBackendStatusLabel?.stringValue = MLXBackendStatus.checking.displayText
+    generationBackendStatusButton?.isEnabled = false
+    let check = generationBackendStatusCheck
+    DispatchQueue.global(qos: .utility).async { [weak self] in
+      let status = check()
+      DispatchQueue.main.async {
+        guard let self, self.generationBackendStatusVersion == version else { return }
+        self.generationBackendStatusLabel?.stringValue = status.displayText
+        self.generationBackendStatusButton?.isEnabled = true
+      }
+    }
+  }
+
+  var displayedGenerationBackendStatus: String? {
+    generationBackendStatusLabel?.stringValue
+  }
+
   private func requireWindow() -> NSWindow {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 770),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 810),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -315,6 +345,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     generationHelp.font = .systemFont(ofSize: 12)
     generationHelp.textColor = .secondaryLabelColor
 
+    let generationBackendStatusLabel = NSTextField(
+      labelWithString: MLXBackendStatus.checking.displayText
+    )
+    generationBackendStatusLabel.textColor = .secondaryLabelColor
+    self.generationBackendStatusLabel = generationBackendStatusLabel
+    let generationBackendStatusButton = NSButton(
+      title: "刷新",
+      target: self,
+      action: #selector(refreshGenerationBackendStatusClicked(_:))
+    )
+    generationBackendStatusButton.bezelStyle = .rounded
+    self.generationBackendStatusButton = generationBackendStatusButton
+    let generationBackendStatusControls = NSStackView(views: [
+      generationBackendStatusLabel, generationBackendStatusButton,
+    ])
+    generationBackendStatusControls.orientation = .horizontal
+    generationBackendStatusControls.alignment = .centerY
+    generationBackendStatusControls.spacing = 8
+
     let emptyPolicyHelp = NSTextField(labelWithString: "")
     let emptyPersistentModeIndicator = NSTextField(labelWithString: "")
     let emptyFocusToggle = NSTextField(labelWithString: "")
@@ -325,6 +374,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     let emptyEnglishCandidateMinimumHelp = NSTextField(labelWithString: "")
     let emptyGenerationToggle = NSTextField(labelWithString: "")
     let emptyGenerationHelp = NSTextField(labelWithString: "")
+    let emptyGenerationBackendStatus = NSTextField(labelWithString: "")
 
     let grid = NSGridView(views: [
       [schemeLabel, schemePopup],
@@ -344,6 +394,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [emptyEnglishCandidateMinimumHelp, englishCandidateMinimumHelp],
       [emptyGenerationToggle, generationEnabledButton],
       [emptyGenerationHelp, generationHelp],
+      [emptyGenerationBackendStatus, generationBackendStatusControls],
     ])
     grid.column(at: 0).xPlacement = .trailing
     grid.column(at: 1).xPlacement = .fill
@@ -451,5 +502,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   @objc private func generationEnabledChanged(_ sender: NSButton) {
     selectGenerationEnabled(sender.state == .on)
+  }
+
+  @objc private func refreshGenerationBackendStatusClicked(_ sender: NSButton) {
+    refreshGenerationBackendStatus()
   }
 }

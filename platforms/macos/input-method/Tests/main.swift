@@ -866,7 +866,8 @@ struct InputMethodSmokeMain {
       candidateLayoutSettings: CandidateLayoutSettings(defaults: defaults),
       candidateFontSettings: CandidateFontSettings(defaults: defaults),
       englishCandidateSettings: EnglishCandidateSettings(defaults: defaults),
-      generationSettings: GenerationSettings(defaults: defaults)
+      generationSettings: GenerationSettings(defaults: defaults),
+      generationBackendStatusCheck: { .ready }
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
     let persistentModeSettings = PersistentModeIndicatorSettings(defaults: defaults)
@@ -905,6 +906,15 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
     }
+    settings.show()
+    guard
+      waitUntil({
+        settings.displayedGenerationBackendStatus == MLXBackendStatus.ready.displayText
+      })
+    else {
+      throw SmokeFailure.expectation("设置窗口没有显示 MLX 后端健康状态")
+    }
+    settings.close()
     settings.selectCandidateFontSize(CandidateFontSettings.maximumSize + 10)
     guard candidateFontSettings.size == CandidateFontSettings.maximumSize else {
       throw SmokeFailure.expectation("候选字号没有限制在允许范围内")
@@ -914,7 +924,7 @@ struct InputMethodSmokeMain {
     shared.show()
     shared.show()
     let settingsWindows = NSApplication.shared.windows.filter {
-      $0.title == "Feather Input 设置"
+      $0.title == "Feather Input 设置" && $0.isVisible
     }
     guard settingsWindows.count == 1 else {
       throw SmokeFailure.expectation("重复打开设置时创建了多个窗口")

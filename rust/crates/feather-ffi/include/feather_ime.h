@@ -120,6 +120,12 @@ enum FeatherKeyKind {
     FEATHER_KEY_TOGGLE_MODE
 };
 
+enum FeatherMlxBackendStatus {
+    FEATHER_MLX_BACKEND_READY = 1,
+    FEATHER_MLX_BACKEND_UNAVAILABLE,
+    FEATHER_MLX_BACKEND_INCOMPATIBLE
+};
+
 uint32_t feather_ime_abi_version(void);
 uint64_t feather_ime_capabilities(void);
 
@@ -187,6 +193,9 @@ FeatherStatus feather_ai_generate_start(uint64_t request_id,
                                         size_t count,
                                         FeatherAiRequest **out_request,
                                         FeatherError **out_error);
+/* Performs bounded blocking loopback I/O; call outside the input event thread. */
+FeatherStatus feather_ai_mlx_backend_status(uint32_t *out_status,
+                                            FeatherError **out_error);
 FeatherStatus feather_ai_request_poll(FeatherAiRequest *request,
                                       uint64_t current_request_id,
                                       uint64_t current_revision,

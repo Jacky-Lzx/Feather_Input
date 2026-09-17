@@ -67,6 +67,13 @@ pub enum AiError {
     InvalidResponse,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MlxBackendStatus {
+    Ready,
+    Unavailable,
+    Incompatible,
+}
+
 impl fmt::Display for AiError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -188,6 +195,13 @@ pub trait MlxTransport: Send + Sync {
     ///
     /// 请求不符合本地传输限制、连接失败或响应无效时返回错误。
     fn post_json(&self, path: &str, body: &[u8]) -> Result<TransportResponse, AiError>;
+
+    /// # Errors
+    ///
+    /// 路径无效、连接失败或响应无效时返回错误。
+    fn get_json(&self, _path: &str) -> Result<TransportResponse, AiError> {
+        Err(AiError::Unavailable)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -232,11 +246,9 @@ impl LoopbackHttpTransport {
         let body = bytes[(header_end + 4)..].to_vec();
         Ok(TransportResponse { status, body })
     }
-}
 
-impl MlxTransport for LoopbackHttpTransport {
-    fn post_json(&self, path: &str, body: &[u8]) -> Result<TransportResponse, AiError> {
-        if !path.starts_with('/') || body.is_empty() || body.len() > MAX_REQUEST_BYTES {
+    fn request(&self, method: &str, path: &str, body: &[u8]) -> Result<TransportResponse, AiError> {
+        if !path.starts_with('/') || body.len() > MAX_REQUEST_BYTES {
             return Err(AiError::InvalidRequest);
         }
         let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, self.port).into();
@@ -250,11 +262,18 @@ impl MlxTransport for LoopbackHttpTransport {
             .map_err(|_| AiError::Unavailable)?;
         write!(
             stream,
-            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
             self.port,
             body.len()
         )
-        .and_then(|()| stream.write_all(body))
+        .and_then(|()| {
+            if body.is_empty() {
+                stream.write_all(b"\r\n")
+            } else {
+                stream.write_all(b"Content-Type: application/json\r\n\r\n")?;
+                stream.write_all(body)
+            }
+        })
         .map_err(|_| AiError::Unavailable)?;
         stream.flush().map_err(|_| AiError::Unavailable)?;
 
@@ -267,6 +286,19 @@ impl MlxTransport for LoopbackHttpTransport {
             return Err(AiError::ResponseTooLarge);
         }
         Self::parse_response(&bytes)
+    }
+}
+
+impl MlxTransport for LoopbackHttpTransport {
+    fn post_json(&self, path: &str, body: &[u8]) -> Result<TransportResponse, AiError> {
+        if body.is_empty() {
+            return Err(AiError::InvalidRequest);
+        }
+        self.request("POST", path, body)
+    }
+
+    fn get_json(&self, path: &str) -> Result<TransportResponse, AiError> {
+        self.request("GET", path, &[])
     }
 }
 
@@ -326,6 +358,34 @@ struct MlxGeneratedCandidate {
 #[derive(Deserialize)]
 struct MlxErrorResponse {
     error: String,
+}
+
+#[derive(Deserialize)]
+struct MlxHealthResponse {
+    ready: bool,
+    backend: String,
+}
+
+impl<T: MlxTransport> MlxProvider<T> {
+    #[must_use]
+    pub fn backend_status(&self) -> MlxBackendStatus {
+        let Ok(response) = self.transport.get_json("/health") else {
+            return MlxBackendStatus::Unavailable;
+        };
+        if !(200..300).contains(&response.status) {
+            return MlxBackendStatus::Incompatible;
+        }
+        let Ok(health) = serde_json::from_slice::<MlxHealthResponse>(&response.body) else {
+            return MlxBackendStatus::Incompatible;
+        };
+        if health.backend != "mlx-lm" {
+            MlxBackendStatus::Incompatible
+        } else if health.ready {
+            MlxBackendStatus::Ready
+        } else {
+            MlxBackendStatus::Unavailable
+        }
+    }
 }
 
 impl<T: MlxTransport> AiProvider for MlxProvider<T> {
@@ -471,6 +531,15 @@ mod tests {
                 .pop_front()
                 .ok_or(AiError::Unavailable)
         }
+
+        fn get_json(&self, path: &str) -> Result<TransportResponse, AiError> {
+            assert_eq!(path, "/health");
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or(AiError::Unavailable)
+        }
     }
 
     fn request() -> GenerationRequest {
@@ -590,6 +659,36 @@ mod tests {
     }
 
     #[test]
+    fn backend_health_distinguishes_ready_unavailable_and_incompatible() {
+        let ready = MlxProvider::new(FakeTransport::new([response(
+            200,
+            r#"{"ready":true,"backend":"mlx-lm"}"#,
+        )]));
+        assert_eq!(ready.backend_status(), MlxBackendStatus::Ready);
+
+        let unavailable = MlxProvider::new(FakeTransport::new([]));
+        assert_eq!(unavailable.backend_status(), MlxBackendStatus::Unavailable);
+
+        for response in [
+            response(404, r"{}"),
+            response(200, r#"{"ready":true,"backend":"other"}"#),
+            response(200, r#"{"ready":true}"#),
+        ] {
+            let incompatible = MlxProvider::new(FakeTransport::new([response]));
+            assert_eq!(
+                incompatible.backend_status(),
+                MlxBackendStatus::Incompatible
+            );
+        }
+
+        let not_ready = MlxProvider::new(FakeTransport::new([response(
+            200,
+            r#"{"ready":false,"backend":"mlx-lm"}"#,
+        )]));
+        assert_eq!(not_ready.backend_status(), MlxBackendStatus::Unavailable);
+    }
+
+    #[test]
     fn generation_task_returns_only_matching_identity() {
         let mut task = GenerationTask::start(task_provider(9, 42, Duration::ZERO), request());
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -671,6 +770,37 @@ mod tests {
             provider.generate(&request()).unwrap().candidates[0].text,
             "孤鹜"
         );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn loopback_health_probe_sends_get_without_user_context() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).unwrap();
+            assert_eq!(request_line, "GET /health HTTP/1.1\r\n");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let response_body = r#"{"ready":true,"backend":"mlx-lm"}"#;
+            write!(
+                reader.get_mut(),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            )
+            .unwrap();
+        });
+        let provider = MlxProvider::new(LoopbackHttpTransport::with_port(port));
+        assert_eq!(provider.backend_status(), MlxBackendStatus::Ready);
         server.join().unwrap();
     }
 }

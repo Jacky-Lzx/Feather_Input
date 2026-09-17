@@ -1,6 +1,6 @@
 use feather_ai::{
     AiProvider, GenerationBatch, GenerationRequest, GenerationTask, GenerationTaskState,
-    InputScheme as AiInputScheme, MlxProvider,
+    InputScheme as AiInputScheme, MlxBackendStatus, MlxProvider,
 };
 use feather_core::{
     CandidateId, DispatchResult, InputCoordinator, InputEffect, InputEvent, InputMode, Key,
@@ -25,6 +25,7 @@ const CAP_SCHEMA_SELECTION: u64 = 1 << 6;
 const CAP_PAGE_SIZE: u64 = 1 << 7;
 const CAP_ENGLISH_CANDIDATE_MINIMUM: u64 = 1 << 8;
 const CAP_ASYNC_MLX_GENERATION: u64 = 1 << 9;
+const CAP_MLX_BACKEND_STATUS: u64 = 1 << 10;
 const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
 
 const AI_REQUEST_PENDING: u32 = 0;
@@ -32,6 +33,10 @@ const AI_REQUEST_READY: u32 = 1;
 const AI_REQUEST_FAILED: u32 = 2;
 const AI_REQUEST_CANCELLED: u32 = 3;
 const AI_REQUEST_STALE: u32 = 4;
+
+const MLX_BACKEND_READY: u32 = 1;
+const MLX_BACKEND_UNAVAILABLE: u32 = 2;
+const MLX_BACKEND_INCOMPATIBLE: u32 = 3;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -535,6 +540,37 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_PAGE_SIZE
         | CAP_ENGLISH_CANDIDATE_MINIMUM
         | CAP_ASYNC_MLX_GENERATION
+        | CAP_MLX_BACKEND_STATUS
+}
+
+#[no_mangle]
+/// Probes the loopback MLX backend. This call performs bounded blocking I/O and
+/// must run outside the input event thread.
+///
+/// # Safety
+///
+/// `out_status` must point to writable storage. `out_error` may be null or
+/// point to writable storage for one null error pointer.
+pub unsafe extern "C" fn feather_ai_mlx_backend_status(
+    out_status: *mut u32,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        status_call(out_error, || {
+            let Some(out_status) = out_status.as_mut() else {
+                return Err(FfiFailure::new(
+                    StatusCode::InvalidArgument,
+                    "MLX 后端状态输出指针为空",
+                ));
+            };
+            *out_status = match MlxProvider::default().backend_status() {
+                MlxBackendStatus::Ready => MLX_BACKEND_READY,
+                MlxBackendStatus::Unavailable => MLX_BACKEND_UNAVAILABLE,
+                MlxBackendStatus::Incompatible => MLX_BACKEND_INCOMPATIBLE,
+            };
+            Ok(())
+        })
+    }
 }
 
 #[no_mangle]
@@ -1238,7 +1274,19 @@ mod tests {
                 | CAP_PAGE_SIZE
                 | CAP_ENGLISH_CANDIDATE_MINIMUM
                 | CAP_ASYNC_MLX_GENERATION
+                | CAP_MLX_BACKEND_STATUS
         );
+    }
+
+    #[test]
+    fn c_abi_v2_rejects_missing_mlx_backend_status_output() {
+        let mut error = ptr::null_mut();
+        assert_eq!(
+            unsafe { feather_ai_mlx_backend_status(ptr::null_mut(), &raw mut error) },
+            StatusCode::InvalidArgument.value()
+        );
+        assert!(unsafe { error_message(error) }.contains("状态输出指针为空"));
+        unsafe { feather_error_free(error) };
     }
 
     #[test]
