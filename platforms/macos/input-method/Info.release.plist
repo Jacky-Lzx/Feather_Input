@@ -5,13 +5,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
 	<key>CFBundleExecutable</key>
-	<string>FeatherInputRustDev</string>
+	<string>FeatherInput</string>
 	<key>CFBundleIdentifier</key>
-	<string>im.feather.inputmethod.rustdev.FeatherInput</string>
+	<string>im.feather.inputmethod.FeatherInput</string>
 	<key>CFBundleName</key>
-	<string>Feather Input Rust Dev</string>
+	<string>Feather Input</string>
 	<key>CFBundleDisplayName</key>
-	<string>Feather Input Rust Dev</string>
+	<string>Feather Input</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -21,7 +21,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>FeatherUserDataDirectory</key>
-	<string>FeatherInputRustDev</string>
+	<string>FeatherInput</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
@@ -29,11 +29,11 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>InputMethodConnectionName</key>
-	<string>im.feather.inputmethod.rustdev.FeatherInput_Connection</string>
+	<string>im.feather.inputmethod.FeatherInput_Connection</string>
 	<key>InputMethodServerControllerClass</key>
 	<string>FeatherRustInputController</string>
 	<key>TISInputSourceID</key>
-	<string>im.feather.inputmethod.rustdev.FeatherInput</string>
+	<string>im.feather.inputmethod.FeatherInput</string>
 	<key>TISIntendedLanguage</key>
 	<string>zh-Hans</string>
 	<key>tsInputMethodCharacterRepertoireKey</key>
@@ -45,10 +45,10 @@
 	<dict>
 		<key>tsInputModeListKey</key>
 		<dict>
-			<key>im.feather.inputmethod.rustdev.FeatherInput.Hans</key>
+			<key>im.feather.inputmethod.FeatherInput.Hans</key>
 			<dict>
 				<key>TISInputSourceID</key>
-				<string>im.feather.inputmethod.rustdev.FeatherInput.Hans</string>
+				<string>im.feather.inputmethod.FeatherInput.Hans</string>
 				<key>TISIntendedLanguage</key>
 				<string>zh-Hans</string>
 				<key>tsInputModeCharacterRepertoireKey</key>
@@ -67,13 +67,13 @@
 				<key>TISIconLabels</key>
 				<dict>
 					<key>Primary</key>
-					<string>Feather Rust Dev</string>
+					<string>Feather Input</string>
 				</dict>
 			</dict>
 		</dict>
 		<key>tsVisibleInputModeOrderedArrayKey</key>
 		<array>
-			<string>im.feather.inputmethod.rustdev.FeatherInput.Hans</string>
+			<string>im.feather.inputmethod.FeatherInput.Hans</string>
 		</array>
 	</dict>
 	<key>TICapsLockLanguageSwitchCapable</key>

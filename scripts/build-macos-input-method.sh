@@ -4,9 +4,30 @@ set -eu
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 source_root="$repo_root/platforms/macos/input-method"
 shared_root="$repo_root/platforms/macos/shared"
-build_root=${FEATHER_MACOS_BUILD_ROOT:-"$repo_root/.build/macos-input-method"}
-app="$build_root/FeatherInputRustDev.app"
-executable="$app/Contents/MacOS/FeatherInputRustDev"
+profile=${FEATHER_MACOS_PROFILE:-development}
+case "$profile" in
+    development)
+        info_plist="$source_root/Info.plist"
+        app_name=FeatherInputRustDev.app
+        executable_name=FeatherInputRustDev
+        product_label="InputMethodKit 开发输入法"
+        default_build_root="$repo_root/.build/macos-input-method"
+        ;;
+    release)
+        info_plist="$source_root/Info.release.plist"
+        app_name=FeatherInput.app
+        executable_name=FeatherInput
+        product_label="InputMethodKit 正式输入法"
+        default_build_root="$repo_root/.build/macos-input-method-release"
+        ;;
+    *)
+        echo "不支持的 macOS 构建配置：$profile" >&2
+        exit 1
+        ;;
+esac
+build_root=${FEATHER_MACOS_BUILD_ROOT:-$default_build_root}
+app="$build_root/$app_name"
+executable="$app/Contents/MacOS/$executable_name"
 frameworks="$app/Contents/Frameworks"
 resources="$app/Contents/Resources"
 macos_arch=${FEATHER_MACOS_ARCH:-$(uname -m)}
@@ -52,11 +73,11 @@ CARGO_TARGET_DIR=$rust_target_root \
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$frameworks" "$resources"
 mkdir -p "$build_root/module-cache"
-cp "$source_root/Info.plist" "$app/Contents/Info.plist"
+cp "$info_plist" "$app/Contents/Info.plist"
 cp "$rust_library" "$frameworks/libfeather_ffi.dylib"
 install_name_tool -id @rpath/libfeather_ffi.dylib "$frameworks/libfeather_ffi.dylib"
 
-echo "正在编译 InputMethodKit 开发输入法……"
+echo "正在编译 ${product_label}……"
 swiftc \
     -parse-as-library \
     -target "$macos_arch-apple-macosx$deployment_target" \

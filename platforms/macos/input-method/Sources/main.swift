@@ -11,13 +11,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         as? String,
       let identifier = Bundle.main.bundleIdentifier
     else {
-      NSLog("Feather Input Rust Dev 缺少 InputMethodKit bundle 元数据")
+      NSLog("Feather Input 缺少 InputMethodKit bundle 元数据")
       NSApplication.shared.terminate(nil)
       return
     }
     server = IMKServer(name: connection, bundleIdentifier: identifier)
     if server == nil {
-      NSLog("Feather Input Rust Dev 无法创建 IMKServer")
+      NSLog("Feather Input 无法创建 IMKServer")
       NSApplication.shared.terminate(nil)
     }
   }

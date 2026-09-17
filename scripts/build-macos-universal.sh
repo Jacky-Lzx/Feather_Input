@@ -9,15 +9,23 @@ case "$product" in
     input-method)
         builder="$repo_root/scripts/build-macos-input-method.sh"
         app_name=FeatherInputRustDev.app
+        macos_profile=development
         final_root=${FEATHER_MACOS_UNIVERSAL_BUILD_ROOT:-"$repo_root/.build/macos-input-method"}
+        ;;
+    input-method-release)
+        builder="$repo_root/scripts/build-macos-input-method.sh"
+        app_name=FeatherInput.app
+        macos_profile=release
+        final_root=${FEATHER_MACOS_UNIVERSAL_BUILD_ROOT:-"$repo_root/.build/macos-release"}
         ;;
     dev-harness)
         builder="$repo_root/scripts/build-macos-dev-harness.sh"
         app_name=FeatherInputDevHarness.app
+        macos_profile=development
         final_root=${FEATHER_MACOS_UNIVERSAL_BUILD_ROOT:-"$repo_root/.build/macos-dev-harness"}
         ;;
     *)
-        echo "用法：$0 [input-method|dev-harness]" >&2
+        echo "用法：$0 [input-method|input-method-release|dev-harness]" >&2
         exit 1
         ;;
 esac
@@ -55,6 +63,7 @@ build_slice() {
     echo "正在构建 $product 的 $arch 切片……"
     FEATHER_MACOS_ARCH=$arch \
         FEATHER_MACOS_BUILD_ROOT="$slice_root/$arch" \
+        FEATHER_MACOS_PROFILE=$macos_profile \
         FEATHER_DYLIB_SEARCH_DIRS="$prefix/lib" \
         RIME_INCLUDE_DIR="$prefix/include" \
         RIME_LIB_DIR="$prefix/lib" \

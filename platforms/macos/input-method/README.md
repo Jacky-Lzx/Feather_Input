@@ -47,6 +47,33 @@ scripts/build-macos-universal.sh input-method
 完整的单架构 bundle，再合并其中的所有 Mach-O；缺少 target、依赖架构错误或两个
 bundle 的文件集合不一致都会中止构建。
 
+## 发布构建
+
+正式包使用 `FeatherInput.app`、稳定 Bundle ID
+`im.feather.inputmethod.FeatherInput` 和独立的
+`~/Library/Application Support/FeatherInput/Rime` 用户数据目录。生成
+本地 ad-hoc 签名的 Universal 验证归档：
+
+```sh
+FEATHER_RELEASE_VERSION=0.1.0 \
+FEATHER_RELEASE_BUILD=1 \
+scripts/package-macos-release.sh
+```
+
+该命令生成名称带 `-local` 的 ZIP，不能作为已公证版本公开分发。正式签名与公证需要
+先用 `xcrun notarytool store-credentials` 保存钥匙串配置，然后运行：
+
+```sh
+FEATHER_CODESIGN_IDENTITY='Developer ID Application: Example (TEAMID)' \
+FEATHER_NOTARY_PROFILE='feather-notary' \
+scripts/package-macos-release.sh --notarize
+```
+
+脚本会按从内到外的顺序使用 hardened runtime 和时间戳重新签名，验证动态库闭包，
+提交公证、staple ticket、执行 Gatekeeper 检查，并在 stapling 后重新生成最终 ZIP。
+每个归档旁边都会生成 `.sha256` 校验文件。发布脚本只生成归档，不会安装或覆盖当前
+正式输入法。
+
 不安装 bundle 的进程内 IMK 客户端测试：
 
 ```sh

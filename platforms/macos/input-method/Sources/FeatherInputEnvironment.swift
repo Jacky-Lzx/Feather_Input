@@ -16,6 +16,14 @@ enum FeatherInputEnvironment {
 
   static func userData() throws -> URL {
     if let userDataOverride { return userDataOverride }
+    guard
+      let directory = Bundle.main.object(forInfoDictionaryKey: "FeatherUserDataDirectory")
+        as? String,
+      !directory.isEmpty,
+      !directory.contains("/")
+    else {
+      throw FeatherBridgeError.sessionCreationFailed
+    }
     let applicationSupport = try FileManager.default.url(
       for: .applicationSupportDirectory,
       in: .userDomainMask,
@@ -24,7 +32,7 @@ enum FeatherInputEnvironment {
     )
     return
       applicationSupport
-      .appendingPathComponent("FeatherInputRustDev", isDirectory: true)
+      .appendingPathComponent(directory, isDirectory: true)
       .appendingPathComponent("Rime", isDirectory: true)
   }
 }

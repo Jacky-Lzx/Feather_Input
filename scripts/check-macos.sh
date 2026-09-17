@@ -80,6 +80,7 @@ sh -n \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
     scripts/merge-macos-app-slices.sh \
+    scripts/package-macos-release.sh \
     scripts/run-macos-client-acceptance.sh \
     scripts/status-macos-input-method.sh \
     scripts/uninstall-macos-input-method.sh \
@@ -99,6 +100,7 @@ shellcheck \
     scripts/enable-macos-input-method.sh \
     scripts/install-macos-input-method.sh \
     scripts/merge-macos-app-slices.sh \
+    scripts/package-macos-release.sh \
     scripts/run-macos-client-acceptance.sh \
     scripts/status-macos-input-method.sh \
     scripts/uninstall-macos-input-method.sh \
@@ -112,7 +114,8 @@ echo "正在检查应用元数据……"
 plutil -lint \
     platforms/macos/client-acceptance/Info.plist \
     platforms/macos/dev-harness/Info.plist \
-    platforms/macos/input-method/Info.plist
+    platforms/macos/input-method/Info.plist \
+    platforms/macos/input-method/Info.release.plist
 
 development_identifier=$(
     /usr/libexec/PlistBuddy \
@@ -131,5 +134,25 @@ development_default_state=$(
 )
 if [ "$development_default_state" != true ]; then
     echo "InputMethodKit 开发输入模式必须在显式安装后可用。" >&2
+    exit 1
+fi
+
+release_identifier=$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :CFBundleIdentifier' \
+        platforms/macos/input-method/Info.release.plist
+)
+if [ "$release_identifier" != "im.feather.inputmethod.FeatherInput" ]; then
+    echo "InputMethodKit 正式包必须使用稳定的 Bundle ID。" >&2
+    exit 1
+fi
+
+release_data_directory=$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :FeatherUserDataDirectory' \
+        platforms/macos/input-method/Info.release.plist
+)
+if [ "$release_data_directory" != "FeatherInput" ]; then
+    echo "InputMethodKit 正式包必须使用独立的正式用户数据目录。" >&2
     exit 1
 fi
