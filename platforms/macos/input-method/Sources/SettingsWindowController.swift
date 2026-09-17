@@ -5,6 +5,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   static let shared = SettingsWindowController(
     modeMemory: .shared,
     schemeMemory: .shared,
+    persistentModeIndicatorSettings: .shared,
     focusIndicatorSettings: .shared,
     candidatePageSettings: .shared,
     candidateLayoutSettings: .shared,
@@ -14,6 +15,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   private let modeMemory: InputModeMemory
   private let schemeMemory: InputSchemeMemory
+  private let persistentModeIndicatorSettings: PersistentModeIndicatorSettings
   private let focusIndicatorSettings: FocusIndicatorSettings
   private let candidatePageSettings: CandidatePageSettings
   private let candidateLayoutSettings: CandidateLayoutSettings
@@ -22,6 +24,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
   private weak var policyPopup: NSPopUpButton?
+  private weak var persistentModeIndicatorButton: NSButton?
   private weak var focusUntilInputButton: NSButton?
   private weak var focusDurationValue: NSTextField?
   private weak var focusDurationStepper: NSStepper?
@@ -36,6 +39,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   init(
     modeMemory: InputModeMemory,
     schemeMemory: InputSchemeMemory,
+    persistentModeIndicatorSettings: PersistentModeIndicatorSettings,
     focusIndicatorSettings: FocusIndicatorSettings,
     candidatePageSettings: CandidatePageSettings,
     candidateLayoutSettings: CandidateLayoutSettings,
@@ -44,6 +48,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   ) {
     self.modeMemory = modeMemory
     self.schemeMemory = schemeMemory
+    self.persistentModeIndicatorSettings = persistentModeIndicatorSettings
     self.focusIndicatorSettings = focusIndicatorSettings
     self.candidatePageSettings = candidatePageSettings
     self.candidateLayoutSettings = candidateLayoutSettings
@@ -70,6 +75,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   func selectModePolicy(_ policy: InputModeMemoryPolicy) {
     modeMemory.updatePolicy(policy)
+    refreshControls()
+  }
+
+  func selectPersistentModeIndicatorEnabled(_ isEnabled: Bool) {
+    persistentModeIndicatorSettings.updateEnabled(isEnabled)
     refreshControls()
   }
 
@@ -107,7 +117,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 660),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 700),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -150,6 +160,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     )
     policyHelp.font = .systemFont(ofSize: 12)
     policyHelp.textColor = .secondaryLabelColor
+
+    let persistentModeIndicatorButton = NSButton(
+      checkboxWithTitle: "屏幕左下角常驻显示中／英",
+      target: self,
+      action: #selector(persistentModeIndicatorChanged(_:))
+    )
+    self.persistentModeIndicatorButton = persistentModeIndicatorButton
 
     let focusUntilInputButton = NSButton(
       checkboxWithTitle: "焦点状态提示持续到开始输入",
@@ -275,6 +292,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     englishCandidateMinimumHelp.textColor = .secondaryLabelColor
 
     let emptyPolicyHelp = NSTextField(labelWithString: "")
+    let emptyPersistentModeIndicator = NSTextField(labelWithString: "")
     let emptyFocusToggle = NSTextField(labelWithString: "")
     let emptyFocusHelp = NSTextField(labelWithString: "")
     let emptyDurationHelp = NSTextField(labelWithString: "")
@@ -286,6 +304,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [schemeLabel, schemePopup],
       [policyLabel, policyPopup],
       [emptyPolicyHelp, policyHelp],
+      [emptyPersistentModeIndicator, persistentModeIndicatorButton],
       [emptyFocusToggle, focusUntilInputButton],
       [emptyFocusHelp, focusHelp],
       [NSTextField(labelWithString: "焦点提示显示"), focusDurationControls],
@@ -336,6 +355,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     if let index = InputModeMemoryPolicy.allCases.firstIndex(of: modeMemory.policy) {
       policyPopup?.selectItem(at: index)
     }
+    persistentModeIndicatorButton?.state =
+      persistentModeIndicatorSettings.isEnabled ? .on : .off
     let waitsUntilInput = focusIndicatorSettings.waitsUntilInput
     focusUntilInputButton?.state = waitsUntilInput ? .on : .off
     focusDurationValue?.stringValue = String(format: "%.1f 秒", focusIndicatorSettings.duration)
@@ -365,6 +386,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       let policy = InputModeMemoryPolicy(rawValue: rawValue)
     else { return }
     selectModePolicy(policy)
+  }
+
+  @objc private func persistentModeIndicatorChanged(_ sender: NSButton) {
+    selectPersistentModeIndicatorEnabled(sender.state == .on)
   }
 
   @objc private func focusUntilInputChanged(_ sender: NSButton) {

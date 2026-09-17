@@ -62,6 +62,8 @@ swiftc \
     "$source_root"/Sources/InputController.swift \
     "$source_root"/Sources/InputOverlays.swift \
     "$source_root"/Sources/ModeIndicatorController.swift \
+    "$source_root"/Sources/PersistentModeIndicatorController.swift \
+    "$source_root"/Sources/PersistentModeIndicatorSettings.swift \
     "$source_root"/Sources/RightControlTap.swift \
     "$source_root"/Sources/SettingsWindowController.swift \
     "$source_root"/Sources/TextCoordinates.swift \

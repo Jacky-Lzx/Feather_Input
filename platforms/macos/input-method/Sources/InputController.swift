@@ -32,6 +32,12 @@ final class InputController: IMKInputController {
     get { injectedModePresenter ?? ownedModePresenter }
     set { injectedModePresenter = newValue }
   }
+  private var injectedPersistentModePresenter: PersistentModeIndicatorPresenting?
+  private lazy var ownedPersistentModePresenter = OwnedPersistentModeIndicatorPresenter()
+  var persistentModePresenter: PersistentModeIndicatorPresenting {
+    get { injectedPersistentModePresenter ?? ownedPersistentModePresenter }
+    set { injectedPersistentModePresenter = newValue }
+  }
   var modeMemory = InputModeMemory.shared
   var schemeMemory = InputSchemeMemory.shared
   var focusIndicatorSettings = FocusIndicatorSettings.shared
@@ -75,6 +81,9 @@ final class InputController: IMKInputController {
     if injectedModePresenter == nil {
       ownedModePresenter.activate()
     }
+    if injectedPersistentModePresenter == nil {
+      ownedPersistentModePresenter.activate()
+    }
     candidatePresenter.actionHandler = { [weak self] action in
       self?.handleCandidateWindowAction(action)
     }
@@ -93,11 +102,17 @@ final class InputController: IMKInputController {
         direct: modeMemory.activate(application: activeApplication)
       )
       active = true
+      if secureInputEnabled() {
+        persistentModePresenter.hide()
+      } else {
+        persistentModePresenter.show(directMode: currentResponse?.directMode ?? false)
+      }
       if let client = sender as? IMKTextInput {
         scheduleFocusIndicator(for: client)
       }
     } catch {
       active = false
+      persistentModePresenter.hide()
       report(error, operation: "activate")
     }
   }
@@ -114,11 +129,15 @@ final class InputController: IMKInputController {
       candidatePresenter.actionHandler = nil
       candidatePresenter.hide()
       modePresenter.hide()
+      persistentModePresenter.hide()
       if injectedCandidatePresenter == nil {
         ownedCandidatePresenter.deactivate()
       }
       if injectedModePresenter == nil {
         ownedModePresenter.deactivate()
+      }
+      if injectedPersistentModePresenter == nil {
+        ownedPersistentModePresenter.deactivate()
       }
       return
     }
@@ -139,11 +158,15 @@ final class InputController: IMKInputController {
     candidatePresenter.actionHandler = nil
     candidatePresenter.hide()
     modePresenter.hide()
+    persistentModePresenter.hide()
     if injectedCandidatePresenter == nil {
       ownedCandidatePresenter.deactivate()
     }
     if injectedModePresenter == nil {
       ownedModePresenter.deactivate()
+    }
+    if injectedPersistentModePresenter == nil {
+      ownedPersistentModePresenter.deactivate()
     }
   }
 
@@ -160,6 +183,7 @@ final class InputController: IMKInputController {
     guard !secureInputEnabled() else {
       cancelFocusIndicator()
       modePresenter.hide()
+      persistentModePresenter.hide()
       cancelEngineComposition()
       return false
     }
@@ -167,9 +191,11 @@ final class InputController: IMKInputController {
     guard textInputAvailable(client) else {
       cancelFocusIndicator()
       modePresenter.hide()
+      persistentModePresenter.hide()
       cancelEngineComposition()
       return false
     }
+    persistentModePresenter.show(directMode: currentResponse?.directMode ?? false)
     cancelFocusIndicator()
     if event.type == .keyDown {
       modePresenter.hide()
@@ -647,6 +673,7 @@ final class InputController: IMKInputController {
       guard response.handled else { return false }
       apply(response, to: client)
       modeMemory.update(directMode: response.directMode, application: activeApplication)
+      persistentModePresenter.show(directMode: response.directMode)
       modePresenter.show(
         directMode: response.directMode,
         anchor: candidateAnchor(for: client),

@@ -49,12 +49,15 @@ struct InputMethodSmokeMain {
     try verifyCandidateLayouts()
     try verifyCandidateOverlayOwnership()
     try verifyModeIndicatorOwnership()
+    try verifyPersistentModeIndicatorOwnership()
+    try verifyPersistentModeIndicatorPresentation()
     guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
       throw SmokeFailure.controllerCreation
     }
     controller.secureInputEnabled = { false }
     let presenter = SmokeCandidatePresenter()
     let modePresenter = SmokeModePresenter()
+    let persistentModePresenter = SmokePersistentModePresenter()
     let modeDefaultsName = "FeatherInputMethodSmoke-\(UUID().uuidString)"
     guard let modeDefaults = UserDefaults(suiteName: modeDefaultsName) else {
       throw SmokeFailure.expectation("无法创建隔离的输入模式设置")
@@ -62,6 +65,7 @@ struct InputMethodSmokeMain {
     defer { modeDefaults.removePersistentDomain(forName: modeDefaultsName) }
     controller.candidatePresenter = presenter
     controller.modePresenter = modePresenter
+    controller.persistentModePresenter = persistentModePresenter
     controller.modeMemory = InputModeMemory(defaults: modeDefaults)
     controller.schemeMemory = InputSchemeMemory(defaults: modeDefaults)
     controller.focusIndicatorSettings = FocusIndicatorSettings(defaults: modeDefaults)
@@ -73,7 +77,8 @@ struct InputMethodSmokeMain {
     controller.focusIndicatorRetryDelaysMilliseconds = []
     let client = SmokeTextClient()
     controller.activateServer(client)
-    guard controller.showFocusIndicator(for: client), modePresenter.isVisible,
+    guard persistentModePresenter.isVisible, persistentModePresenter.directMode == false,
+      controller.showFocusIndicator(for: client), modePresenter.isVisible,
       modePresenter.directMode == false,
       modePresenter.anchor == client.caretRectangle,
       !modePresenter.waitsUntilInput,
@@ -186,6 +191,7 @@ struct InputMethodSmokeMain {
       modePresenter.anchor == client.caretRectangle,
       modePresenter.isVisible,
       modePresenter.showCount == focusShowCount + 1,
+      persistentModePresenter.directMode == true,
       !modePresenter.waitsUntilInput,
       modePresenter.duration == 0.8
     else {
@@ -200,6 +206,7 @@ struct InputMethodSmokeMain {
       controller.handle(
         key(" ", code: 49, modifiers: [.control, .shift]), client: client),
       modePresenter.directMode == false,
+      persistentModePresenter.directMode == false,
       modePresenter.showCount == focusShowCount + 2
     else {
       throw SmokeFailure.expectation("Control + Shift + Space 没有切回中文模式")
@@ -211,9 +218,11 @@ struct InputMethodSmokeMain {
       client.marked.isEmpty,
       presenter.candidates.isEmpty,
       modePresenter.directMode == true,
+      persistentModePresenter.directMode == true,
       !controller.handle(key("n", code: 45), client: client),
       controller.handle(flags(code: 57, modifiers: [], timestamp: 1.16), client: client),
-      modePresenter.directMode == false
+      modePresenter.directMode == false,
+      persistentModePresenter.directMode == false
     else {
       throw SmokeFailure.expectation("Caps Lock 没有切换模式并取消现有组合")
     }
@@ -519,15 +528,22 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("Command 快捷键不应被输入法消费")
     }
     controller.secureInputEnabled = { true }
-    guard !controller.handle(key("n", code: 45), client: client) else {
+    guard !controller.handle(key("n", code: 45), client: client),
+      !persistentModePresenter.isVisible
+    else {
       throw SmokeFailure.expectation("安全输入事件不应被输入法消费")
     }
     controller.secureInputEnabled = { false }
     client.selectionAvailable = false
-    guard !controller.handle(key("n", code: 45), client: client) else {
+    guard !controller.handle(key("n", code: 45), client: client),
+      !persistentModePresenter.isVisible
+    else {
       throw SmokeFailure.expectation("非文本客户端事件不应被输入法消费")
     }
     controller.deactivateServer(client)
+    guard !persistentModePresenter.isVisible else {
+      throw SmokeFailure.expectation("输入法停用后常驻中英提示仍然显示")
+    }
     try verifySharedCandidatePanelCount()
   }
 
@@ -627,6 +643,7 @@ struct InputMethodSmokeMain {
     let settings = SettingsWindowController(
       modeMemory: modeMemory,
       schemeMemory: schemeMemory,
+      persistentModeIndicatorSettings: PersistentModeIndicatorSettings(defaults: defaults),
       focusIndicatorSettings: FocusIndicatorSettings(defaults: defaults),
       candidatePageSettings: CandidatePageSettings(defaults: defaults),
       candidateLayoutSettings: CandidateLayoutSettings(defaults: defaults),
@@ -634,11 +651,13 @@ struct InputMethodSmokeMain {
       englishCandidateSettings: EnglishCandidateSettings(defaults: defaults)
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
+    let persistentModeSettings = PersistentModeIndicatorSettings(defaults: defaults)
     let candidatePageSettings = CandidatePageSettings(defaults: defaults)
     let candidateLayoutSettings = CandidateLayoutSettings(defaults: defaults)
     let candidateFontSettings = CandidateFontSettings(defaults: defaults)
     let englishCandidateSettings = EnglishCandidateSettings(defaults: defaults)
-    guard !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
+    guard persistentModeSettings.isEnabled,
+      !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
       candidatePageSettings.count == CandidatePageSettings.defaultCount,
       candidateLayoutSettings.layout == .vertical,
       candidateFontSettings.size == CandidateFontSettings.defaultSize,
@@ -648,6 +667,7 @@ struct InputMethodSmokeMain {
     }
     settings.selectScheme(.flypy)
     settings.selectModePolicy(.perApplication)
+    settings.selectPersistentModeIndicatorEnabled(false)
     settings.selectFocusIndicatorWaitsUntilInput(true)
     settings.selectFocusIndicatorDuration(2.4)
     settings.selectCandidateCount(8)
@@ -655,6 +675,7 @@ struct InputMethodSmokeMain {
     settings.selectCandidateFontSize(21)
     settings.selectEnglishCandidateMinimum(6)
     guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
+      !persistentModeSettings.isEnabled,
       focusSettings.waitsUntilInput, focusSettings.duration == 2.4,
       candidatePageSettings.count == 8, candidateLayoutSettings.layout == .horizontal,
       candidateFontSettings.size == 21,
@@ -782,6 +803,58 @@ struct InputMethodSmokeMain {
   }
 
   @MainActor
+  private static func verifyPersistentModeIndicatorOwnership() throws {
+    let presenter = SmokePersistentModePresenter()
+    let store = PersistentModeIndicatorOverlayStore(presenter: presenter)
+    let first = OwnedPersistentModeIndicatorPresenter(store: store)
+    let second = OwnedPersistentModeIndicatorPresenter(store: store)
+
+    first.activate()
+    first.show(directMode: true)
+    second.activate()
+    second.show(directMode: false)
+    first.show(directMode: true)
+    first.hide()
+    first.deactivate()
+
+    guard presenter.isVisible, presenter.directMode == false else {
+      throw SmokeFailure.expectation("旧控制器修改了新控制器持有的常驻模式提示")
+    }
+    second.deactivate()
+    guard !presenter.isVisible else {
+      throw SmokeFailure.expectation("当前控制器释放后常驻模式提示没有隐藏")
+    }
+  }
+
+  @MainActor
+  private static func verifyPersistentModeIndicatorPresentation() throws {
+    let suiteName = "FeatherPersistentModeIndicator-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+      throw SmokeFailure.expectation("无法创建常驻模式提示测试设置")
+    }
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let settings = PersistentModeIndicatorSettings(defaults: defaults)
+    let presenter = PersistentModeIndicatorController(
+      settings: settings,
+      inputSourceIsSelected: { true }
+    )
+
+    presenter.show(directMode: false)
+    guard presenter.isVisible else {
+      throw SmokeFailure.expectation("默认设置没有显示常驻模式提示")
+    }
+    settings.updateEnabled(false)
+    guard !presenter.isVisible else {
+      throw SmokeFailure.expectation("关闭设置后常驻模式提示没有立即隐藏")
+    }
+    settings.updateEnabled(true)
+    guard presenter.isVisible else {
+      throw SmokeFailure.expectation("重新开启设置后常驻模式提示没有恢复")
+    }
+    presenter.hide()
+  }
+
+  @MainActor
   private static func verifySharedCandidatePanelCount() throws {
     let baseline = NSApplication.shared.windows.filter { $0 is NSPanel }.count
     var controllers: [InputController] = []
@@ -804,7 +877,7 @@ struct InputMethodSmokeMain {
     }
 
     let finalCount = NSApplication.shared.windows.filter { $0 is NSPanel }.count
-    guard finalCount <= baseline + 2 else {
+    guard finalCount <= baseline + 3 else {
       throw SmokeFailure.expectation(
         "多个输入控制器创建了 \(finalCount - baseline) 个输入浮层"
       )
