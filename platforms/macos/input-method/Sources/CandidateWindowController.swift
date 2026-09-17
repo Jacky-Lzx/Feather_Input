@@ -2,6 +2,7 @@ import AppKit
 
 @MainActor
 private final class CandidateRowButton: NSButton {
+  private let metrics: CandidateWindowMetrics
   private let indexLabel = NSTextField(labelWithString: "")
   private let candidateLabel = NSTextField(labelWithString: "")
   private var trackingArea: NSTrackingArea?
@@ -14,22 +15,31 @@ private final class CandidateRowButton: NSButton {
   }
 
   override init(frame frameRect: NSRect) {
+    metrics = CandidateWindowStyle.metrics(fontSize: CandidateFontSettings.defaultSize)
     super.init(frame: frameRect)
     configureView()
   }
 
   required init?(coder: NSCoder) {
+    metrics = CandidateWindowStyle.metrics(fontSize: CandidateFontSettings.defaultSize)
     super.init(coder: coder)
+    configureView()
+  }
+
+  private init(metrics: CandidateWindowMetrics) {
+    self.metrics = metrics
+    super.init(frame: .zero)
     configureView()
   }
 
   convenience init(
     index: String,
     text: String,
+    metrics: CandidateWindowMetrics,
     target: AnyObject?,
     action: Selector?
   ) {
-    self.init(frame: .zero)
+    self.init(metrics: metrics)
     self.target = target
     self.action = action
     indexLabel.stringValue = index
@@ -42,10 +52,10 @@ private final class CandidateRowButton: NSButton {
   override var intrinsicContentSize: NSSize {
     NSSize(
       width: CandidateWindowStyle.candidateHorizontalPadding * 2
-        + CandidateWindowStyle.indexWidth
+        + metrics.indexWidth
         + CandidateWindowStyle.candidateLabelSpacing
         + candidateLabel.intrinsicContentSize.width,
-      height: CandidateWindowStyle.candidateHeight
+      height: metrics.candidateHeight
     )
   }
 
@@ -109,10 +119,10 @@ private final class CandidateRowButton: NSButton {
     wantsLayer = true
 
     indexLabel.alignment = .left
-    indexLabel.font = CandidateWindowStyle.indexFont
+    indexLabel.font = metrics.indexFont
     indexLabel.lineBreakMode = .byClipping
     indexLabel.maximumNumberOfLines = 1
-    candidateLabel.font = CandidateWindowStyle.candidateFont
+    candidateLabel.font = metrics.candidateFont
     candidateLabel.lineBreakMode = .byTruncatingTail
     candidateLabel.maximumNumberOfLines = 1
     candidateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -122,13 +132,13 @@ private final class CandidateRowButton: NSButton {
     indexLabel.translatesAutoresizingMaskIntoConstraints = false
     candidateLabel.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      heightAnchor.constraint(greaterThanOrEqualToConstant: CandidateWindowStyle.candidateHeight),
+      heightAnchor.constraint(greaterThanOrEqualToConstant: metrics.candidateHeight),
       indexLabel.leadingAnchor.constraint(
         equalTo: leadingAnchor,
         constant: CandidateWindowStyle.candidateHorizontalPadding
       ),
       indexLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-      indexLabel.widthAnchor.constraint(equalToConstant: CandidateWindowStyle.indexWidth),
+      indexLabel.widthAnchor.constraint(equalToConstant: metrics.indexWidth),
       candidateLabel.leadingAnchor.constraint(
         equalTo: indexLabel.trailingAnchor,
         constant: CandidateWindowStyle.candidateLabelSpacing
@@ -188,20 +198,28 @@ protocol CandidatePresenting: AnyObject {
 final class CandidateWindowController: NSObject, CandidatePresenting {
   var actionHandler: ((CandidateWindowAction) -> Void)?
   private let layoutSettings: CandidateLayoutSettings
+  private let fontSettings: CandidateFontSettings
   private(set) var resolvedCompactLayout = CandidateLayout.vertical
   private(set) var numberedExpandedIndices: [Int] = []
+  private(set) var appliedFontSize = CandidateFontSettings.defaultSize
   var compactLayout: CandidateLayout { resolvedCompactLayout }
+  var currentPanelSize: NSSize { panel.frame.size }
 
   private var candidates: [FeatherCandidateValue] = []
   private lazy var panel = makePanel()
   private lazy var candidateStack = makeCandidateStack()
   private lazy var expandedHeader = makeExpandedHeader()
+  private var expandedHeaderHeightConstraint: NSLayoutConstraint?
   private lazy var expandedGrid = makeExpandedGrid()
   private lazy var contentStack = makeContentStack()
   private lazy var backgroundView = makeBackgroundView()
 
-  init(layoutSettings: CandidateLayoutSettings = .shared) {
+  init(
+    layoutSettings: CandidateLayoutSettings = .shared,
+    fontSettings: CandidateFontSettings = .shared
+  ) {
     self.layoutSettings = layoutSettings
+    self.fontSettings = fontSettings
     super.init()
   }
 
@@ -216,6 +234,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     }
 
     self.candidates = candidates
+    appliedFontSize = fontSettings.size
     candidateStack.isHidden = false
     expandedHeader.isHidden = true
     expandedGrid.isHidden = true
@@ -238,11 +257,14 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     }
 
     self.candidates = candidates
+    appliedFontSize = fontSettings.size
     candidateStack.isHidden = true
     expandedHeader.isHidden = false
     expandedGrid.isHidden = false
     removeArrangedSubviews(from: candidateStack)
     expandedHeader.stringValue = "全部候选 · \(candidates.count)\(hasMore ? "+" : "")"
+    expandedHeader.font = currentMetrics.expandedHeaderFont
+    expandedHeaderHeightConstraint?.constant = currentMetrics.expandedHeaderHeight
     let gridWidth = rebuildExpandedGrid(
       highlighted: highlighted,
       pageSize: pageSize,
@@ -344,12 +366,14 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
   private func rebuildCandidateRows(highlighted: Int?, anchor: NSRect) -> CGFloat {
     removeArrangedSubviews(from: candidateStack)
 
+    let metrics = currentMetrics
     var buttons: [CandidateRowButton] = []
     var widths: [CGFloat] = []
     for (index, candidate) in candidates.enumerated() {
       let button = CandidateRowButton(
         index: String(index + 1),
         text: candidate.text,
+        metrics: metrics,
         target: self,
         action: #selector(selectCandidate(_:))
       )
@@ -387,16 +411,20 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     if resolvedCompactLayout == .horizontal {
       return horizontalContentWidth
     }
-    return widths.max() ?? CandidateWindowStyle.fallbackColumnWidth
+    return widths.max() ?? metrics.fallbackColumnWidth
   }
 
   private func makeExpandedHeader() -> NSTextField {
+    let metrics = currentMetrics
     let label = NSTextField(labelWithString: "")
-    label.font = CandidateWindowStyle.expandedHeaderFont
+    label.font = metrics.expandedHeaderFont
     label.textColor = .secondaryLabelColor
     label.maximumNumberOfLines = 1
-    label.heightAnchor.constraint(equalToConstant: CandidateWindowStyle.expandedHeaderHeight)
-      .isActive = true
+    let heightConstraint = label.heightAnchor.constraint(
+      greaterThanOrEqualToConstant: metrics.expandedHeaderHeight
+    )
+    heightConstraint.isActive = true
+    expandedHeaderHeightConstraint = heightConstraint
     label.isHidden = true
     return label
   }
@@ -417,6 +445,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
   ) -> CGFloat {
     removeArrangedSubviews(from: expandedGrid)
     numberedExpandedIndices = []
+    let metrics = currentMetrics
 
     let expandedPageSize = pageSize * CandidateWindowStyle.expandedColumnCount
     let start =
@@ -464,6 +493,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
         let button = CandidateRowButton(
           index: number,
           text: candidates[index].text,
+          metrics: metrics,
           target: self,
           action: #selector(selectCandidate(_:))
         )
@@ -480,17 +510,23 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
   }
 
   private func measuredCandidateWidth(in range: Range<Int>) -> CGFloat {
+    let metrics = currentMetrics
     var measuredWidth: CGFloat = 0
     for index in range {
       let button = CandidateRowButton(
         index: "1",
         text: candidates[index].text,
+        metrics: metrics,
         target: nil,
         action: nil
       )
       measuredWidth = max(measuredWidth, button.intrinsicContentSize.width)
     }
-    return measuredWidth > 0 ? measuredWidth : CandidateWindowStyle.fallbackColumnWidth
+    return measuredWidth > 0 ? measuredWidth : metrics.fallbackColumnWidth
+  }
+
+  private var currentMetrics: CandidateWindowMetrics {
+    CandidateWindowStyle.metrics(fontSize: appliedFontSize)
   }
 
   private func removeArrangedSubviews(from stack: NSStackView) {

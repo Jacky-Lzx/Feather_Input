@@ -630,15 +630,18 @@ struct InputMethodSmokeMain {
       focusIndicatorSettings: FocusIndicatorSettings(defaults: defaults),
       candidatePageSettings: CandidatePageSettings(defaults: defaults),
       candidateLayoutSettings: CandidateLayoutSettings(defaults: defaults),
+      candidateFontSettings: CandidateFontSettings(defaults: defaults),
       englishCandidateSettings: EnglishCandidateSettings(defaults: defaults)
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
     let candidatePageSettings = CandidatePageSettings(defaults: defaults)
     let candidateLayoutSettings = CandidateLayoutSettings(defaults: defaults)
+    let candidateFontSettings = CandidateFontSettings(defaults: defaults)
     let englishCandidateSettings = EnglishCandidateSettings(defaults: defaults)
     guard !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
       candidatePageSettings.count == CandidatePageSettings.defaultCount,
       candidateLayoutSettings.layout == .vertical,
+      candidateFontSettings.size == CandidateFontSettings.defaultSize,
       englishCandidateSettings.minimumInputLength == EnglishCandidateSettings.defaultMinimum
     else {
       throw SmokeFailure.expectation("设置窗口的焦点提示或每页候选默认值错误")
@@ -649,13 +652,19 @@ struct InputMethodSmokeMain {
     settings.selectFocusIndicatorDuration(2.4)
     settings.selectCandidateCount(8)
     settings.selectCandidateLayout(.horizontal)
+    settings.selectCandidateFontSize(21)
     settings.selectEnglishCandidateMinimum(6)
     guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
       focusSettings.waitsUntilInput, focusSettings.duration == 2.4,
       candidatePageSettings.count == 8, candidateLayoutSettings.layout == .horizontal,
+      candidateFontSettings.size == 21,
       englishCandidateSettings.minimumInputLength == 6
     else {
       throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
+    }
+    settings.selectCandidateFontSize(CandidateFontSettings.maximumSize + 10)
+    guard candidateFontSettings.size == CandidateFontSettings.maximumSize else {
+      throw SmokeFailure.expectation("候选字号没有限制在允许范围内")
     }
 
     let shared = SettingsWindowController.shared
@@ -678,16 +687,32 @@ struct InputMethodSmokeMain {
     }
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let layoutSettings = CandidateLayoutSettings(defaults: defaults)
-    let presenter = CandidateWindowController(layoutSettings: layoutSettings)
+    let fontSettings = CandidateFontSettings(defaults: defaults)
+    let presenter = CandidateWindowController(
+      layoutSettings: layoutSettings,
+      fontSettings: fontSettings
+    )
     let anchor = NSRect(x: 300, y: 400, width: 1, height: 20)
     let compact = ["世界", "时间", "实践", "世间", "事件"].enumerated().map {
       FeatherCandidateValue(revision: 1, value: UInt64($0.offset), text: $0.element)
     }
 
     presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
-    guard presenter.resolvedCompactLayout == .vertical else {
+    let defaultPanelSize = presenter.currentPanelSize
+    guard presenter.resolvedCompactLayout == .vertical,
+      presenter.appliedFontSize == CandidateFontSettings.defaultSize
+    else {
       throw SmokeFailure.expectation("紧凑候选窗没有默认使用竖排")
     }
+
+    fontSettings.updateSize(CandidateFontSettings.maximumSize)
+    presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
+    guard presenter.appliedFontSize == CandidateFontSettings.maximumSize,
+      presenter.currentPanelSize.height > defaultPanelSize.height
+    else {
+      throw SmokeFailure.expectation("候选字号变化没有重新测量候选窗")
+    }
+    fontSettings.updateSize(CandidateFontSettings.defaultSize)
 
     layoutSettings.update(.horizontal)
     presenter.update(candidates: compact, highlighted: 0, anchor: anchor)

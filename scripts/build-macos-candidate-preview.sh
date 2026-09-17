@@ -16,6 +16,7 @@ swiftc \
     -parse-as-library \
     -module-cache-path "$build_root/module-cache" \
     -framework AppKit \
+    "$input_method_root/Sources/CandidateFontSettings.swift" \
     "$input_method_root/Sources/CandidateLayoutSettings.swift" \
     "$input_method_root/Sources/CandidateWindowStyle.swift" \
     "$input_method_root/Sources/CandidateWindowController.swift" \

@@ -8,6 +8,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusIndicatorSettings: .shared,
     candidatePageSettings: .shared,
     candidateLayoutSettings: .shared,
+    candidateFontSettings: .shared,
     englishCandidateSettings: .shared
   )
 
@@ -16,6 +17,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private let focusIndicatorSettings: FocusIndicatorSettings
   private let candidatePageSettings: CandidatePageSettings
   private let candidateLayoutSettings: CandidateLayoutSettings
+  private let candidateFontSettings: CandidateFontSettings
   private let englishCandidateSettings: EnglishCandidateSettings
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
@@ -26,6 +28,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var candidateCountValue: NSTextField?
   private weak var candidateCountStepper: NSStepper?
   private weak var candidateLayoutPopup: NSPopUpButton?
+  private weak var candidateFontValue: NSTextField?
+  private weak var candidateFontSlider: NSSlider?
   private weak var englishCandidateMinimumValue: NSTextField?
   private weak var englishCandidateMinimumStepper: NSStepper?
 
@@ -35,6 +39,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusIndicatorSettings: FocusIndicatorSettings,
     candidatePageSettings: CandidatePageSettings,
     candidateLayoutSettings: CandidateLayoutSettings,
+    candidateFontSettings: CandidateFontSettings,
     englishCandidateSettings: EnglishCandidateSettings
   ) {
     self.modeMemory = modeMemory
@@ -42,6 +47,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     self.focusIndicatorSettings = focusIndicatorSettings
     self.candidatePageSettings = candidatePageSettings
     self.candidateLayoutSettings = candidateLayoutSettings
+    self.candidateFontSettings = candidateFontSettings
     self.englishCandidateSettings = englishCandidateSettings
   }
 
@@ -87,6 +93,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func selectCandidateFontSize(_ size: CGFloat) {
+    candidateFontSettings.updateSize(size)
+    refreshControls()
+  }
+
   func selectEnglishCandidateMinimum(_ minimum: Int) {
     englishCandidateSettings.updateMinimumInputLength(minimum)
     refreshControls()
@@ -96,7 +107,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 590),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 660),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -209,6 +220,33 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateLayoutPopup.action = #selector(candidateLayoutChanged(_:))
     self.candidateLayoutPopup = candidateLayoutPopup
 
+    let candidateFontValue = NSTextField(labelWithString: "")
+    candidateFontValue.alignment = .right
+    candidateFontValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    self.candidateFontValue = candidateFontValue
+    let candidateFontSlider = NSSlider(
+      value: Double(candidateFontSettings.size),
+      minValue: Double(CandidateFontSettings.minimumSize),
+      maxValue: Double(CandidateFontSettings.maximumSize),
+      target: self,
+      action: #selector(candidateFontChanged(_:))
+    )
+    candidateFontSlider.numberOfTickMarks =
+      Int(CandidateFontSettings.maximumSize - CandidateFontSettings.minimumSize) + 1
+    candidateFontSlider.allowsTickMarkValuesOnly = true
+    candidateFontSlider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    self.candidateFontSlider = candidateFontSlider
+    let candidateFontControls = NSStackView(views: [candidateFontSlider, candidateFontValue])
+    candidateFontControls.orientation = .horizontal
+    candidateFontControls.alignment = .centerY
+    candidateFontControls.spacing = 8
+
+    let candidateFontHelp = NSTextField(
+      wrappingLabelWithString: "下一次显示候选窗时生效，无需重启。"
+    )
+    candidateFontHelp.font = .systemFont(ofSize: 12)
+    candidateFontHelp.textColor = .secondaryLabelColor
+
     let englishCandidateMinimumValue = NSTextField(labelWithString: "")
     englishCandidateMinimumValue.alignment = .right
     englishCandidateMinimumValue.font = .monospacedDigitSystemFont(
@@ -241,6 +279,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     let emptyFocusHelp = NSTextField(labelWithString: "")
     let emptyDurationHelp = NSTextField(labelWithString: "")
     let emptyCandidateCountHelp = NSTextField(labelWithString: "")
+    let emptyCandidateFontHelp = NSTextField(labelWithString: "")
     let emptyEnglishCandidateMinimumHelp = NSTextField(labelWithString: "")
 
     let grid = NSGridView(views: [
@@ -252,6 +291,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [NSTextField(labelWithString: "焦点提示显示"), focusDurationControls],
       [emptyDurationHelp, focusDurationHelp],
       [candidateLayoutLabel, candidateLayoutPopup],
+      [NSTextField(labelWithString: "候选字号"), candidateFontControls],
+      [emptyCandidateFontHelp, candidateFontHelp],
       [NSTextField(labelWithString: "拼音每页候选"), candidateCountControls],
       [emptyCandidateCountHelp, candidateCountHelp],
       [NSTextField(labelWithString: "英文候选最少输入"), englishCandidateMinimumControls],
@@ -274,6 +315,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     focusDurationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     candidateCountHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    candidateFontHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     englishCandidateMinimumHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
@@ -301,6 +343,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusDurationStepper?.isEnabled = !waitsUntilInput
     candidateCountValue?.stringValue = "\(candidatePageSettings.count)"
     candidateCountStepper?.integerValue = candidatePageSettings.count
+    candidateFontValue?.stringValue = "\(Int(candidateFontSettings.size))"
+    candidateFontSlider?.doubleValue = Double(candidateFontSettings.size)
     englishCandidateMinimumValue?.stringValue =
       "\(englishCandidateSettings.minimumInputLength) 个字符"
     englishCandidateMinimumStepper?.integerValue = englishCandidateSettings.minimumInputLength
@@ -340,6 +384,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       let layout = CandidateLayout(rawValue: rawValue)
     else { return }
     selectCandidateLayout(layout)
+  }
+
+  @objc private func candidateFontChanged(_ sender: NSSlider) {
+    selectCandidateFontSize(CGFloat(sender.doubleValue))
   }
 
   @objc private func englishCandidateMinimumChanged(_ sender: NSStepper) {

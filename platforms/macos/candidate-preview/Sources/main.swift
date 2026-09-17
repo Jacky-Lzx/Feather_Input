@@ -36,6 +36,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     action: nil
   )
   private let layoutSettings = CandidateLayoutSettings.shared
+  private let fontSettings = CandidateFontSettings.shared
   private let layoutControl = NSSegmentedControl(
     labels: CandidateLayout.allCases.map(\.title),
     trackingMode: .selectOne,
@@ -48,6 +49,14 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     target: nil,
     action: nil
   )
+  private let fontSizeSlider = NSSlider(
+    value: Double(CandidateFontSettings.defaultSize),
+    minValue: Double(CandidateFontSettings.minimumSize),
+    maxValue: Double(CandidateFontSettings.maximumSize),
+    target: nil,
+    action: nil
+  )
+  private let fontSizeLabel = NSTextField(labelWithString: "")
   private var scenario = Scenario.standard
   private var pageIndex = 0
   private var highlightedIndex = 0
@@ -58,13 +67,13 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
 
   init() {
     let window = PreviewWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 700, height: 430),
+      contentRect: NSRect(x: 0, y: 0, width: 700, height: 470),
       styleMask: [.titled, .closable, .miniaturizable, .resizable],
       backing: .buffered,
       defer: false
     )
     window.title = "Feather 候选窗预览"
-    window.minSize = NSSize(width: 620, height: 390)
+    window.minSize = NSSize(width: 620, height: 430)
     super.init(window: window)
     window.keyHandler = { [weak self] event in
       self?.handleKeyEvent(event) ?? false
@@ -121,9 +130,20 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     layoutControl.selectedSegment =
       CandidateLayout.allCases.firstIndex(of: layoutSettings.layout) ?? 0
     scenarioControl.selectedSegment = 0
+    fontSizeSlider.doubleValue = Double(fontSettings.size)
+    fontSizeSlider.numberOfTickMarks =
+      Int(CandidateFontSettings.maximumSize - CandidateFontSettings.minimumSize) + 1
+    fontSizeSlider.allowsTickMarkValuesOnly = true
+    fontSizeLabel.stringValue = "\(Int(fontSettings.size))"
+    fontSizeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    let fontSizeControls = NSStackView(views: [fontSizeSlider, fontSizeLabel])
+    fontSizeControls.orientation = .horizontal
+    fontSizeControls.alignment = .centerY
+    fontSizeControls.spacing = 8
 
     let appearanceRow = formRow(title: "外观", control: appearanceControl)
     let layoutRow = formRow(title: "排列", control: layoutControl)
+    let fontSizeRow = formRow(title: "字号", control: fontSizeControls)
     let scenarioRow = formRow(title: "内容", control: scenarioControl)
 
     let previous = NSButton(title: "上一项", target: self, action: #selector(highlightPrevious(_:)))
@@ -154,6 +174,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
       help,
       appearanceRow,
       layoutRow,
+      fontSizeRow,
       scenarioRow,
       highlightRow,
       anchorHelp,
@@ -169,6 +190,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     help.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     appearanceRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     layoutRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    fontSizeRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     scenarioRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     anchorView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     NSLayoutConstraint.activate([
@@ -197,6 +219,8 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     layoutControl.action = #selector(changeLayout(_:))
     scenarioControl.target = self
     scenarioControl.action = #selector(changeScenario(_:))
+    fontSizeSlider.target = self
+    fontSizeSlider.action = #selector(changeFontSize(_:))
   }
 
   @objc private func changeAppearance(_ sender: NSSegmentedControl) {
@@ -227,6 +251,12 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     expanded = scenario == .manyCandidates
     expandedLayout = layoutSettings.layout
     compositionActive = true
+    refreshCandidates()
+  }
+
+  @objc private func changeFontSize(_ sender: NSSlider) {
+    fontSettings.updateSize(CGFloat(sender.doubleValue))
+    fontSizeLabel.stringValue = "\(Int(fontSettings.size))"
     refreshCandidates()
   }
 

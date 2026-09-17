@@ -159,6 +159,9 @@ macOS 设置窗口是进程级单例，只保存平台偏好；重新激活文�
 schema，并只替换对应控制器的空闲 Rime session，不清理其他客户端会话。组合期间的变更
 延迟到组合结束后应用。设置窗口不持有引擎或 session，避免设置 UI 生命周期与
 InputMethodKit 的多控制器生命周期耦合。
+候选字号属于纯 macOS 呈现设置，不进入 ABI。候选窗每次更新时读取字号并生成同一组动态
+metrics，候选文字、编号、标题、行高、编号栏和兜底列宽据此共同缩放；窗口随后重新测量，
+因此紧凑窗、全词窗和横排宽度回退使用同一字号状态。
 
 `feather_english` 作为两个中文 schema 的低优先级 `table_translator`，从 `easy_en` 导入
 英文词表。它与中文候选共用 Rime 菜单、revision 和不透明候选 ID；Rust 核心与 macOS

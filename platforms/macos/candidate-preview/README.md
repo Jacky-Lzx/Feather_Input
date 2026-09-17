@@ -20,6 +20,7 @@ open -n .build/macos-candidate-preview/FeatherCandidatePreview.app
 - 竖排和横排两种紧凑候选排列；
 - 常规、长文本和全词候选三种内容；
 - 切换高亮候选；
+- 调整 14–24 的候选字号并观察窗口重新测量；
 - 点击候选；
 - 使用方向键、Page Up / Page Down、数字键、空格、回车和 Esc 模拟输入法操作；
 - 移动或缩放主窗口，检查候选窗是否持续跟随锚点。
