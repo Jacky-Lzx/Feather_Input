@@ -963,6 +963,9 @@ struct InputMethodSmokeMain {
 
     presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
     let defaultPanelSize = presenter.currentPanelSize
+    guard defaultPanelSize.width >= CandidateWindowStyle.minimumCompactWidth else {
+      throw SmokeFailure.expectation("紧凑候选窗没有遵守最小宽度")
+    }
     guard presenter.resolvedCompactLayout == .vertical,
       presenter.appliedFontSize == CandidateFontSettings.defaultSize
     else {

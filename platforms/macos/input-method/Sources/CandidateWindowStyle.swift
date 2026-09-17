@@ -11,7 +11,7 @@ struct CandidateWindowMetrics {
 }
 
 enum CandidateWindowStyle {
-  static let minimumWidth: CGFloat = 0
+  static let minimumCompactWidth: CGFloat = 84
   static let maximumWidth: CGFloat = 540
   static let cornerRadius: CGFloat = 12
   static let borderWidth: CGFloat = 0.5

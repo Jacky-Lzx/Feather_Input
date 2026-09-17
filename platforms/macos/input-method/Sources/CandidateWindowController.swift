@@ -257,7 +257,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     expandedGrid.isHidden = true
     removeArrangedSubviews(from: expandedGrid)
     let contentWidth = rebuildCandidateRows(highlighted: highlighted, anchor: anchor)
-    resizeAndShow(at: anchor, contentWidth: contentWidth)
+    resizeAndShow(
+      at: anchor,
+      contentWidth: contentWidth,
+      minimumWidth: CandidateWindowStyle.minimumCompactWidth
+    )
   }
 
   func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect) {
@@ -275,7 +279,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     expandedGrid.isHidden = true
     removeArrangedSubviews(from: expandedGrid)
     let contentWidth = rebuildCandidateRows(highlighted: nil, anchor: anchor)
-    resizeAndShow(beside: anchor, contentWidth: contentWidth)
+    resizeAndShow(beside: anchor, contentWidth: contentWidth, minimumWidth: 0)
   }
 
   func updateExpanded(
@@ -308,22 +312,30 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       layout: layout
     )
     let contentWidth = max(gridWidth, expandedHeader.intrinsicContentSize.width)
-    resizeAndShow(at: anchor, contentWidth: contentWidth)
+    resizeAndShow(at: anchor, contentWidth: contentWidth, minimumWidth: 0)
   }
 
-  private func resizeAndShow(at anchor: NSRect, contentWidth: CGFloat) {
-    resize(contentWidth: contentWidth)
+  private func resizeAndShow(
+    at anchor: NSRect,
+    contentWidth: CGFloat,
+    minimumWidth: CGFloat
+  ) {
+    resize(contentWidth: contentWidth, minimumWidth: minimumWidth)
     positionPanel(at: anchor)
     panel.orderFrontRegardless()
   }
 
-  private func resizeAndShow(beside anchor: NSRect, contentWidth: CGFloat) {
-    resize(contentWidth: contentWidth)
+  private func resizeAndShow(
+    beside anchor: NSRect,
+    contentWidth: CGFloat,
+    minimumWidth: CGFloat
+  ) {
+    resize(contentWidth: contentWidth, minimumWidth: minimumWidth)
     positionPanel(beside: anchor)
     panel.orderFrontRegardless()
   }
 
-  private func resize(contentWidth: CGFloat) {
+  private func resize(contentWidth: CGFloat, minimumWidth: CGFloat) {
     panel.contentView = backgroundView
     backgroundView.layoutSubtreeIfNeeded()
     let fittingSize = backgroundView.fittingSize
@@ -332,7 +344,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     panel.setContentSize(
       NSSize(
         width: max(
-          CandidateWindowStyle.minimumWidth,
+          minimumWidth,
           min(contentWidth + horizontalInsets, CandidateWindowStyle.maximumWidth)
         ),
         height: fittingSize.height
