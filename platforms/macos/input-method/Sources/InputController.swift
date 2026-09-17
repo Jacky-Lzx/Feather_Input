@@ -58,13 +58,14 @@ final class InputController: IMKInputController {
   var focusIndicatorSettings = FocusIndicatorSettings.shared
   var candidatePageSettings = CandidatePageSettings.shared
   var englishCandidateSettings = EnglishCandidateSettings.shared
+  var generationSettings = GenerationSettings.shared
   var capsLockState: () -> Bool = {
     CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
   }
   var focusIndicatorRetryDelaysMilliseconds: [UInt64] = [80, 120, 200]
   var generationDebounceMilliseconds: UInt64 = 120
   var generationPollMilliseconds: UInt64 = 20
-  var generationEnabled: () -> Bool = { true }
+  var generationEnabled: (() -> Bool)?
   var generationContextProvider: ((IMKTextInput) -> String?)?
   var generationRequestFactory:
     (
@@ -93,8 +94,10 @@ final class InputController: IMKInputController {
   private var generationVersion = UUID()
   private var nextGenerationRequestID: UInt64 = 0
   private var recentContext = ""
+  private var observesGenerationSettings = false
 
   override func activateServer(_ sender: Any!) {
+    startObservingGenerationSettings()
     cancelFocusIndicator()
     cancelGeneration(clearContext: true)
     activeClient = sender as AnyObject?
@@ -157,6 +160,7 @@ final class InputController: IMKInputController {
   }
 
   override func deactivateServer(_ sender: Any!) {
+    stopObservingGenerationSettings()
     cancelFocusIndicator()
     cancelGeneration(clearContext: true)
     guard let session else {
@@ -546,7 +550,7 @@ final class InputController: IMKInputController {
   }
 
   private func scheduleGeneration(for response: FeatherResponseValue, client: IMKTextInput) {
-    guard generationEnabled(), active, !response.directMode, !recentContext.isEmpty,
+    guard isGenerationEnabled, active, !response.directMode, !recentContext.isEmpty,
       !response.preedit.isEmpty, !response.candidates.isEmpty,
       response.preedit.utf8.allSatisfy({
         (0x61...0x7a).contains($0) || $0 == 0x20 || $0 == 0x27
@@ -668,7 +672,7 @@ final class InputController: IMKInputController {
     version: UUID,
     client: IMKTextInput
   ) -> Bool {
-    active && generationEnabled() && !secureInputEnabled()
+    active && isGenerationEnabled && !secureInputEnabled()
       && generationVersion == version
       && activeClient === client
       && currentResponse?.revision == snapshot.revision
@@ -698,6 +702,38 @@ final class InputController: IMKInputController {
     clearGeneratedCandidates()
     if clearContext {
       recentContext = ""
+    }
+  }
+
+  private var isGenerationEnabled: Bool {
+    generationEnabled?() ?? generationSettings.isEnabled
+  }
+
+  private func startObservingGenerationSettings() {
+    guard !observesGenerationSettings else { return }
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(generationSettingsChanged(_:)),
+      name: .generationSettingsDidChange,
+      object: nil
+    )
+    observesGenerationSettings = true
+  }
+
+  private func stopObservingGenerationSettings() {
+    guard observesGenerationSettings else { return }
+    NotificationCenter.default.removeObserver(
+      self,
+      name: .generationSettingsDidChange,
+      object: nil
+    )
+    observesGenerationSettings = false
+  }
+
+  @objc private func generationSettingsChanged(_ notification: Notification) {
+    guard notification.object as? GenerationSettings === generationSettings else { return }
+    if !isGenerationEnabled {
+      cancelGeneration()
     }
   }
 

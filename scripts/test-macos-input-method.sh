@@ -57,6 +57,7 @@ swiftc \
     "$source_root"/Sources/EnglishCandidateSettings.swift \
     "$source_root"/Sources/FeatherInputEnvironment.swift \
     "$source_root"/Sources/FocusIndicatorSettings.swift \
+    "$source_root"/Sources/GenerationSettings.swift \
     "$source_root"/Sources/InputModeMemory.swift \
     "$source_root"/Sources/InputScheme.swift \
     "$source_root"/Sources/InputController.swift \

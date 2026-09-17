@@ -10,7 +10,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidatePageSettings: .shared,
     candidateLayoutSettings: .shared,
     candidateFontSettings: .shared,
-    englishCandidateSettings: .shared
+    englishCandidateSettings: .shared,
+    generationSettings: .shared
   )
 
   private let modeMemory: InputModeMemory
@@ -21,6 +22,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private let candidateLayoutSettings: CandidateLayoutSettings
   private let candidateFontSettings: CandidateFontSettings
   private let englishCandidateSettings: EnglishCandidateSettings
+  private let generationSettings: GenerationSettings
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
   private weak var policyPopup: NSPopUpButton?
@@ -35,6 +37,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var candidateFontSlider: NSSlider?
   private weak var englishCandidateMinimumValue: NSTextField?
   private weak var englishCandidateMinimumStepper: NSStepper?
+  private weak var generationEnabledButton: NSButton?
 
   init(
     modeMemory: InputModeMemory,
@@ -44,7 +47,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidatePageSettings: CandidatePageSettings,
     candidateLayoutSettings: CandidateLayoutSettings,
     candidateFontSettings: CandidateFontSettings,
-    englishCandidateSettings: EnglishCandidateSettings
+    englishCandidateSettings: EnglishCandidateSettings,
+    generationSettings: GenerationSettings
   ) {
     self.modeMemory = modeMemory
     self.schemeMemory = schemeMemory
@@ -54,6 +58,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     self.candidateLayoutSettings = candidateLayoutSettings
     self.candidateFontSettings = candidateFontSettings
     self.englishCandidateSettings = englishCandidateSettings
+    self.generationSettings = generationSettings
   }
 
   func show() {
@@ -113,11 +118,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func selectGenerationEnabled(_ isEnabled: Bool) {
+    generationSettings.updateEnabled(isEnabled)
+    refreshControls()
+  }
+
   private func requireWindow() -> NSWindow {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 700),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 770),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -291,6 +301,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     englishCandidateMinimumHelp.font = .systemFont(ofSize: 12)
     englishCandidateMinimumHelp.textColor = .secondaryLabelColor
 
+    let generationEnabledButton = NSButton(
+      checkboxWithTitle: "根据上下文和拼音生成新词（实验）",
+      target: self,
+      action: #selector(generationEnabledChanged(_:))
+    )
+    self.generationEnabledButton = generationEnabledButton
+
+    let generationHelp = NSTextField(
+      wrappingLabelWithString:
+        "完整输入拼音后，侧边最多显示 3 个本地 MLX 建议；按 Option + 数字、Option + 空格或点击上屏。后端不可用时不影响普通候选。"
+    )
+    generationHelp.font = .systemFont(ofSize: 12)
+    generationHelp.textColor = .secondaryLabelColor
+
     let emptyPolicyHelp = NSTextField(labelWithString: "")
     let emptyPersistentModeIndicator = NSTextField(labelWithString: "")
     let emptyFocusToggle = NSTextField(labelWithString: "")
@@ -299,6 +323,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     let emptyCandidateCountHelp = NSTextField(labelWithString: "")
     let emptyCandidateFontHelp = NSTextField(labelWithString: "")
     let emptyEnglishCandidateMinimumHelp = NSTextField(labelWithString: "")
+    let emptyGenerationToggle = NSTextField(labelWithString: "")
+    let emptyGenerationHelp = NSTextField(labelWithString: "")
 
     let grid = NSGridView(views: [
       [schemeLabel, schemePopup],
@@ -316,6 +342,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [emptyCandidateCountHelp, candidateCountHelp],
       [NSTextField(labelWithString: "英文候选最少输入"), englishCandidateMinimumControls],
       [emptyEnglishCandidateMinimumHelp, englishCandidateMinimumHelp],
+      [emptyGenerationToggle, generationEnabledButton],
+      [emptyGenerationHelp, generationHelp],
     ])
     grid.column(at: 0).xPlacement = .trailing
     grid.column(at: 1).xPlacement = .fill
@@ -336,6 +364,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateCountHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     candidateFontHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     englishCandidateMinimumHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    generationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
       stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
@@ -369,6 +398,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     englishCandidateMinimumValue?.stringValue =
       "\(englishCandidateSettings.minimumInputLength) 个字符"
     englishCandidateMinimumStepper?.integerValue = englishCandidateSettings.minimumInputLength
+    generationEnabledButton?.state = generationSettings.isEnabled ? .on : .off
     if let index = CandidateLayout.allCases.firstIndex(of: candidateLayoutSettings.layout) {
       candidateLayoutPopup?.selectItem(at: index)
     }
@@ -417,5 +447,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   @objc private func englishCandidateMinimumChanged(_ sender: NSStepper) {
     selectEnglishCandidateMinimum(sender.integerValue)
+  }
+
+  @objc private func generationEnabledChanged(_ sender: NSButton) {
+    selectGenerationEnabled(sender.state == .on)
   }
 }

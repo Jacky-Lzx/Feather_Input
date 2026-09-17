@@ -681,8 +681,6 @@ struct InputMethodSmokeMain {
     controller.secureInputEnabled = { false }
     controller.generationDebounceMilliseconds = 0
     controller.generationPollMilliseconds = 1
-    var generationEnabled = true
-    controller.generationEnabled = { generationEnabled }
     controller.generationContextProvider = { _ in "你好" }
     let candidatePresenter = SmokeCandidatePresenter()
     let generatedPresenter = SmokeGeneratedCandidatePresenter()
@@ -697,6 +695,8 @@ struct InputMethodSmokeMain {
     }
     defer { defaults.removePersistentDomain(forName: defaultsName) }
     controller.modeMemory = InputModeMemory(defaults: defaults)
+    let generationSettings = GenerationSettings(defaults: defaults)
+    controller.generationSettings = generationSettings
     let schemeMemory = InputSchemeMemory(defaults: defaults)
     schemeMemory.update(.fullPinyin)
     controller.schemeMemory = schemeMemory
@@ -733,7 +733,7 @@ struct InputMethodSmokeMain {
     client.committed = "你好"
     controller.activateServer(client)
     defer {
-      generationEnabled = false
+      generationSettings.updateEnabled(false)
       controller.deactivateServer(client)
       RunLoop.current.run(until: Date().addingTimeInterval(0.02))
     }
@@ -777,6 +777,16 @@ struct InputMethodSmokeMain {
       waitUntil({ pending.cancelCount == 1 && pending.closeCount == 1 })
     else {
       throw SmokeFailure.expectation("输入变化没有取消并释放旧 MLX 请求")
+    }
+    guard waitUntil({ requests.count >= 3 }) else {
+      throw SmokeFailure.expectation("没有启动用于设置关闭验证的 MLX 请求")
+    }
+    let disabled = requests[2]
+    generationSettings.updateEnabled(false)
+    guard waitUntil({ disabled.cancelCount == 1 && disabled.closeCount == 1 }),
+      !generatedPresenter.isVisible
+    else {
+      throw SmokeFailure.expectation("关闭 MLX 生成设置没有立即取消请求并隐藏候选")
     }
   }
 
@@ -855,7 +865,8 @@ struct InputMethodSmokeMain {
       candidatePageSettings: CandidatePageSettings(defaults: defaults),
       candidateLayoutSettings: CandidateLayoutSettings(defaults: defaults),
       candidateFontSettings: CandidateFontSettings(defaults: defaults),
-      englishCandidateSettings: EnglishCandidateSettings(defaults: defaults)
+      englishCandidateSettings: EnglishCandidateSettings(defaults: defaults),
+      generationSettings: GenerationSettings(defaults: defaults)
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
     let persistentModeSettings = PersistentModeIndicatorSettings(defaults: defaults)
@@ -863,12 +874,14 @@ struct InputMethodSmokeMain {
     let candidateLayoutSettings = CandidateLayoutSettings(defaults: defaults)
     let candidateFontSettings = CandidateFontSettings(defaults: defaults)
     let englishCandidateSettings = EnglishCandidateSettings(defaults: defaults)
+    let generationSettings = GenerationSettings(defaults: defaults)
     guard persistentModeSettings.isEnabled,
       !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
       candidatePageSettings.count == CandidatePageSettings.defaultCount,
       candidateLayoutSettings.layout == .vertical,
       candidateFontSettings.size == CandidateFontSettings.defaultSize,
-      englishCandidateSettings.minimumInputLength == EnglishCandidateSettings.defaultMinimum
+      englishCandidateSettings.minimumInputLength == EnglishCandidateSettings.defaultMinimum,
+      generationSettings.isEnabled
     else {
       throw SmokeFailure.expectation("设置窗口的焦点提示或每页候选默认值错误")
     }
@@ -881,12 +894,14 @@ struct InputMethodSmokeMain {
     settings.selectCandidateLayout(.horizontal)
     settings.selectCandidateFontSize(21)
     settings.selectEnglishCandidateMinimum(6)
+    settings.selectGenerationEnabled(false)
     guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
       !persistentModeSettings.isEnabled,
       focusSettings.waitsUntilInput, focusSettings.duration == 2.4,
       candidatePageSettings.count == 8, candidateLayoutSettings.layout == .horizontal,
       candidateFontSettings.size == 21,
-      englishCandidateSettings.minimumInputLength == 6
+      englishCandidateSettings.minimumInputLength == 6,
+      !generationSettings.isEnabled
     else {
       throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
     }
