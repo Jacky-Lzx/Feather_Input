@@ -6,6 +6,8 @@ Swift/InputMethodKit 应用并行存在：当前应用继续作为行为基准�
 
 包含以下 crate：
 
+- `feather-ai`：可选 AI Provider 边界，以及只连接 `127.0.0.1` 的 MLX `/generate`
+  客户端；请求携带 request ID 和输入 revision，响应经过严格校验后才会交给调用方。
 - `feather-core`：标准化输入事件、平台效果、候选身份、完整候选批次以及输入引擎边界。
 - `feather-engine-lexicon`：一个小型纯 Rust 参考引擎，用来验证不依赖 librime 的
   完整组合、候选和上屏链路。

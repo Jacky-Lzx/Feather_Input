@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/feather-ai",
     "crates/feather-core",
     "crates/feather-engine-lexicon",
     "crates/feather-engine-rime",
