@@ -130,6 +130,9 @@ shellcheck \
     scripts/format-macos.sh \
     scripts/check-macos.sh
 
+echo "正在检查 MLX 后端管理脚本……"
+python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
 echo "正在检查应用元数据……"
 plutil -lint \
     platforms/macos/candidate-preview/Info.plist \
