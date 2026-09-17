@@ -30,9 +30,11 @@ final class InputController: IMKInputController {
   private var expandedCandidates: ExpandedCandidateState?
   private weak var activeClient: AnyObject?
   private var active = false
+  private var lastCaret: NSRect?
 
   override func activateServer(_ sender: Any!) {
     activeClient = sender as AnyObject?
+    lastCaret = nil
     if injectedCandidatePresenter == nil {
       ownedCandidatePresenter.activate()
     }
@@ -55,6 +57,7 @@ final class InputController: IMKInputController {
       currentResponse = nil
       expandedCandidates = nil
       activeClient = nil
+      lastCaret = nil
       candidatePresenter.actionHandler = nil
       candidatePresenter.hide()
       if injectedCandidatePresenter == nil {
@@ -74,6 +77,7 @@ final class InputController: IMKInputController {
     currentResponse = nil
     expandedCandidates = nil
     activeClient = nil
+    lastCaret = nil
     candidatePresenter.actionHandler = nil
     candidatePresenter.hide()
     if injectedCandidatePresenter == nil {
@@ -405,12 +409,15 @@ final class InputController: IMKInputController {
   }
 
   private func candidateAnchor(for client: IMKTextInput) -> NSRect {
-    let range =
-      client.markedRange().location == NSNotFound
-      ? client.selectedRange()
-      : client.markedRange()
-    var actualRange = NSRange(location: NSNotFound, length: 0)
-    return client.firstRect(forCharacterRange: range, actualRange: &actualRange)
+    var caret = NSRect.zero
+    _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &caret)
+    if caret.minX.isFinite, caret.minY.isFinite, caret.width.isFinite,
+      caret.height.isFinite, caret.height > 0
+    {
+      lastCaret = caret
+    }
+    return lastCaret
+      ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
   }
 
   private func normalizedInput(for event: NSEvent) -> NormalizedInput? {

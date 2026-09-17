@@ -6,6 +6,8 @@ final class SmokeTextClient: NSObject, IMKTextInput {
   var marked = ""
   var markedSelection = NSRange(location: 0, length: 0)
   var selectionAvailable = true
+  var lastAttributesCharacterIndex: Int?
+  var caretRectangle = NSRect(x: 100, y: 100, width: 1, height: 20)
 
   func insertText(_ string: Any!, replacementRange: NSRange) {
     committed += string as? String ?? ""
@@ -44,7 +46,8 @@ final class SmokeTextClient: NSObject, IMKTextInput {
     forCharacterIndex index: Int,
     lineHeightRectangle rect: UnsafeMutablePointer<NSRect>!
   ) -> [AnyHashable: Any]! {
-    rect.pointee = NSRect(x: 100, y: 100, width: 1, height: 20)
+    lastAttributesCharacterIndex = index
+    rect.pointee = caretRectangle
     return [:]
   }
 
@@ -61,6 +64,6 @@ final class SmokeTextClient: NSObject, IMKTextInput {
 
   func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer!) -> NSRect {
     actualRange?.pointee = range
-    return NSRect(x: 100, y: 100, width: 1, height: 20)
+    return .zero
   }
 }

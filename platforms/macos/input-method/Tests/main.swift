@@ -70,8 +70,10 @@ struct InputMethodSmokeMain {
     guard presenter.candidates.contains(where: { $0.text == "你好" }) else {
       throw SmokeFailure.expectation("候选窗口没有收到“你好”")
     }
-    guard presenter.anchor == NSRect(x: 100, y: 100, width: 1, height: 20) else {
-      throw SmokeFailure.expectation("候选窗口锚点错误")
+    guard client.lastAttributesCharacterIndex == 0,
+      presenter.anchor == client.caretRectangle
+    else {
+      throw SmokeFailure.expectation("候选窗口没有使用 InputMethodKit 光标矩形")
     }
     let markedBeforeBoundaryPaging = client.marked
     guard controller.handle(key("", code: 123, modifiers: .function), client: client) else {
@@ -82,9 +84,14 @@ struct InputMethodSmokeMain {
     }
     let initialHighlight = presenter.highlighted
     let updateCountBeforeNavigation = presenter.updateCount
+    client.caretRectangle = .zero
     guard controller.handle(key("", code: 125, modifiers: .function), client: client) else {
       throw SmokeFailure.expectation("向下键没有移动候选高亮")
     }
+    guard presenter.anchor == NSRect(x: 100, y: 100, width: 1, height: 20) else {
+      throw SmokeFailure.expectation("临时取不到光标矩形时没有保留最近有效位置")
+    }
+    client.caretRectangle = NSRect(x: 100, y: 100, width: 1, height: 20)
     guard presenter.highlighted != initialHighlight else {
       throw SmokeFailure.expectation("向下键被处理，但候选高亮没有变化")
     }
