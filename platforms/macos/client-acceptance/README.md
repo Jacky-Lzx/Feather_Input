@@ -10,6 +10,16 @@
 scripts/run-macos-client-acceptance.sh
 ```
 
+开始跨客户端验收前，运行以下命令生成包含系统版本、工具链、自动检查、安装状态和产物
+哈希的基线报告：
+
+```sh
+scripts/capture-macos-client-acceptance-baseline.sh
+```
+
+报告保存在 `.build/macos-client-acceptance-baseline/baseline.md`，详细的客户端覆盖和记录
+规则见 [`docs/macos-client-acceptance-matrix.md`](../../../docs/macos-client-acceptance-matrix.md)。
+
 运行脚本只在检测到 `FeatherInputRustDev.app` 已安装且 Hans 输入模式已启用时启动应用，
 不会自动切换当前输入源。应用中的检查框只是人工记录，不会把观察结果伪装成自动测试。
 
