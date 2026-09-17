@@ -44,6 +44,7 @@ struct InputMethodSmokeMain {
     }
     try verifyInputModeMemory()
     try verifyInputSchemeMemory()
+    try verifySettingsWindow()
     try verifyCandidateOverlayOwnership()
     try verifyModeIndicatorOwnership()
     guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
@@ -311,6 +312,18 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("数字键没有按当前列的不透明候选 ID 上屏")
     }
 
+    guard controller.handle(key("n", code: 45), client: client), !client.marked.isEmpty else {
+      throw SmokeFailure.expectation("设置窗口测试无法创建组合")
+    }
+    controller.showSettings(nil)
+    guard client.marked.isEmpty, presenter.candidates.isEmpty else {
+      throw SmokeFailure.expectation("打开设置窗口没有取消当前组合")
+    }
+    SettingsWindowController.shared.close()
+    guard controller.menu()?.item(withTitle: "设置…") != nil else {
+      throw SmokeFailure.expectation("输入法菜单缺少设置入口")
+    }
+
     guard !controller.handle(key("c", code: 8, modifiers: .command), client: client) else {
       throw SmokeFailure.expectation("Command 快捷键不应被输入法消费")
     }
@@ -395,6 +408,37 @@ struct InputMethodSmokeMain {
     guard memory.load() == .flypy else {
       throw SmokeFailure.expectation("没有持久化小鹤双拼方案")
     }
+  }
+
+  @MainActor
+  private static func verifySettingsWindow() throws {
+    let suiteName = "FeatherSettingsWindow-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+      throw SmokeFailure.expectation("无法创建设置窗口测试设置")
+    }
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let modeMemory = InputModeMemory(defaults: defaults)
+    let schemeMemory = InputSchemeMemory(defaults: defaults)
+    let settings = SettingsWindowController(
+      modeMemory: modeMemory,
+      schemeMemory: schemeMemory
+    )
+    settings.selectScheme(.flypy)
+    settings.selectModePolicy(.perApplication)
+    guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication else {
+      throw SmokeFailure.expectation("设置窗口没有持久化输入方案或模式记忆策略")
+    }
+
+    let shared = SettingsWindowController.shared
+    shared.show()
+    shared.show()
+    let settingsWindows = NSApplication.shared.windows.filter {
+      $0.title == "Feather Input 设置"
+    }
+    guard settingsWindows.count == 1 else {
+      throw SmokeFailure.expectation("重复打开设置时创建了多个窗口")
+    }
+    shared.close()
   }
 
   @MainActor

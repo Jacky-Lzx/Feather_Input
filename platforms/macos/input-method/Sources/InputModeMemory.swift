@@ -1,10 +1,19 @@
 import Foundation
 
-enum InputModeMemoryPolicy: String {
-  case perApplication
+enum InputModeMemoryPolicy: String, CaseIterable {
   case global
+  case perApplication
   case resetToChinese
   case resetToEnglish
+
+  var title: String {
+    switch self {
+    case .global: "全局记忆"
+    case .perApplication: "按应用记忆"
+    case .resetToChinese: "切换应用时恢复中文"
+    case .resetToEnglish: "切换应用时恢复英文"
+    }
+  }
 }
 
 final class InputModeMemory {
@@ -21,6 +30,10 @@ final class InputModeMemory {
   var policy: InputModeMemoryPolicy {
     InputModeMemoryPolicy(rawValue: defaults.string(forKey: "inputModeMemoryPolicy") ?? "")
       ?? .global
+  }
+
+  func updatePolicy(_ policy: InputModeMemoryPolicy) {
+    defaults.set(policy.rawValue, forKey: "inputModeMemoryPolicy")
   }
 
   func activate(application: String) -> Bool {

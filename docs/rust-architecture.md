@@ -149,6 +149,9 @@ macOS 适配层通过核心已有的 `Native`/`Direct` 状态实现中英文切�
 C ABI 在同一 librime session 内切换。FFI 只接受已打包的 `luna_pinyin_simp` 与
 `double_pinyin_flypy`；成功切换会清除组合并推进 revision，使旧候选 ID 失效。macOS
 菜单负责显示和持久化当前方案，但不直接操作 librime 状态。
+macOS 设置窗口是进程级单例，只保存平台偏好；重新激活文本客户端时，控制器读取偏好并
+通过既有 ABI 同步 schema。设置窗口不持有引擎或 session，避免设置 UI 生命周期与
+InputMethodKit 的多控制器生命周期耦合。
 
 `platforms/macos/client-acceptance` 是不链接 Feather 核心的普通 AppKit 客户端。它通过
 系统 Text Input Services 使用已安装的开发输入法，为普通文本、密码输入和快捷键放行

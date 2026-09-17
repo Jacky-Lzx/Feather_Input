@@ -126,6 +126,8 @@ final class AcceptanceWindowController: NSWindowController {
       "Control + Shift + Space 会切换模式并取消现有组合",
       "小鹤双拼输入 uijp 时出现“世界”候选",
       "输入方案切换不会改变当前中英文模式",
+      "设置窗口会保存输入方案与模式记忆策略",
+      "组合过程中打开设置不会意外上屏文字",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
     let itemsPerColumn = (checklistItems.count + 1) / 2

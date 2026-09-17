@@ -217,6 +217,14 @@ final class InputController: IMKInputController {
     )
     toggle.target = self
     menu.addItem(toggle)
+    menu.addItem(.separator())
+    let settings = NSMenuItem(
+      title: "设置…",
+      action: #selector(showSettings(_:)),
+      keyEquivalent: ""
+    )
+    settings.target = self
+    menu.addItem(settings)
     return menu
   }
 
@@ -495,6 +503,18 @@ final class InputController: IMKInputController {
       return
     }
     _ = toggleInputMode(for: client)
+  }
+
+  @objc func showSettings(_ sender: Any?) {
+    let senderClient = (sender as? NSDictionary)?[kIMKCommandClientName as String]
+    if let client = (senderClient as? IMKTextInput) ?? (activeClient as? IMKTextInput),
+      hasComposition
+    {
+      _ = dispatch(.escape, to: client)
+    }
+    candidatePresenter.hide()
+    modePresenter.hide()
+    SettingsWindowController.shared.show()
   }
 
   @objc private func selectFullPinyin(_ sender: Any?) {
