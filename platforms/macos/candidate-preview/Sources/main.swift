@@ -35,6 +35,13 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     target: nil,
     action: nil
   )
+  private let layoutSettings = CandidateLayoutSettings.shared
+  private let layoutControl = NSSegmentedControl(
+    labels: CandidateLayout.allCases.map(\.title),
+    trackingMode: .selectOne,
+    target: nil,
+    action: nil
+  )
   private let scenarioControl = NSSegmentedControl(
     labels: ["常规", "长文本", "全词候选"],
     trackingMode: .selectOne,
@@ -45,6 +52,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
   private var pageIndex = 0
   private var highlightedIndex = 0
   private var expanded = false
+  private var expandedLayout = CandidateLayout.vertical
   private var compositionActive = true
   private var currentCandidates: [FeatherCandidateValue] = []
 
@@ -110,9 +118,12 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     help.textColor = .secondaryLabelColor
 
     appearanceControl.selectedSegment = 0
+    layoutControl.selectedSegment =
+      CandidateLayout.allCases.firstIndex(of: layoutSettings.layout) ?? 0
     scenarioControl.selectedSegment = 0
 
     let appearanceRow = formRow(title: "外观", control: appearanceControl)
+    let layoutRow = formRow(title: "排列", control: layoutControl)
     let scenarioRow = formRow(title: "内容", control: scenarioControl)
 
     let previous = NSButton(title: "上一项", target: self, action: #selector(highlightPrevious(_:)))
@@ -142,6 +153,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
       title,
       help,
       appearanceRow,
+      layoutRow,
       scenarioRow,
       highlightRow,
       anchorHelp,
@@ -156,6 +168,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
 
     help.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     appearanceRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    layoutRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     scenarioRow.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     anchorView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     NSLayoutConstraint.activate([
@@ -180,6 +193,8 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
   private func connectActions() {
     appearanceControl.target = self
     appearanceControl.action = #selector(changeAppearance(_:))
+    layoutControl.target = self
+    layoutControl.action = #selector(changeLayout(_:))
     scenarioControl.target = self
     scenarioControl.action = #selector(changeScenario(_:))
   }
@@ -196,11 +211,21 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     refreshCandidates()
   }
 
+  @objc private func changeLayout(_ sender: NSSegmentedControl) {
+    guard CandidateLayout.allCases.indices.contains(sender.selectedSegment) else { return }
+    layoutSettings.update(CandidateLayout.allCases[sender.selectedSegment])
+    if expanded {
+      expandedLayout = layoutSettings.layout
+    }
+    refreshCandidates()
+  }
+
   @objc private func changeScenario(_ sender: NSSegmentedControl) {
     scenario = Scenario(rawValue: sender.selectedSegment) ?? .standard
     pageIndex = 0
     highlightedIndex = 0
     expanded = scenario == .manyCandidates
+    expandedLayout = layoutSettings.layout
     compositionActive = true
     refreshCandidates()
   }
@@ -245,27 +270,55 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
       return handleExpandedKeyEvent(event)
     }
 
-    switch event.keyCode {
-    case 123, 116:
-      pageIndex = max(0, pageIndex - 1)
-      highlightedIndex = 0
-      statusLabel.stringValue = "模拟上一页"
-    case 121:
-      pageIndex = min(pages.count - 1, pageIndex + 1)
-      highlightedIndex = 0
-      statusLabel.stringValue = "模拟下一页"
-    case 124:
-      expanded = true
-      highlightedIndex = pageIndex * 5
-      statusLabel.stringValue = "已用右方向键展开全词候选"
-    case 125:
-      highlightedIndex = min(currentCandidates.count - 1, highlightedIndex + 1)
-      statusLabel.stringValue = "模拟下一项"
-    case 126:
-      highlightedIndex = max(0, highlightedIndex - 1)
-      statusLabel.stringValue = "模拟上一项"
-    default:
-      return false
+    switch candidatePresenter.compactLayout {
+    case .vertical:
+      switch event.keyCode {
+      case 123, 116:
+        pageIndex = max(0, pageIndex - 1)
+        highlightedIndex = 0
+        statusLabel.stringValue = "模拟上一页"
+      case 121:
+        pageIndex = min(pages.count - 1, pageIndex + 1)
+        highlightedIndex = 0
+        statusLabel.stringValue = "模拟下一页"
+      case 124:
+        expanded = true
+        expandedLayout = .vertical
+        highlightedIndex = pageIndex * 5
+        statusLabel.stringValue = "已用右方向键展开全词候选"
+      case 125:
+        highlightedIndex = min(currentCandidates.count - 1, highlightedIndex + 1)
+        statusLabel.stringValue = "模拟下一项"
+      case 126:
+        highlightedIndex = max(0, highlightedIndex - 1)
+        statusLabel.stringValue = "模拟上一项"
+      default:
+        return false
+      }
+    case .horizontal:
+      switch event.keyCode {
+      case 123:
+        highlightedIndex = max(0, highlightedIndex - 1)
+        statusLabel.stringValue = "模拟上一项"
+      case 124:
+        highlightedIndex = min(currentCandidates.count - 1, highlightedIndex + 1)
+        statusLabel.stringValue = "模拟下一项"
+      case 125, 126:
+        expanded = true
+        expandedLayout = .horizontal
+        highlightedIndex = pageIndex * 5
+        statusLabel.stringValue = "已用上下方向键展开全词候选"
+      case 116:
+        pageIndex = max(0, pageIndex - 1)
+        highlightedIndex = 0
+        statusLabel.stringValue = "模拟上一页"
+      case 121:
+        pageIndex = min(pages.count - 1, pageIndex + 1)
+        highlightedIndex = 0
+        statusLabel.stringValue = "模拟下一页"
+      default:
+        return false
+      }
     }
     refreshCandidates()
     return true
@@ -314,14 +367,25 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
 
   private func moveExpandedHighlight(horizontal: Int, vertical: Int) {
     guard !currentCandidates.isEmpty else { return }
-    let rows = 5
-    let currentColumn = highlightedIndex / rows
-    let maximumColumn = (currentCandidates.count - 1) / rows
-    let column = min(maximumColumn, max(0, currentColumn + horizontal))
-    let currentRow = highlightedIndex % rows
-    let maximumRow = min(rows - 1, currentCandidates.count - 1 - column * rows)
-    let row = min(maximumRow, max(0, currentRow + vertical))
-    highlightedIndex = column * rows + row
+    let pageSize = 5
+    switch expandedLayout {
+    case .vertical:
+      let currentColumn = highlightedIndex / pageSize
+      let maximumColumn = (currentCandidates.count - 1) / pageSize
+      let column = min(maximumColumn, max(0, currentColumn + horizontal))
+      let currentRow = highlightedIndex % pageSize
+      let maximumRow = min(pageSize - 1, currentCandidates.count - 1 - column * pageSize)
+      let row = min(maximumRow, max(0, currentRow + vertical))
+      highlightedIndex = column * pageSize + row
+    case .horizontal:
+      let currentRow = highlightedIndex / pageSize
+      let maximumRow = (currentCandidates.count - 1) / pageSize
+      let row = min(maximumRow, max(0, currentRow + vertical))
+      let currentColumn = highlightedIndex % pageSize
+      let maximumColumn = min(pageSize - 1, currentCandidates.count - 1 - row * pageSize)
+      let column = min(maximumColumn, max(0, currentColumn + horizontal))
+      highlightedIndex = row * pageSize + column
+    }
   }
 
   private func selectHighlightedCandidate() {
@@ -345,7 +409,8 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
       candidatePresenter.updateExpanded(
         candidates: currentCandidates,
         highlighted: highlightedIndex,
-        rows: 5,
+        pageSize: 5,
+        layout: expandedLayout,
         hasMore: false,
         anchor: anchorRectOnScreen()
       )
@@ -364,7 +429,8 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
       candidatePresenter.updateExpanded(
         candidates: currentCandidates,
         highlighted: highlightedIndex,
-        rows: 5,
+        pageSize: 5,
+        layout: expandedLayout,
         hasMore: false,
         anchor: anchorRectOnScreen()
       )
@@ -441,6 +507,8 @@ private enum FeatherCandidatePreviewMain {
     application.setActivationPolicy(.regular)
     let delegate = AppDelegate()
     application.delegate = delegate
-    application.run()
+    withExtendedLifetime(delegate) {
+      application.run()
+    }
   }
 }

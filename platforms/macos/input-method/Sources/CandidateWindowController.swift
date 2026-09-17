@@ -166,6 +166,7 @@ enum CandidateWindowAction {
 @MainActor
 protocol CandidatePresenting: AnyObject {
   var actionHandler: ((CandidateWindowAction) -> Void)? { get set }
+  var compactLayout: CandidateLayout { get }
 
   func update(
     candidates: [FeatherCandidateValue],
@@ -175,7 +176,8 @@ protocol CandidatePresenting: AnyObject {
   func updateExpanded(
     candidates: [FeatherCandidateValue],
     highlighted: Int,
-    rows: Int,
+    pageSize: Int,
+    layout: CandidateLayout,
     hasMore: Bool,
     anchor: NSRect
   )
@@ -185,6 +187,10 @@ protocol CandidatePresenting: AnyObject {
 @MainActor
 final class CandidateWindowController: NSObject, CandidatePresenting {
   var actionHandler: ((CandidateWindowAction) -> Void)?
+  private let layoutSettings: CandidateLayoutSettings
+  private(set) var resolvedCompactLayout = CandidateLayout.vertical
+  private(set) var numberedExpandedIndices: [Int] = []
+  var compactLayout: CandidateLayout { resolvedCompactLayout }
 
   private var candidates: [FeatherCandidateValue] = []
   private lazy var panel = makePanel()
@@ -193,6 +199,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
   private lazy var expandedGrid = makeExpandedGrid()
   private lazy var contentStack = makeContentStack()
   private lazy var backgroundView = makeBackgroundView()
+
+  init(layoutSettings: CandidateLayoutSettings = .shared) {
+    self.layoutSettings = layoutSettings
+    super.init()
+  }
 
   func update(
     candidates: [FeatherCandidateValue],
@@ -209,18 +220,19 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     expandedHeader.isHidden = true
     expandedGrid.isHidden = true
     removeArrangedSubviews(from: expandedGrid)
-    let columnWidth = rebuildCandidateRows(highlighted: highlighted)
-    resizeAndShow(at: anchor, contentWidth: columnWidth)
+    let contentWidth = rebuildCandidateRows(highlighted: highlighted, anchor: anchor)
+    resizeAndShow(at: anchor, contentWidth: contentWidth)
   }
 
   func updateExpanded(
     candidates: [FeatherCandidateValue],
     highlighted: Int,
-    rows: Int,
+    pageSize: Int,
+    layout: CandidateLayout,
     hasMore: Bool,
     anchor: NSRect
   ) {
-    guard !candidates.isEmpty, rows > 0 else {
+    guard !candidates.isEmpty, pageSize > 0 else {
       hide()
       return
     }
@@ -231,7 +243,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     expandedGrid.isHidden = false
     removeArrangedSubviews(from: candidateStack)
     expandedHeader.stringValue = "全部候选 · \(candidates.count)\(hasMore ? "+" : "")"
-    let gridWidth = rebuildExpandedGrid(highlighted: highlighted, rows: rows)
+    let gridWidth = rebuildExpandedGrid(
+      highlighted: highlighted,
+      pageSize: pageSize,
+      layout: layout
+    )
     let contentWidth = max(gridWidth, expandedHeader.intrinsicContentSize.width)
     resizeAndShow(at: anchor, contentWidth: contentWidth)
   }
@@ -325,10 +341,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     return background
   }
 
-  private func rebuildCandidateRows(highlighted: Int?) -> CGFloat {
+  private func rebuildCandidateRows(highlighted: Int?, anchor: NSRect) -> CGFloat {
     removeArrangedSubviews(from: candidateStack)
 
-    var measuredWidth: CGFloat = 0
+    var buttons: [CandidateRowButton] = []
+    var widths: [CGFloat] = []
     for (index, candidate) in candidates.enumerated() {
       let button = CandidateRowButton(
         index: String(index + 1),
@@ -338,11 +355,39 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
       )
       button.tag = index
       button.candidateHighlighted = highlighted == index
-      measuredWidth = max(measuredWidth, button.intrinsicContentSize.width)
-      candidateStack.addArrangedSubview(button)
-      button.widthAnchor.constraint(equalTo: candidateStack.widthAnchor).isActive = true
+      buttons.append(button)
+      widths.append(button.intrinsicContentSize.width)
     }
-    return measuredWidth > 0 ? measuredWidth : CandidateWindowStyle.fallbackColumnWidth
+
+    let horizontalInsets =
+      CandidateWindowStyle.contentInsets.left + CandidateWindowStyle.contentInsets.right
+    let availableScreenWidth =
+      (screen(containing: anchor)?.visibleFrame.width ?? NSScreen.main?.visibleFrame.width
+        ?? CandidateWindowStyle.maximumWidth)
+      - CandidateWindowStyle.screenInset * 2
+    let horizontalContentWidth =
+      widths.reduce(0, +)
+      + CandidateWindowStyle.candidateSpacing * CGFloat(max(0, widths.count - 1))
+    let horizontalLimit = min(
+      CandidateWindowStyle.maximumWidth - horizontalInsets,
+      max(0, availableScreenWidth - horizontalInsets)
+    )
+    resolvedCompactLayout =
+      layoutSettings.layout == .horizontal && horizontalContentWidth <= horizontalLimit
+      ? .horizontal : .vertical
+    candidateStack.orientation = resolvedCompactLayout == .horizontal ? .horizontal : .vertical
+    candidateStack.alignment = resolvedCompactLayout == .horizontal ? .centerY : .leading
+
+    for button in buttons {
+      candidateStack.addArrangedSubview(button)
+      if resolvedCompactLayout == .vertical {
+        button.widthAnchor.constraint(equalTo: candidateStack.widthAnchor).isActive = true
+      }
+    }
+    if resolvedCompactLayout == .horizontal {
+      return horizontalContentWidth
+    }
+    return widths.max() ?? CandidateWindowStyle.fallbackColumnWidth
   }
 
   private func makeExpandedHeader() -> NSTextField {
@@ -365,33 +410,57 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     return stack
   }
 
-  private func rebuildExpandedGrid(highlighted: Int, rows: Int) -> CGFloat {
+  private func rebuildExpandedGrid(
+    highlighted: Int,
+    pageSize: Int,
+    layout: CandidateLayout
+  ) -> CGFloat {
     removeArrangedSubviews(from: expandedGrid)
+    numberedExpandedIndices = []
 
-    let pageSize = rows * CandidateWindowStyle.expandedColumnCount
-    let start = min(max(0, highlighted), candidates.count - 1) / pageSize * pageSize
-    let end = min(candidates.count, start + pageSize)
-    let activeColumn = highlighted / rows
+    let expandedPageSize = pageSize * CandidateWindowStyle.expandedColumnCount
+    let start =
+      min(max(0, highlighted), candidates.count - 1) / expandedPageSize
+      * expandedPageSize
+    let end = min(candidates.count, start + expandedPageSize)
+    let columnCount = layout == .horizontal ? pageSize : CandidateWindowStyle.expandedColumnCount
     let horizontalInsets =
       CandidateWindowStyle.contentInsets.left + CandidateWindowStyle.contentInsets.right
     let maximumColumnWidth =
       (CandidateWindowStyle.maximumWidth - horizontalInsets
         - CandidateWindowStyle.expandedColumnSpacing
-        * CGFloat(CandidateWindowStyle.expandedColumnCount - 1))
-      / CGFloat(CandidateWindowStyle.expandedColumnCount)
+        * CGFloat(max(0, columnCount - 1)))
+      / CGFloat(columnCount)
     let columnWidth = min(measuredCandidateWidth(in: start..<end), maximumColumnWidth)
     guard start < end else { return 0 }
 
-    var columnCount = 0
-    for columnStart in stride(from: start, to: end, by: rows) {
+    var renderedColumnCount = 0
+    for columnOffset in 0..<columnCount {
       let column = NSStackView()
       column.orientation = .vertical
       column.alignment = .leading
       column.spacing = CandidateWindowStyle.candidateSpacing
       column.widthAnchor.constraint(equalToConstant: columnWidth)
         .isActive = true
-      for index in columnStart..<min(end, columnStart + rows) {
-        let number = index / rows == activeColumn ? String(index % rows + 1) : ""
+      let indices: [Int]
+      switch layout {
+      case .vertical:
+        let columnStart = start + columnOffset * pageSize
+        indices = Array(columnStart..<min(end, columnStart + pageSize))
+      case .horizontal:
+        indices = stride(
+          from: start + columnOffset,
+          to: end,
+          by: pageSize
+        ).map { $0 }
+      }
+      guard !indices.isEmpty else { continue }
+      for index in indices {
+        let isNumbered = index / pageSize == highlighted / pageSize
+        if isNumbered {
+          numberedExpandedIndices.append(index)
+        }
+        let number = isNumbered ? String(index % pageSize + 1) : ""
         let button = CandidateRowButton(
           index: number,
           text: candidates[index].text,
@@ -404,10 +473,10 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
         button.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
       }
       expandedGrid.addArrangedSubview(column)
-      columnCount += 1
+      renderedColumnCount += 1
     }
-    return columnWidth * CGFloat(columnCount)
-      + CandidateWindowStyle.expandedColumnSpacing * CGFloat(max(0, columnCount - 1))
+    return columnWidth * CGFloat(renderedColumnCount)
+      + CandidateWindowStyle.expandedColumnSpacing * CGFloat(max(0, renderedColumnCount - 1))
   }
 
   private func measuredCandidateWidth(in range: Range<Int>) -> CGFloat {

@@ -56,6 +56,10 @@ final class OwnedCandidatePresenter: CandidatePresenting {
     set { store.presenter(for: ownershipID)?.actionHandler = newValue }
   }
 
+  var compactLayout: CandidateLayout {
+    store.presenter(for: ownershipID)?.compactLayout ?? .vertical
+  }
+
   func activate() {
     store.activate(ownershipID)
   }
@@ -79,14 +83,16 @@ final class OwnedCandidatePresenter: CandidatePresenting {
   func updateExpanded(
     candidates: [FeatherCandidateValue],
     highlighted: Int,
-    rows: Int,
+    pageSize: Int,
+    layout: CandidateLayout,
     hasMore: Bool,
     anchor: NSRect
   ) {
     store.presenter(for: ownershipID)?.updateExpanded(
       candidates: candidates,
       highlighted: highlighted,
-      rows: rows,
+      pageSize: pageSize,
+      layout: layout,
       hasMore: hasMore,
       anchor: anchor
     )

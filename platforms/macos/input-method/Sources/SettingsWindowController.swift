@@ -6,13 +6,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     modeMemory: .shared,
     schemeMemory: .shared,
     focusIndicatorSettings: .shared,
-    candidatePageSettings: .shared
+    candidatePageSettings: .shared,
+    candidateLayoutSettings: .shared
   )
 
   private let modeMemory: InputModeMemory
   private let schemeMemory: InputSchemeMemory
   private let focusIndicatorSettings: FocusIndicatorSettings
   private let candidatePageSettings: CandidatePageSettings
+  private let candidateLayoutSettings: CandidateLayoutSettings
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
   private weak var policyPopup: NSPopUpButton?
@@ -21,17 +23,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var focusDurationStepper: NSStepper?
   private weak var candidateCountValue: NSTextField?
   private weak var candidateCountStepper: NSStepper?
+  private weak var candidateLayoutPopup: NSPopUpButton?
 
   init(
     modeMemory: InputModeMemory,
     schemeMemory: InputSchemeMemory,
     focusIndicatorSettings: FocusIndicatorSettings,
-    candidatePageSettings: CandidatePageSettings
+    candidatePageSettings: CandidatePageSettings,
+    candidateLayoutSettings: CandidateLayoutSettings
   ) {
     self.modeMemory = modeMemory
     self.schemeMemory = schemeMemory
     self.focusIndicatorSettings = focusIndicatorSettings
     self.candidatePageSettings = candidatePageSettings
+    self.candidateLayoutSettings = candidateLayoutSettings
   }
 
   func show() {
@@ -71,11 +76,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func selectCandidateLayout(_ layout: CandidateLayout) {
+    candidateLayoutSettings.update(layout)
+    refreshControls()
+  }
+
   private func requireWindow() -> NSWindow {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 465),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 510),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -177,6 +187,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateCountHelp.font = .systemFont(ofSize: 12)
     candidateCountHelp.textColor = .secondaryLabelColor
 
+    let candidateLayoutLabel = NSTextField(labelWithString: "候选排列")
+    candidateLayoutLabel.font = .systemFont(ofSize: 13, weight: .medium)
+    let candidateLayoutPopup = NSPopUpButton()
+    for layout in CandidateLayout.allCases {
+      candidateLayoutPopup.addItem(withTitle: layout.title)
+      candidateLayoutPopup.lastItem?.representedObject = layout.rawValue
+    }
+    candidateLayoutPopup.target = self
+    candidateLayoutPopup.action = #selector(candidateLayoutChanged(_:))
+    self.candidateLayoutPopup = candidateLayoutPopup
+
     let emptyPolicyHelp = NSTextField(labelWithString: "")
     let emptyFocusToggle = NSTextField(labelWithString: "")
     let emptyFocusHelp = NSTextField(labelWithString: "")
@@ -191,6 +212,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [emptyFocusHelp, focusHelp],
       [NSTextField(labelWithString: "焦点提示显示"), focusDurationControls],
       [emptyDurationHelp, focusDurationHelp],
+      [candidateLayoutLabel, candidateLayoutPopup],
       [NSTextField(labelWithString: "拼音每页候选"), candidateCountControls],
       [emptyCandidateCountHelp, candidateCountHelp],
     ])
@@ -237,6 +259,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusDurationStepper?.isEnabled = !waitsUntilInput
     candidateCountValue?.stringValue = "\(candidatePageSettings.count)"
     candidateCountStepper?.integerValue = candidatePageSettings.count
+    if let index = CandidateLayout.allCases.firstIndex(of: candidateLayoutSettings.layout) {
+      candidateLayoutPopup?.selectItem(at: index)
+    }
   }
 
   @objc private func schemeChanged(_ sender: NSPopUpButton) {
@@ -263,5 +288,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   @objc private func candidateCountChanged(_ sender: NSStepper) {
     selectCandidateCount(sender.integerValue)
+  }
+
+  @objc private func candidateLayoutChanged(_ sender: NSPopUpButton) {
+    guard let rawValue = sender.selectedItem?.representedObject as? String,
+      let layout = CandidateLayout(rawValue: rawValue)
+    else { return }
+    selectCandidateLayout(layout)
   }
 }

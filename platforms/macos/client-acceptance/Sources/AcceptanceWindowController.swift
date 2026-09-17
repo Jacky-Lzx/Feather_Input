@@ -109,12 +109,12 @@ final class AcceptanceWindowController: NSWindowController {
     let checklistTitle = label("人工验收清单", font: .systemFont(ofSize: 16, weight: .medium))
     let checklistItems = [
       "shijie 出现预编辑和“世界”候选",
-      "紧凑窗上下键会改变候选高亮",
-      "紧凑窗左键和 Page Up / Page Down 会翻页",
-      "紧凑窗右键会展开全词候选",
+      "竖排紧凑窗上下键选词、右键展开",
+      "横排紧凑窗左右键选词、上下键展开",
+      "Page Up / Page Down 可以翻页",
       "全词窗四个方向键可以跨行、跨列移动",
-      "全词窗只有当前列显示数字",
-      "数字键选择当前列对应候选并上屏",
+      "全词窗只给竖排当前列或横排当前行编号",
+      "数字键选择当前列或当前行对应候选并上屏",
       "Tab 由客户端接收，输入法不主动关闭全词候选",
       "Esc 取消组合并关闭候选窗，不产生上屏文字",
       "输入 shi，右移越过第 40 项后仍能继续加载候选",
@@ -131,6 +131,7 @@ final class AcceptanceWindowController: NSWindowController {
       "输入框获得焦点时在插入点旁显示当前中英文状态",
       "焦点状态提示按设置自动消失或保持到开始输入",
       "修改拼音每页候选后，下一次组合的页大小与翻页边界同步变化",
+      "横排超宽时回退竖排，键盘语义与实际排列一致",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
     let itemsPerColumn = (checklistItems.count + 1) / 2

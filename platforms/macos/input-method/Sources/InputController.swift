@@ -11,7 +11,8 @@ private struct ExpandedCandidateState {
   let revision: UInt64
   var candidates: [FeatherCandidateValue]
   var highlighted: Int
-  let rows: Int
+  let pageSize: Int
+  let layout: CandidateLayout
   var hasMore: Bool
 }
 
@@ -188,11 +189,23 @@ final class InputController: IMKInputController {
     if event.keyCode == 53, hasComposition {
       return dispatch(.escape, to: client)
     }
-    if event.keyCode == 124, hasComposition, currentResponse?.candidates.isEmpty == false,
+    if hasComposition, currentResponse?.candidates.isEmpty == false,
       event.modifierFlags.intersection([.command, .control, .option]).isEmpty
     {
-      openExpandedCandidates(for: client)
-      return true
+      switch candidatePresenter.compactLayout {
+      case .vertical where event.keyCode == 124:
+        openExpandedCandidates(for: client)
+        return true
+      case .horizontal where event.keyCode == 125 || event.keyCode == 126:
+        openExpandedCandidates(for: client)
+        return true
+      case .horizontal where event.keyCode == 123:
+        return dispatch(.up, to: client)
+      case .horizontal where event.keyCode == 124:
+        return dispatch(.down, to: client)
+      default:
+        break
+      }
     }
     let shortcutModifiers = event.modifierFlags.intersection([.command, .control, .option])
     guard shortcutModifiers.isEmpty, let input = normalizedInput(for: event) else {
@@ -360,10 +373,11 @@ final class InputController: IMKInputController {
   private func openExpandedCandidates(for client: IMKTextInput) {
     guard let response = currentResponse, !response.candidates.isEmpty else { return }
     do {
-      let rows = max(1, min(9, response.candidates.count))
-      let pageSize = rows * CandidateWindowStyle.expandedColumnCount
+      let compactPageSize = max(1, min(9, response.candidates.count))
+      let expandedPageSize = compactPageSize * CandidateWindowStyle.expandedColumnCount
+      let layout = candidatePresenter.compactLayout
       let slice = try ensureActive().candidateSlice(
-        revision: response.revision, offset: 0, limit: pageSize)
+        revision: response.revision, offset: 0, limit: expandedPageSize)
       guard currentResponse?.revision == slice.revision, !slice.candidates.isEmpty else { return }
       let highlightedID = response.highlighted.flatMap { index in
         response.candidates.indices.contains(index) ? response.candidates[index] : nil
@@ -376,7 +390,8 @@ final class InputController: IMKInputController {
         revision: slice.revision,
         candidates: slice.candidates,
         highlighted: highlighted,
-        rows: rows,
+        pageSize: compactPageSize,
+        layout: layout,
         hasMore: slice.hasMore
       )
       renderExpandedCandidates(for: client)
@@ -392,7 +407,7 @@ final class InputController: IMKInputController {
       let slice = try session.candidateSlice(
         revision: expandedCandidates.revision,
         offset: expandedCandidates.candidates.count,
-        limit: expandedCandidates.rows * CandidateWindowStyle.expandedColumnCount
+        limit: expandedCandidates.pageSize * CandidateWindowStyle.expandedColumnCount
       )
       guard currentResponse?.revision == slice.revision else {
         self.expandedCandidates = nil
@@ -414,7 +429,8 @@ final class InputController: IMKInputController {
     candidatePresenter.updateExpanded(
       candidates: expandedCandidates.candidates,
       highlighted: expandedCandidates.highlighted,
-      rows: expandedCandidates.rows,
+      pageSize: expandedCandidates.pageSize,
+      layout: expandedCandidates.layout,
       hasMore: expandedCandidates.hasMore,
       anchor: candidateAnchor(for: client)
     )
@@ -456,10 +472,10 @@ final class InputController: IMKInputController {
     }
     if let characters = event.charactersIgnoringModifiers,
       let number = Int(characters),
-      (1...expandedCandidates.rows).contains(number)
+      (1...expandedCandidates.pageSize).contains(number)
     {
-      let column = expandedCandidates.highlighted / expandedCandidates.rows
-      let index = column * expandedCandidates.rows + number - 1
+      let axis = expandedCandidates.highlighted / expandedCandidates.pageSize
+      let index = axis * expandedCandidates.pageSize + number - 1
       if expandedCandidates.candidates.indices.contains(index) {
         selectExpandedCandidate(expandedCandidates.candidates[index], client: client)
       }
@@ -479,27 +495,55 @@ final class InputController: IMKInputController {
     let horizontal = movement.horizontal
     let vertical = movement.vertical
 
-    let currentColumn = expandedCandidates.highlighted / expandedCandidates.rows
-    if horizontal > 0,
-      (currentColumn + 1) * expandedCandidates.rows >= expandedCandidates.candidates.count,
-      expandedCandidates.hasMore
-    {
-      guard loadMoreExpandedCandidates() else {
-        closeExpandedCandidates(for: client)
-        return true
+    switch expandedCandidates.layout {
+    case .vertical:
+      let currentColumn = expandedCandidates.highlighted / expandedCandidates.pageSize
+      if horizontal > 0,
+        (currentColumn + 1) * expandedCandidates.pageSize
+          >= expandedCandidates.candidates.count,
+        expandedCandidates.hasMore
+      {
+        guard loadMoreExpandedCandidates() else {
+          closeExpandedCandidates(for: client)
+          return true
+        }
+        guard let loaded = self.expandedCandidates else { return true }
+        expandedCandidates = loaded
       }
-      guard let loaded = self.expandedCandidates else { return true }
-      expandedCandidates = loaded
+      let maximumColumn =
+        (expandedCandidates.candidates.count - 1) / expandedCandidates.pageSize
+      let column = min(maximumColumn, max(0, currentColumn + horizontal))
+      let currentRow = expandedCandidates.highlighted % expandedCandidates.pageSize
+      let maximumRow = min(
+        expandedCandidates.pageSize - 1,
+        expandedCandidates.candidates.count - 1 - column * expandedCandidates.pageSize
+      )
+      let row = min(maximumRow, max(0, currentRow + vertical))
+      expandedCandidates.highlighted = column * expandedCandidates.pageSize + row
+    case .horizontal:
+      let currentRow = expandedCandidates.highlighted / expandedCandidates.pageSize
+      if vertical > 0,
+        (currentRow + 1) * expandedCandidates.pageSize
+          >= expandedCandidates.candidates.count,
+        expandedCandidates.hasMore
+      {
+        guard loadMoreExpandedCandidates() else {
+          closeExpandedCandidates(for: client)
+          return true
+        }
+        guard let loaded = self.expandedCandidates else { return true }
+        expandedCandidates = loaded
+      }
+      let maximumRow = (expandedCandidates.candidates.count - 1) / expandedCandidates.pageSize
+      let row = min(maximumRow, max(0, currentRow + vertical))
+      let currentColumn = expandedCandidates.highlighted % expandedCandidates.pageSize
+      let maximumColumn = min(
+        expandedCandidates.pageSize - 1,
+        expandedCandidates.candidates.count - 1 - row * expandedCandidates.pageSize
+      )
+      let column = min(maximumColumn, max(0, currentColumn + horizontal))
+      expandedCandidates.highlighted = row * expandedCandidates.pageSize + column
     }
-    let maximumColumn = (expandedCandidates.candidates.count - 1) / expandedCandidates.rows
-    let column = min(maximumColumn, max(0, currentColumn + horizontal))
-    let currentRow = expandedCandidates.highlighted % expandedCandidates.rows
-    let maximumRow = min(
-      expandedCandidates.rows - 1,
-      expandedCandidates.candidates.count - 1 - column * expandedCandidates.rows
-    )
-    let row = min(maximumRow, max(0, currentRow + vertical))
-    expandedCandidates.highlighted = column * expandedCandidates.rows + row
     self.expandedCandidates = expandedCandidates
     renderExpandedCandidates(for: client)
     return true

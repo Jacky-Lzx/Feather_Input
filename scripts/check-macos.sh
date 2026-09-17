@@ -24,6 +24,7 @@ swiftc \
     -parse-as-library \
     -module-cache-path "$module_cache" \
     -framework AppKit \
+    platforms/macos/input-method/Sources/CandidateLayoutSettings.swift \
     platforms/macos/input-method/Sources/CandidateWindowStyle.swift \
     platforms/macos/input-method/Sources/CandidateWindowController.swift \
     platforms/macos/candidate-preview/Sources/*.swift

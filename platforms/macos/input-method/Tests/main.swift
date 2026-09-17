@@ -45,6 +45,7 @@ struct InputMethodSmokeMain {
     try verifyInputModeMemory()
     try verifyInputSchemeMemory()
     try verifySettingsWindow()
+    try verifyCandidateLayouts()
     try verifyCandidateOverlayOwnership()
     try verifyModeIndicatorOwnership()
     guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
@@ -349,6 +350,42 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("数字键没有按当前列的不透明候选 ID 上屏")
     }
 
+    presenter.compactLayout = .horizontal
+    for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("横排候选测试无法输入拼音：\(character)")
+      }
+    }
+    let horizontalPageSize = presenter.candidates.count
+    let horizontalStart = presenter.highlighted ?? 0
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client),
+      !presenter.expanded, presenter.highlighted == horizontalStart + 1
+    else {
+      throw SmokeFailure.expectation("横排紧凑候选窗的左右键没有在当前行内选词")
+    }
+    guard controller.handle(key("", code: 126, modifiers: .function), client: client),
+      presenter.expanded, presenter.expandedLayout == .horizontal,
+      presenter.expandedPageSize == horizontalPageSize
+    else {
+      throw SmokeFailure.expectation("横排紧凑候选窗的上下键没有展开全词候选窗")
+    }
+    guard controller.handle(key("", code: 125, modifiers: .function), client: client),
+      presenter.highlighted == horizontalStart + 1 + horizontalPageSize
+    else {
+      throw SmokeFailure.expectation("横排全词候选窗的上下键没有切换候选行")
+    }
+    guard let horizontalRowStart = presenter.highlighted.map({ $0 / horizontalPageSize }) else {
+      throw SmokeFailure.expectation("横排全词候选窗没有高亮项")
+    }
+    let horizontalSelectionIndex = horizontalRowStart * horizontalPageSize + 2
+    let horizontalSelection = presenter.candidates[horizontalSelectionIndex]
+    guard controller.handle(key("3", code: 20), client: client),
+      client.committed.hasSuffix(horizontalSelection.text), !presenter.expanded
+    else {
+      throw SmokeFailure.expectation("数字键没有选择横排全词候选当前行的对应候选")
+    }
+    presenter.compactLayout = .vertical
+
     guard controller.handle(key("n", code: 45), client: client), !client.marked.isEmpty else {
       throw SmokeFailure.expectation("设置窗口测试无法创建组合")
     }
@@ -460,12 +497,15 @@ struct InputMethodSmokeMain {
       modeMemory: modeMemory,
       schemeMemory: schemeMemory,
       focusIndicatorSettings: FocusIndicatorSettings(defaults: defaults),
-      candidatePageSettings: CandidatePageSettings(defaults: defaults)
+      candidatePageSettings: CandidatePageSettings(defaults: defaults),
+      candidateLayoutSettings: CandidateLayoutSettings(defaults: defaults)
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
     let candidatePageSettings = CandidatePageSettings(defaults: defaults)
+    let candidateLayoutSettings = CandidateLayoutSettings(defaults: defaults)
     guard !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
-      candidatePageSettings.count == CandidatePageSettings.defaultCount
+      candidatePageSettings.count == CandidatePageSettings.defaultCount,
+      candidateLayoutSettings.layout == .vertical
     else {
       throw SmokeFailure.expectation("设置窗口的焦点提示或每页候选默认值错误")
     }
@@ -474,9 +514,10 @@ struct InputMethodSmokeMain {
     settings.selectFocusIndicatorWaitsUntilInput(true)
     settings.selectFocusIndicatorDuration(2.4)
     settings.selectCandidateCount(8)
+    settings.selectCandidateLayout(.horizontal)
     guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
       focusSettings.waitsUntilInput, focusSettings.duration == 2.4,
-      candidatePageSettings.count == 8
+      candidatePageSettings.count == 8, candidateLayoutSettings.layout == .horizontal
     else {
       throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
     }
@@ -491,6 +532,57 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("重复打开设置时创建了多个窗口")
     }
     shared.close()
+  }
+
+  @MainActor
+  private static func verifyCandidateLayouts() throws {
+    let suiteName = "FeatherCandidateLayout-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+      throw SmokeFailure.expectation("无法创建候选排列测试设置")
+    }
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let layoutSettings = CandidateLayoutSettings(defaults: defaults)
+    let presenter = CandidateWindowController(layoutSettings: layoutSettings)
+    let anchor = NSRect(x: 300, y: 400, width: 1, height: 20)
+    let compact = ["世界", "时间", "实践", "世间", "事件"].enumerated().map {
+      FeatherCandidateValue(revision: 1, value: UInt64($0.offset), text: $0.element)
+    }
+
+    presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
+    guard presenter.resolvedCompactLayout == .vertical else {
+      throw SmokeFailure.expectation("紧凑候选窗没有默认使用竖排")
+    }
+
+    layoutSettings.update(.horizontal)
+    presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
+    guard presenter.resolvedCompactLayout == .horizontal else {
+      throw SmokeFailure.expectation("紧凑候选窗没有应用横排设置")
+    }
+
+    let longCandidates = compact.map {
+      FeatherCandidateValue(
+        revision: $0.revision,
+        value: $0.value,
+        text: String(repeating: $0.text, count: 12)
+      )
+    }
+    presenter.update(candidates: longCandidates, highlighted: 0, anchor: anchor)
+    guard presenter.resolvedCompactLayout == .vertical else {
+      throw SmokeFailure.expectation("横排超过可用宽度时没有回退为竖排")
+    }
+
+    presenter.updateExpanded(
+      candidates: compact + compact,
+      highlighted: 6,
+      pageSize: compact.count,
+      layout: .horizontal,
+      hasMore: false,
+      anchor: anchor
+    )
+    guard presenter.numberedExpandedIndices == Array(compact.count..<(compact.count * 2)) else {
+      throw SmokeFailure.expectation("横排全词候选没有只给当前行显示编号")
+    }
+    presenter.hide()
   }
 
   @MainActor
