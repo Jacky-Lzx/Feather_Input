@@ -26,6 +26,27 @@ struct FeatherCandidateSliceValue {
   let hasMore: Bool
 }
 
+struct FeatherGeneratedCandidateValue: Equatable {
+  let text: String
+  let score: Double
+}
+
+struct FeatherGenerationResultValue: Equatable {
+  let requestID: UInt64
+  let revision: UInt64
+  let candidates: [FeatherGeneratedCandidateValue]
+  let elapsedMilliseconds: UInt64
+  let truncated: Bool
+}
+
+enum FeatherGenerationState: Equatable {
+  case pending
+  case ready(FeatherGenerationResultValue)
+  case failed
+  case cancelled
+  case stale
+}
+
 enum FeatherBridgeError: LocalizedError {
   case unsupportedABI(UInt32)
   case missingCapabilities(UInt64)
@@ -77,6 +98,7 @@ final class FeatherSession {
   private static let schemaSelectionCapability: UInt64 = 1 << 6
   private static let pageSizeCapability: UInt64 = 1 << 7
   private static let englishCandidateMinimumCapability: UInt64 = 1 << 8
+  private static let asyncMLXGenerationCapability: UInt64 = 1 << 9
 
   private var handle: OpaquePointer?
   private let capabilities: UInt64
@@ -280,6 +302,49 @@ final class FeatherSession {
     )
   }
 
+  func startGeneration(
+    requestID: UInt64,
+    revision: UInt64,
+    context: String,
+    input: String,
+    schema: String,
+    count: Int
+  ) throws -> FeatherGenerationRequest {
+    let missing = Self.asyncMLXGenerationCapability & ~capabilities
+    guard missing == 0 else {
+      throw FeatherBridgeError.missingCapabilities(missing)
+    }
+
+    var request: OpaquePointer?
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = context.withCString { contextValue in
+      input.withCString { inputValue in
+        schema.withCString { schemaValue in
+          feather_ai_generate_start(
+            requestID,
+            revision,
+            contextValue,
+            inputValue,
+            schemaValue,
+            count,
+            &request,
+            &ffiError
+          )
+        }
+      }
+    }
+    do {
+      try Self.check(status: status, error: ffiError, operation: "start MLX generation")
+    } catch {
+      feather_ai_request_free(request)
+      throw error
+    }
+    guard let request else {
+      throw FeatherBridgeError.invalidSuccess(operation: "start MLX generation")
+    }
+    return FeatherGenerationRequest(handle: request)
+  }
+
   private func requireHandle() throws -> OpaquePointer {
     guard let handle else {
       throw FeatherBridgeError.sessionClosed
@@ -312,7 +377,7 @@ final class FeatherSession {
     return consume(response)
   }
 
-  private static func check(
+  fileprivate static func check(
     status: FeatherStatus,
     error: UnsafeMutablePointer<FeatherError>?,
     operation: String
@@ -363,6 +428,110 @@ final class FeatherSession {
       revision: response.revision,
       candidates: candidates,
       highlighted: response.highlighted >= 0 ? Int(response.highlighted) : nil
+    )
+  }
+}
+
+@MainActor
+final class FeatherGenerationRequest {
+  private var handle: OpaquePointer?
+
+  fileprivate init(handle: OpaquePointer) {
+    self.handle = handle
+  }
+
+  deinit {
+    feather_ai_request_free(handle)
+  }
+
+  func poll(currentRequestID: UInt64, currentRevision: UInt64) throws
+    -> FeatherGenerationState
+  {
+    guard let handle else {
+      return .cancelled
+    }
+    var rawState = FEATHER_AI_REQUEST_PENDING.rawValue
+    var result: UnsafeMutablePointer<FeatherAiResult>?
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = feather_ai_request_poll(
+      handle,
+      currentRequestID,
+      currentRevision,
+      &rawState,
+      &result,
+      &ffiError
+    )
+    do {
+      try FeatherSession.check(status: status, error: ffiError, operation: "poll MLX generation")
+    } catch {
+      feather_ai_result_free(result)
+      throw error
+    }
+
+    switch rawState {
+    case FEATHER_AI_REQUEST_PENDING.rawValue:
+      guard result == nil else {
+        feather_ai_result_free(result)
+        throw FeatherBridgeError.invalidSuccess(operation: "pending MLX generation")
+      }
+      return .pending
+    case FEATHER_AI_REQUEST_READY.rawValue:
+      guard let result else {
+        throw FeatherBridgeError.invalidSuccess(operation: "ready MLX generation")
+      }
+      return .ready(consume(result))
+    case FEATHER_AI_REQUEST_FAILED.rawValue:
+      feather_ai_result_free(result)
+      return .failed
+    case FEATHER_AI_REQUEST_CANCELLED.rawValue:
+      feather_ai_result_free(result)
+      return .cancelled
+    case FEATHER_AI_REQUEST_STALE.rawValue:
+      feather_ai_result_free(result)
+      return .stale
+    default:
+      feather_ai_result_free(result)
+      throw FeatherBridgeError.invalidSuccess(
+        operation: "unknown MLX generation state \(rawState)"
+      )
+    }
+  }
+
+  func cancel() throws {
+    guard let handle else { return }
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = feather_ai_request_cancel(handle, &ffiError)
+    try FeatherSession.check(status: status, error: ffiError, operation: "cancel MLX generation")
+  }
+
+  func close() {
+    guard let handle else { return }
+    feather_ai_request_free(handle)
+    self.handle = nil
+  }
+
+  private func consume(_ pointer: UnsafeMutablePointer<FeatherAiResult>)
+    -> FeatherGenerationResultValue
+  {
+    defer { feather_ai_result_free(pointer) }
+    let result = pointer.pointee
+    let candidates: [FeatherGeneratedCandidateValue]
+    if let base = result.candidates, result.candidate_count > 0 {
+      candidates = UnsafeBufferPointer(start: base, count: result.candidate_count).map {
+        FeatherGeneratedCandidateValue(
+          text: $0.text.map(String.init(cString:)) ?? "",
+          score: $0.score
+        )
+      }
+    } else {
+      candidates = []
+    }
+    return FeatherGenerationResultValue(
+      requestID: result.request_id,
+      revision: result.revision,
+      candidates: candidates,
+      elapsedMilliseconds: result.elapsed_ms,
+      truncated: result.truncated != 0
     )
   }
 }
