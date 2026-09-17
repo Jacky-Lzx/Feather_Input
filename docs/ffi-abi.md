@@ -78,6 +78,34 @@ session 独立持有。关闭一个 ABI session 不会关闭其他 session。只
 所有传入字符串和按键文字均使用 UTF-8。`cursor_utf8` 也是 UTF-8 字节偏移，平台层
 负责转换成原生文本 API 所要求的坐标单位。
 
+## 异步 MLX 请求
+
+`feather_ai_generate_start()` 创建一个独立的异步请求，并立即返回
+`FeatherAiRequest`。平台层不得在按键处理路径中等待模型；应按下面的顺序管理请求：
+
+```text
+generate_start
+      ↓
+poll(current request_id, current revision) ──→ READY + FeatherAiResult
+      │                                             ↓
+      ├─ PENDING                              result_free
+      ├─ FAILED
+      ├─ CANCELLED
+      └─ STALE
+      ↓
+request_free
+```
+
+每次 `poll` 都必须传入当前组合的 `request_id` 和 `revision`。任一值已经变化时，请求会
+永久进入 `FEATHER_AI_REQUEST_STALE`，迟到的生成结果不会重新变为可用。显式取消后则永久
+进入 `FEATHER_AI_REQUEST_CANCELLED`。底层网络或 Metal 工作不保证能够立即停止，但其结果
+不会再被返回给平台层。
+
+`READY` 是唯一会返回 `FeatherAiResult` 的状态；结果及其中的候选文字必须由
+`feather_ai_result_free()` 释放。`FAILED`、`CANCELLED` 和 `STALE` 都不返回结果，平台层应
+静默保留 Rime 候选，不改变当前组合。`FeatherAiRequest` 的 `poll`、`cancel` 和 `free`
+必须在创建它的同一线程执行。
+
 ## 能力位
 
 ABI v2 当前公开以下能力：
@@ -91,6 +119,8 @@ ABI v2 当前公开以下能力：
 - `FEATHER_CAP_SCHEMA_SELECTION`：支持在现有会话内切换已允许的输入方案；
 - `FEATHER_CAP_PAGE_SIZE`：支持将引擎的真实候选页大小设置为 1–9。
 - `FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM`：支持将混合英文候选的最少输入长度设置为 1–12。
+- `FEATHER_CAP_ASYNC_MLX_GENERATION`：支持带 request ID 与 revision 校验的异步 MLX
+  生成请求。
 
 平台层只应要求自身实际依赖的能力。新增可选能力时增加新的位，不改变已有位的含义。
 

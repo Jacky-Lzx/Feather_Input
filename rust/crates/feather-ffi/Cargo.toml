@@ -9,6 +9,7 @@ rust-version.workspace = true
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
+feather-ai = { path = "../feather-ai" }
 feather-core = { path = "../feather-core" }
 feather-engine-lexicon = { path = "../feather-engine-lexicon" }
 feather-engine-rime = { path = "../feather-engine-rime" }

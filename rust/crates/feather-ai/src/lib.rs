@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -27,6 +29,17 @@ pub struct GenerationRequest {
     pub input: String,
     pub scheme: InputScheme,
     pub count: u8,
+}
+
+impl GenerationRequest {
+    /// 检查发送给模型服务之前的输入边界。
+    ///
+    /// # Errors
+    ///
+    /// 上下文为空、拼音格式错误或候选数量超出范围时返回错误。
+    pub fn validate(&self) -> Result<(), AiError> {
+        validate_request(self)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +88,93 @@ pub trait AiProvider: Send + Sync {
     ///
     /// 请求无效、提供者不可用、服务繁忙或响应未通过校验时返回错误。
     fn generate(&self, request: &GenerationRequest) -> Result<GenerationBatch, AiError>;
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum GenerationTaskState {
+    Pending,
+    Ready(GenerationBatch),
+    Failed(AiError),
+    Cancelled,
+    Stale,
+}
+
+pub struct GenerationTask {
+    request_id: u64,
+    revision: u64,
+    receiver: mpsc::Receiver<Result<GenerationBatch, AiError>>,
+    cancelled: Arc<AtomicBool>,
+    terminal: Option<GenerationTaskState>,
+}
+
+impl GenerationTask {
+    #[must_use]
+    pub fn start(provider: Arc<dyn AiProvider>, request: GenerationRequest) -> Self {
+        let request_id = request.request_id;
+        let revision = request.revision;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            if worker_cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            let result = provider.generate(&request);
+            if !worker_cancelled.load(Ordering::Acquire) {
+                let _ = sender.send(result);
+            }
+        });
+        Self {
+            request_id,
+            revision,
+            receiver,
+            cancelled,
+            terminal: None,
+        }
+    }
+
+    #[must_use]
+    pub fn poll(&mut self, current_request_id: u64, current_revision: u64) -> GenerationTaskState {
+        if let Some(state) = &self.terminal {
+            return state.clone();
+        }
+        if self.request_id != current_request_id || self.revision != current_revision {
+            self.cancelled.store(true, Ordering::Release);
+            let state = GenerationTaskState::Stale;
+            self.terminal = Some(state.clone());
+            return state;
+        }
+        match self.receiver.try_recv() {
+            Ok(Ok(batch)) => {
+                let state =
+                    if batch.request_id == self.request_id && batch.revision == self.revision {
+                        GenerationTaskState::Ready(batch)
+                    } else {
+                        GenerationTaskState::Stale
+                    };
+                self.terminal = Some(state.clone());
+                state
+            }
+            Ok(Err(error)) => {
+                let state = GenerationTaskState::Failed(error);
+                self.terminal = Some(state.clone());
+                state
+            }
+            Err(mpsc::TryRecvError::Empty) => GenerationTaskState::Pending,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                let state = GenerationTaskState::Failed(AiError::Unavailable);
+                self.terminal = Some(state.clone());
+                state
+            }
+        }
+    }
+
+    pub fn cancel(&mut self) {
+        if self.terminal.is_none() {
+            self.cancelled.store(true, Ordering::Release);
+            self.terminal = Some(GenerationTaskState::Cancelled);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -345,6 +445,7 @@ mod tests {
     use std::io::{BufRead, BufReader};
     use std::net::TcpListener;
     use std::sync::Mutex;
+    use std::time::Instant;
 
     #[derive(Debug)]
     struct FakeTransport {
@@ -388,6 +489,35 @@ mod tests {
             status,
             body: body.as_bytes().to_vec(),
         }
+    }
+
+    #[derive(Debug)]
+    struct StaticProvider {
+        batch: GenerationBatch,
+        delay: Duration,
+    }
+
+    impl AiProvider for StaticProvider {
+        fn generate(&self, _request: &GenerationRequest) -> Result<GenerationBatch, AiError> {
+            thread::sleep(self.delay);
+            Ok(self.batch.clone())
+        }
+    }
+
+    fn task_provider(request_id: u64, revision: u64, delay: Duration) -> Arc<dyn AiProvider> {
+        Arc::new(StaticProvider {
+            batch: GenerationBatch {
+                request_id,
+                revision,
+                candidates: vec![GeneratedCandidate {
+                    text: "孤鹜".into(),
+                    score: -0.47,
+                }],
+                elapsed_ms: 5,
+                truncated: false,
+            },
+            delay,
+        })
     }
 
     #[test]
@@ -457,6 +587,48 @@ mod tests {
     fn context_suffix_uses_unicode_characters() {
         let context = format!("前缀{}", "界".repeat(80));
         assert_eq!(suffix_chars(&context, 80), "界".repeat(80));
+    }
+
+    #[test]
+    fn generation_task_returns_only_matching_identity() {
+        let mut task = GenerationTask::start(task_provider(9, 42, Duration::ZERO), request());
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match task.poll(9, 42) {
+                GenerationTaskState::Pending if Instant::now() < deadline => thread::yield_now(),
+                GenerationTaskState::Ready(batch) => {
+                    assert_eq!(batch.candidates[0].text, "孤鹜");
+                    break;
+                }
+                state => panic!("unexpected generation state: {state:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn generation_task_rejects_stale_and_cancelled_results() {
+        let delay = Duration::from_millis(20);
+        let mut stale = GenerationTask::start(task_provider(9, 42, delay), request());
+        assert_eq!(stale.poll(10, 42), GenerationTaskState::Stale);
+        thread::sleep(delay);
+        assert_eq!(stale.poll(9, 42), GenerationTaskState::Stale);
+
+        let mut cancelled = GenerationTask::start(task_provider(9, 42, delay), request());
+        cancelled.cancel();
+        assert_eq!(cancelled.poll(9, 42), GenerationTaskState::Cancelled);
+    }
+
+    #[test]
+    fn generation_task_rejects_provider_identity_mismatch() {
+        let mut task = GenerationTask::start(task_provider(99, 42, Duration::ZERO), request());
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match task.poll(9, 42) {
+                GenerationTaskState::Pending if Instant::now() < deadline => thread::yield_now(),
+                GenerationTaskState::Stale => break,
+                state => panic!("unexpected generation state: {state:?}"),
+            }
+        }
     }
 
     #[test]

@@ -32,6 +32,7 @@ dependencies = [
 name = "feather-ffi"
 version = "0.1.0"
 dependencies = [
+ "feather-ai",
  "feather-core",
  "feather-engine-lexicon",
  "feather-engine-rime",

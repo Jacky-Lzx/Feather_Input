@@ -1,3 +1,7 @@
+use feather_ai::{
+    AiProvider, GenerationBatch, GenerationRequest, GenerationTask, GenerationTaskState,
+    InputScheme as AiInputScheme, MlxProvider,
+};
 use feather_core::{
     CandidateId, DispatchResult, InputCoordinator, InputEffect, InputEvent, InputMode, Key,
 };
@@ -8,6 +12,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::ptr;
 use std::slice;
+use std::sync::Arc;
 use std::thread::{self, ThreadId};
 
 const CAP_RIME_ENGINE: u64 = 1 << 0;
@@ -19,7 +24,14 @@ const CAP_CANDIDATE_SLICES: u64 = 1 << 5;
 const CAP_SCHEMA_SELECTION: u64 = 1 << 6;
 const CAP_PAGE_SIZE: u64 = 1 << 7;
 const CAP_ENGLISH_CANDIDATE_MINIMUM: u64 = 1 << 8;
+const CAP_ASYNC_MLX_GENERATION: u64 = 1 << 9;
 const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
+
+const AI_REQUEST_PENDING: u32 = 0;
+const AI_REQUEST_READY: u32 = 1;
+const AI_REQUEST_FAILED: u32 = 2;
+const AI_REQUEST_CANCELLED: u32 = 3;
+const AI_REQUEST_STALE: u32 = 4;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,6 +75,11 @@ pub struct FeatherIme {
     owner_thread: ThreadId,
 }
 
+pub struct FeatherAiRequest {
+    task: GenerationTask,
+    owner_thread: ThreadId,
+}
+
 #[repr(C)]
 pub struct FeatherCandidate {
     pub revision: u64,
@@ -80,6 +97,28 @@ struct ResponseStorage {
 struct CandidateSliceStorage {
     _texts: Vec<CString>,
     candidates: Vec<FeatherCandidate>,
+}
+
+#[repr(C)]
+pub struct FeatherAiCandidate {
+    pub text: *const c_char,
+    pub score: f64,
+}
+
+struct AiResultStorage {
+    _texts: Vec<CString>,
+    candidates: Vec<FeatherAiCandidate>,
+}
+
+#[repr(C)]
+pub struct FeatherAiResult {
+    pub request_id: u64,
+    pub revision: u64,
+    pub candidates: *const FeatherAiCandidate,
+    pub candidate_count: usize,
+    pub elapsed_ms: u64,
+    pub truncated: u8,
+    pub storage: *mut c_void,
 }
 
 #[repr(C)]
@@ -126,6 +165,51 @@ fn new_session(core: InputCoordinator) -> *mut FeatherIme {
     Box::into_raw(Box::new(FeatherIme {
         core: Some(core),
         owner_thread: thread::current().id(),
+    }))
+}
+
+fn new_ai_request(
+    provider: Arc<dyn AiProvider>,
+    request: GenerationRequest,
+) -> *mut FeatherAiRequest {
+    Box::into_raw(Box::new(FeatherAiRequest {
+        task: GenerationTask::start(provider, request),
+        owner_thread: thread::current().id(),
+    }))
+}
+
+fn ai_result(batch: &GenerationBatch) -> *mut FeatherAiResult {
+    let texts = batch
+        .candidates
+        .iter()
+        .map(|candidate| cstring(&candidate.text))
+        .collect::<Vec<_>>();
+    let candidates = batch
+        .candidates
+        .iter()
+        .zip(&texts)
+        .map(|(candidate, text)| FeatherAiCandidate {
+            text: text.as_ptr(),
+            score: candidate.score,
+        })
+        .collect::<Vec<_>>();
+    let storage = Box::new(AiResultStorage {
+        _texts: texts,
+        candidates,
+    });
+    let result = FeatherAiResult {
+        request_id: batch.request_id,
+        revision: batch.revision,
+        candidates: storage.candidates.as_ptr(),
+        candidate_count: storage.candidates.len(),
+        elapsed_ms: batch.elapsed_ms,
+        truncated: u8::from(batch.truncated),
+        storage: ptr::null_mut(),
+    };
+    let storage = Box::into_raw(storage);
+    Box::into_raw(Box::new(FeatherAiResult {
+        storage: storage.cast(),
+        ..result
     }))
 }
 
@@ -268,6 +352,24 @@ unsafe fn checked_core<'a>(ime: *mut FeatherIme) -> Result<&'a mut InputCoordina
         .core
         .as_mut()
         .ok_or_else(|| FfiFailure::new(StatusCode::SessionClosed, "输入法 session 已经关闭"))
+}
+
+unsafe fn checked_ai_request<'a>(
+    request: *mut FeatherAiRequest,
+) -> Result<&'a mut FeatherAiRequest, FfiFailure> {
+    let Some(request) = (unsafe { request.as_mut() }) else {
+        return Err(FfiFailure::new(
+            StatusCode::InvalidArgument,
+            "AI 请求指针为空",
+        ));
+    };
+    if request.owner_thread != thread::current().id() {
+        return Err(FfiFailure::new(
+            StatusCode::WrongThread,
+            "AI 请求必须在创建它的线程上轮询和释放",
+        ));
+    }
+    Ok(request)
 }
 
 unsafe fn dispatch_impl(
@@ -432,6 +534,7 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_SCHEMA_SELECTION
         | CAP_PAGE_SIZE
         | CAP_ENGLISH_CANDIDATE_MINIMUM
+        | CAP_ASYNC_MLX_GENERATION
 }
 
 #[no_mangle]
@@ -745,6 +848,165 @@ pub unsafe extern "C" fn feather_ime_candidate_slice(
 }
 
 #[no_mangle]
+/// Starts one asynchronous MLX pinyin-generation request.
+///
+/// # Safety
+///
+/// String arguments must point to valid NUL-terminated UTF-8 strings for the
+/// duration of the call. Output pointers follow `feather_ime_new`.
+pub unsafe extern "C" fn feather_ai_generate_start(
+    request_id: u64,
+    revision: u64,
+    context: *const c_char,
+    input: *const c_char,
+    schema: *const c_char,
+    count: usize,
+    out_request: *mut *mut FeatherAiRequest,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        output_call(out_request, out_error, || {
+            let context = utf8_argument(context, "context")?.to_owned();
+            let input = utf8_argument(input, "input")?.to_owned();
+            let schema_value = supported_schema(utf8_argument(schema, "schema")?)?;
+            let input_scheme = match schema_value {
+                "luna_pinyin_simp" => AiInputScheme::FullPinyin,
+                "double_pinyin_flypy" => AiInputScheme::Flypy,
+                _ => unreachable!("supported_schema already validated the value"),
+            };
+            let count = u8::try_from(count)
+                .map_err(|_| FfiFailure::new(StatusCode::InvalidArgument, "AI 候选数量超出范围"))?;
+            let request = GenerationRequest {
+                request_id,
+                revision,
+                context,
+                input,
+                scheme: input_scheme,
+                count,
+            };
+            request.validate().map_err(|error| {
+                FfiFailure::new(
+                    StatusCode::InvalidArgument,
+                    format!("AI 生成请求无效：{error}"),
+                )
+            })?;
+            Ok(new_ai_request(Arc::new(MlxProvider::default()), request))
+        })
+    }
+}
+
+#[no_mangle]
+/// Polls an asynchronous generation request without blocking.
+///
+/// A ready result is returned only when both current identity values still
+/// match the request. Provider failures are reported through `out_state` so
+/// the input path can silently retain Rime candidates.
+///
+/// # Safety
+///
+/// `request` must be a live request handle used on its owner thread. Output
+/// pointers must point to writable storage.
+pub unsafe extern "C" fn feather_ai_request_poll(
+    request: *mut FeatherAiRequest,
+    current_request_id: u64,
+    current_revision: u64,
+    out_state: *mut u32,
+    out_result: *mut *mut FeatherAiResult,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe { clear_error_output(out_error) };
+    let result = catch_unwind(AssertUnwindSafe(|| unsafe {
+        let Some(out_state) = out_state.as_mut() else {
+            return Err(FfiFailure::new(
+                StatusCode::InvalidArgument,
+                "AI 请求状态输出指针为空",
+            ));
+        };
+        let Some(out_result) = out_result.as_mut() else {
+            return Err(FfiFailure::new(
+                StatusCode::InvalidArgument,
+                "AI 请求结果输出指针为空",
+            ));
+        };
+        *out_state = AI_REQUEST_PENDING;
+        *out_result = ptr::null_mut();
+        let request = checked_ai_request(request)?;
+        match request.task.poll(current_request_id, current_revision) {
+            GenerationTaskState::Pending => {}
+            GenerationTaskState::Ready(batch) => {
+                *out_state = AI_REQUEST_READY;
+                *out_result = ai_result(&batch);
+            }
+            GenerationTaskState::Failed(_) => *out_state = AI_REQUEST_FAILED,
+            GenerationTaskState::Cancelled => *out_state = AI_REQUEST_CANCELLED,
+            GenerationTaskState::Stale => *out_state = AI_REQUEST_STALE,
+        }
+        Ok(())
+    }))
+    .unwrap_or_else(|_| {
+        Err(FfiFailure::new(
+            StatusCode::InternalError,
+            "Rust FFI 内部发生 panic",
+        ))
+    });
+    match result {
+        Ok(()) => StatusCode::Ok.value(),
+        Err(failure) => unsafe { store_failure(&failure, out_error) },
+    }
+}
+
+#[no_mangle]
+/// Cancels one asynchronous generation request. Repeated cancellation is safe.
+///
+/// # Safety
+///
+/// `request` must be a live request handle used on its owner thread.
+pub unsafe extern "C" fn feather_ai_request_cancel(
+    request: *mut FeatherAiRequest,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        status_call(out_error, || {
+            checked_ai_request(request)?.task.cancel();
+            Ok(())
+        })
+    }
+}
+
+#[no_mangle]
+/// Releases an AI request handle. A null pointer is accepted.
+///
+/// # Safety
+///
+/// `request` must be null or a live request handle. It must be released on its
+/// owner thread and must not be used after this call.
+pub unsafe extern "C" fn feather_ai_request_free(request: *mut FeatherAiRequest) {
+    if !request.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            drop(unsafe { Box::from_raw(request) });
+        }));
+    }
+}
+
+#[no_mangle]
+/// Releases a generated AI result. A null pointer is accepted.
+///
+/// # Safety
+///
+/// `result` must be null or a live pointer returned through `out_result`.
+pub unsafe extern "C" fn feather_ai_result_free(result: *mut FeatherAiResult) {
+    if result.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let result = unsafe { Box::from_raw(result) };
+        if !result.storage.is_null() {
+            drop(unsafe { Box::from_raw(result.storage.cast::<AiResultStorage>()) });
+        }
+    }));
+}
+
+#[no_mangle]
 /// Releases an error returned by this library. A null pointer is accepted.
 ///
 /// # Safety
@@ -801,7 +1063,69 @@ pub unsafe extern "C" fn feather_ime_candidate_slice_free(slice: *mut FeatherCan
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use feather_ai::{AiError, GeneratedCandidate};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    #[derive(Debug)]
+    struct StaticAiProvider {
+        batch: GenerationBatch,
+        delay: Duration,
+    }
+
+    impl AiProvider for StaticAiProvider {
+        fn generate(&self, _request: &GenerationRequest) -> Result<GenerationBatch, AiError> {
+            std::thread::sleep(self.delay);
+            Ok(self.batch.clone())
+        }
+    }
+
+    fn ai_request(delay: Duration) -> *mut FeatherAiRequest {
+        let provider = Arc::new(StaticAiProvider {
+            batch: GenerationBatch {
+                request_id: 17,
+                revision: 23,
+                candidates: vec![GeneratedCandidate {
+                    text: "孤鹜".into(),
+                    score: -0.47,
+                }],
+                elapsed_ms: 8,
+                truncated: false,
+            },
+            delay,
+        });
+        new_ai_request(
+            provider,
+            GenerationRequest {
+                request_id: 17,
+                revision: 23,
+                context: "落霞与".into(),
+                input: "guwu".into(),
+                scheme: AiInputScheme::FullPinyin,
+                count: 3,
+            },
+        )
+    }
+
+    unsafe fn poll_ai(
+        request: *mut FeatherAiRequest,
+        request_id: u64,
+        revision: u64,
+    ) -> (u32, *mut FeatherAiResult, *mut FeatherError, u32) {
+        let mut state = u32::MAX;
+        let mut result = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let status = unsafe {
+            feather_ai_request_poll(
+                request,
+                request_id,
+                revision,
+                &raw mut state,
+                &raw mut result,
+                &raw mut error,
+            )
+        };
+        (state, result, error, status)
+    }
 
     unsafe fn new_lexicon() -> *mut FeatherIme {
         let mut ime = ptr::null_mut();
@@ -913,7 +1237,90 @@ mod tests {
                 | CAP_SCHEMA_SELECTION
                 | CAP_PAGE_SIZE
                 | CAP_ENGLISH_CANDIDATE_MINIMUM
+                | CAP_ASYNC_MLX_GENERATION
         );
+    }
+
+    #[test]
+    fn c_abi_v2_returns_only_identity_matching_ai_results() {
+        let request = ai_request(Duration::ZERO);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let result = loop {
+            let (state, result, error, status) = unsafe { poll_ai(request, 17, 23) };
+            assert_eq!(status, StatusCode::Ok.value());
+            assert!(error.is_null());
+            match state {
+                AI_REQUEST_PENDING if Instant::now() < deadline => std::thread::yield_now(),
+                AI_REQUEST_READY => break result,
+                state => panic!("unexpected AI request state: {state}"),
+            }
+        };
+        assert!(!result.is_null());
+        assert_eq!(unsafe { (*result).request_id }, 17);
+        assert_eq!(unsafe { (*result).revision }, 23);
+        assert_eq!(unsafe { (*result).candidate_count }, 1);
+        let candidate = unsafe { &*(*result).candidates };
+        assert_eq!(
+            unsafe { CStr::from_ptr(candidate.text) }.to_str(),
+            Ok("孤鹜")
+        );
+        assert!((candidate.score - (-0.47)).abs() < f64::EPSILON);
+        unsafe {
+            feather_ai_result_free(result);
+            feather_ai_request_free(request);
+        }
+    }
+
+    #[test]
+    fn c_abi_v2_rejects_stale_and_cancelled_ai_results() {
+        let delay = Duration::from_millis(20);
+        let stale_request = ai_request(delay);
+        let (request_state, result, error, status) = unsafe { poll_ai(stale_request, 17, 24) };
+        assert_eq!(status, StatusCode::Ok.value());
+        assert_eq!(request_state, AI_REQUEST_STALE);
+        assert!(result.is_null());
+        assert!(error.is_null());
+        std::thread::sleep(delay);
+        let (request_state, result, error, status) = unsafe { poll_ai(stale_request, 17, 23) };
+        assert_eq!(status, StatusCode::Ok.value());
+        assert_eq!(request_state, AI_REQUEST_STALE);
+        assert!(result.is_null());
+        assert!(error.is_null());
+        unsafe { feather_ai_request_free(stale_request) };
+
+        let cancelled = ai_request(delay);
+        let mut error = ptr::null_mut();
+        assert_eq!(
+            unsafe { feather_ai_request_cancel(cancelled, &raw mut error) },
+            StatusCode::Ok.value()
+        );
+        assert!(error.is_null());
+        let (request_state, result, error, status) = unsafe { poll_ai(cancelled, 17, 23) };
+        assert_eq!(status, StatusCode::Ok.value());
+        assert_eq!(request_state, AI_REQUEST_CANCELLED);
+        assert!(result.is_null());
+        assert!(error.is_null());
+        unsafe { feather_ai_request_free(cancelled) };
+    }
+
+    #[test]
+    fn c_abi_v2_rejects_ai_polling_from_another_thread() {
+        let request = ai_request(Duration::from_millis(20));
+        let address = request as usize;
+        let outcome = std::thread::spawn(move || {
+            let request = address as *mut FeatherAiRequest;
+            let (state, result, error, status) = unsafe { poll_ai(request, 17, 23) };
+            let message = unsafe { error_message(error) };
+            unsafe { feather_error_free(error) };
+            (state, result.is_null(), status, message)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(outcome.0, AI_REQUEST_PENDING);
+        assert!(outcome.1);
+        assert_eq!(outcome.2, StatusCode::WrongThread.value());
+        assert!(outcome.3.contains("创建它的线程"));
+        unsafe { feather_ai_request_free(request) };
     }
 
     #[test]

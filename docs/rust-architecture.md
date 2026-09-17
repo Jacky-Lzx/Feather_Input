@@ -66,9 +66,9 @@ macOS IMK / Windows TSF / Linux Fcitx 或 IBus
 
 当前 `feather-ai` 已实现第一种提供者：兼容旧版 `main` 的本机 MLX `/generate` 协议。
 它只连接 `127.0.0.1`，把上下文、原始拼音、输入方案和最多 3 个结果的数量发送给独立
-后端。Provider 返回原 request ID 和输入 revision；未来的协调器必须再次核对这两个值，
-不得采用来自旧组合的响应。该调用本身是阻塞接口，只允许在工作线程执行，尚未接入 C ABI
-或 macOS 候选窗。
+后端。Provider 返回原 request ID 和输入 revision；异步任务与 C ABI 轮询接口会再次核对
+这两个值，不得采用来自旧组合的响应。阻塞调用只在 Rust 工作线程执行，平台按非阻塞方式
+轮询。macOS 推荐候选窗尚未接入。
 
 ## 候选身份
 

@@ -14,6 +14,8 @@ typedef struct FeatherIme FeatherIme;
 typedef struct FeatherError FeatherError;
 typedef struct FeatherResponse FeatherResponse;
 typedef struct FeatherCandidateSlice FeatherCandidateSlice;
+typedef struct FeatherAiRequest FeatherAiRequest;
+typedef struct FeatherAiResult FeatherAiResult;
 typedef uint32_t FeatherStatus;
 
 enum FeatherStatusCode {
@@ -40,7 +42,16 @@ enum FeatherCapability {
     FEATHER_CAP_CANDIDATE_SLICES = UINT64_C(1) << 5,
     FEATHER_CAP_SCHEMA_SELECTION = UINT64_C(1) << 6,
     FEATHER_CAP_PAGE_SIZE = UINT64_C(1) << 7,
-    FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM = UINT64_C(1) << 8
+    FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM = UINT64_C(1) << 8,
+    FEATHER_CAP_ASYNC_MLX_GENERATION = UINT64_C(1) << 9
+};
+
+enum FeatherAiRequestState {
+    FEATHER_AI_REQUEST_PENDING = 0,
+    FEATHER_AI_REQUEST_READY = 1,
+    FEATHER_AI_REQUEST_FAILED = 2,
+    FEATHER_AI_REQUEST_CANCELLED = 3,
+    FEATHER_AI_REQUEST_STALE = 4
 };
 
 struct FeatherError {
@@ -75,6 +86,21 @@ struct FeatherCandidateSlice {
     const FeatherCandidate *candidates;
     size_t candidate_count;
     uint8_t has_more;
+    void *_storage;
+};
+
+typedef struct {
+    const char *text;
+    double score;
+} FeatherAiCandidate;
+
+struct FeatherAiResult {
+    uint64_t request_id;
+    uint64_t revision;
+    const FeatherAiCandidate *candidates;
+    size_t candidate_count;
+    uint64_t elapsed_ms;
+    uint8_t truncated;
     void *_storage;
 };
 
@@ -151,6 +177,26 @@ FeatherStatus feather_ime_candidate_slice(FeatherIme *ime,
                                           size_t limit,
                                           FeatherCandidateSlice **out_slice,
                                           FeatherError **out_error);
+
+/* AI requests run off the caller thread and never block the input session. */
+FeatherStatus feather_ai_generate_start(uint64_t request_id,
+                                        uint64_t revision,
+                                        const char *context,
+                                        const char *input,
+                                        const char *schema,
+                                        size_t count,
+                                        FeatherAiRequest **out_request,
+                                        FeatherError **out_error);
+FeatherStatus feather_ai_request_poll(FeatherAiRequest *request,
+                                      uint64_t current_request_id,
+                                      uint64_t current_revision,
+                                      uint32_t *out_state,
+                                      FeatherAiResult **out_result,
+                                      FeatherError **out_error);
+FeatherStatus feather_ai_request_cancel(FeatherAiRequest *request,
+                                        FeatherError **out_error);
+void feather_ai_request_free(FeatherAiRequest *request);
+void feather_ai_result_free(FeatherAiResult *result);
 
 void feather_error_free(FeatherError *error);
 void feather_ime_response_free(FeatherResponse *response);
