@@ -49,6 +49,7 @@ struct InputMethodSmokeMain {
     try verifyCandidateLayouts()
     try verifyCandidateOverlayOwnership()
     try verifyGeneratedCandidateOverlayOwnership()
+    try verifyMLXGenerationFlow()
     try verifyModeIndicatorOwnership()
     try verifyPersistentModeIndicatorOwnership()
     try verifyPersistentModeIndicatorPresentation()
@@ -670,6 +671,124 @@ struct InputMethodSmokeMain {
     guard presenter.candidates.isEmpty else {
       throw SmokeFailure.expectation("当前控制器释放后共享 AI 推荐窗没有隐藏")
     }
+  }
+
+  @MainActor
+  private static func verifyMLXGenerationFlow() throws {
+    guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
+      throw SmokeFailure.controllerCreation
+    }
+    controller.secureInputEnabled = { false }
+    controller.generationDebounceMilliseconds = 0
+    controller.generationPollMilliseconds = 1
+    var generationEnabled = true
+    controller.generationEnabled = { generationEnabled }
+    controller.generationContextProvider = { _ in "你好" }
+    let candidatePresenter = SmokeCandidatePresenter()
+    let generatedPresenter = SmokeGeneratedCandidatePresenter()
+    controller.candidatePresenter = candidatePresenter
+    controller.generatedCandidatePresenter = generatedPresenter
+    controller.modePresenter = SmokeModePresenter()
+    controller.persistentModePresenter = SmokePersistentModePresenter()
+    controller.focusIndicatorRetryDelaysMilliseconds = []
+    let defaultsName = "FeatherMLXGeneration-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: defaultsName) else {
+      throw SmokeFailure.expectation("无法创建隔离的 MLX 调度设置")
+    }
+    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    controller.modeMemory = InputModeMemory(defaults: defaults)
+    let schemeMemory = InputSchemeMemory(defaults: defaults)
+    schemeMemory.update(.fullPinyin)
+    controller.schemeMemory = schemeMemory
+
+    var requests: [SmokeGenerationRequest] = []
+    var requestArguments: [(String, String, String, Int)] = []
+    controller.generationRequestFactory = {
+      _, requestID, revision, context, input, schema, count in
+      requestArguments.append((context, input, schema, count))
+      guard context == "你好", input == "shi jie", schema == InputScheme.fullPinyin.rawValue,
+        count == 3
+      else {
+        let pending = SmokeGenerationRequest(result: nil)
+        requests.append(pending)
+        return pending
+      }
+      let request = SmokeGenerationRequest(
+        result: FeatherGenerationResultValue(
+          requestID: requestID,
+          revision: revision,
+          candidates: [
+            FeatherGeneratedCandidateValue(text: "世界", score: -0.2),
+            FeatherGeneratedCandidateValue(text: "寰宙", score: -0.4),
+          ],
+          elapsedMilliseconds: 7,
+          truncated: false
+        )
+      )
+      requests.append(request)
+      return request
+    }
+
+    let client = SmokeTextClient()
+    client.committed = "你好"
+    controller.activateServer(client)
+    defer {
+      generationEnabled = false
+      controller.deactivateServer(client)
+      RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    }
+    for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("MLX 请求测试无法输入拼音：\(character)")
+      }
+    }
+    let becameVisible = waitUntil({ generatedPresenter.isVisible })
+    guard becameVisible,
+      generatedPresenter.candidates.map(\.text) == ["寰宙"],
+      requests.count == 1,
+      requests[0].pollIdentities.allSatisfy({ $0.0 > 0 }),
+      requests[0].closeCount == 1
+    else {
+      throw SmokeFailure.expectation(
+        "匹配的 MLX 结果没有去重后显示在 AI 推荐窗：visible=\(becameVisible)，"
+          + "candidates=\(generatedPresenter.candidates.map(\.text))，requests=\(requests.count)，"
+          + "arguments=\(requestArguments)，"
+          + "polls=\(requests.first?.pollIdentities.count ?? 0)，"
+          + "closed=\(requests.first?.closeCount ?? 0)"
+      )
+    }
+    guard controller.handle(key(" ", code: 49, modifiers: .option), client: client),
+      client.committed == "你好寰宙", client.marked.isEmpty, !generatedPresenter.isVisible
+    else {
+      throw SmokeFailure.expectation("Option + Space 没有提交真实调度得到的首个 AI 候选")
+    }
+    _ = controller.handle(flags(code: 58, modifiers: [], timestamp: 0.7), client: client)
+
+    for (character, keyCode) in zip("shi", [1, 4, 34]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("MLX 取消测试无法输入拼音：\(character)")
+      }
+    }
+    guard waitUntil({ requests.count >= 2 }) else {
+      throw SmokeFailure.expectation("没有启动用于取消验证的 MLX 请求")
+    }
+    let pending = requests[1]
+    guard controller.handle(key("j", code: 38), client: client),
+      waitUntil({ pending.cancelCount == 1 && pending.closeCount == 1 })
+    else {
+      throw SmokeFailure.expectation("输入变化没有取消并释放旧 MLX 请求")
+    }
+  }
+
+  private static func waitUntil(
+    _ condition: () -> Bool,
+    timeout: TimeInterval = 1
+  ) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition(), Date() < deadline {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.005))
+    }
+    return condition()
   }
 
   private static func verifyInputModeMemory() throws {

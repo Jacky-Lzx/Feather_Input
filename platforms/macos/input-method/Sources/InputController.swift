@@ -16,6 +16,15 @@ private struct ExpandedCandidateState {
   var hasMore: Bool
 }
 
+private struct GenerationSnapshot {
+  let requestID: UInt64
+  let revision: UInt64
+  let context: String
+  let input: String
+  let schema: String
+  let selection: NSRange
+}
+
 @objc(FeatherRustInputController)
 @MainActor
 final class InputController: IMKInputController {
@@ -53,6 +62,15 @@ final class InputController: IMKInputController {
     CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
   }
   var focusIndicatorRetryDelaysMilliseconds: [UInt64] = [80, 120, 200]
+  var generationDebounceMilliseconds: UInt64 = 120
+  var generationPollMilliseconds: UInt64 = 20
+  var generationEnabled: () -> Bool = { true }
+  var generationContextProvider: ((IMKTextInput) -> String?)?
+  var generationRequestFactory:
+    (
+      (FeatherSession, UInt64, UInt64, String, String, String, Int) throws ->
+        any FeatherGenerationRequesting
+    )?
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
   private var expandedCandidates: ExpandedCandidateState?
@@ -70,9 +88,15 @@ final class InputController: IMKInputController {
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
   private var generatedSelectionHandler: ((FeatherGeneratedCandidateValue, IMKTextInput) -> Bool)?
   private var consumedGeneratedShortcutKey: UInt16?
+  private var generationTask: Task<Void, Never>?
+  private var generationRequest: (any FeatherGenerationRequesting)?
+  private var generationVersion = UUID()
+  private var nextGenerationRequestID: UInt64 = 0
+  private var recentContext = ""
 
   override func activateServer(_ sender: Any!) {
     cancelFocusIndicator()
+    cancelGeneration(clearContext: true)
     activeClient = sender as AnyObject?
     lastCaret = nil
     rightControlTap.reset()
@@ -134,6 +158,7 @@ final class InputController: IMKInputController {
 
   override func deactivateServer(_ sender: Any!) {
     cancelFocusIndicator()
+    cancelGeneration(clearContext: true)
     guard let session else {
       active = false
       currentResponse = nil
@@ -209,6 +234,7 @@ final class InputController: IMKInputController {
       cancelFocusIndicator()
       modePresenter.hide()
       persistentModePresenter.hide()
+      cancelGeneration(clearContext: true)
       cancelEngineComposition()
       return false
     }
@@ -225,8 +251,12 @@ final class InputController: IMKInputController {
       cancelFocusIndicator()
       modePresenter.hide()
       persistentModePresenter.hide()
+      cancelGeneration(clearContext: true)
       cancelEngineComposition()
       return false
+    }
+    if !hasComposition {
+      refreshContext(from: client)
     }
     persistentModePresenter.show(directMode: currentResponse?.directMode ?? false)
     cancelFocusIndicator()
@@ -401,11 +431,12 @@ final class InputController: IMKInputController {
   }
 
   private func apply(_ response: FeatherResponseValue, to client: IMKTextInput) {
-    clearGeneratedCandidates()
+    cancelGeneration()
     expandedCandidates = nil
     currentResponse = response
     if let commit = response.commit, !commit.isEmpty {
       client.insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))
+      recentContext = String((recentContext + commit).suffix(80))
     }
     let selection = NSRange(
       location: TextCoordinates.utf16Offset(in: response.preedit, utf8Offset: response.cursorUTF8),
@@ -424,6 +455,7 @@ final class InputController: IMKInputController {
         highlighted: response.highlighted,
         anchor: candidateAnchor(for: client)
       )
+      scheduleGeneration(for: response, client: client)
     }
   }
 
@@ -513,8 +545,194 @@ final class InputController: IMKInputController {
     consumedGeneratedShortcutKey = nil
   }
 
-  private func openExpandedCandidates(for client: IMKTextInput) {
+  private func scheduleGeneration(for response: FeatherResponseValue, client: IMKTextInput) {
+    guard generationEnabled(), active, !response.directMode, !recentContext.isEmpty,
+      !response.preedit.isEmpty, !response.candidates.isEmpty,
+      response.preedit.utf8.allSatisfy({
+        (0x61...0x7a).contains($0) || $0 == 0x20 || $0 == 0x27
+      })
+    else { return }
+
+    nextGenerationRequestID &+= 1
+    if nextGenerationRequestID == 0 {
+      nextGenerationRequestID = 1
+    }
+    let snapshot = GenerationSnapshot(
+      requestID: nextGenerationRequestID,
+      revision: response.revision,
+      context: recentContext,
+      input: response.preedit,
+      schema: activeScheme.rawValue,
+      selection: client.selectedRange()
+    )
+    let version = generationVersion
+    let debounce = generationDebounceMilliseconds
+    generationTask = Task { @MainActor [weak self, weak client] in
+      do {
+        if debounce > 0 {
+          try await Task.sleep(nanoseconds: debounce * 1_000_000)
+        }
+        guard let self, let client,
+          self.generationSnapshotIsCurrent(snapshot, version: version, client: client),
+          let session = self.session
+        else { return }
+
+        let request = try self.makeGenerationRequest(session: session, snapshot: snapshot)
+        self.generationRequest = request
+        while !Task.isCancelled {
+          guard self.generationSnapshotIsCurrent(snapshot, version: version, client: client) else {
+            try? request.cancel()
+            self.finishGeneration(request, version: version)
+            return
+          }
+          let state = try request.poll(
+            currentRequestID: snapshot.requestID,
+            currentRevision: snapshot.revision
+          )
+          switch state {
+          case .pending:
+            try await Task.sleep(nanoseconds: self.generationPollMilliseconds * 1_000_000)
+          case .ready(let result):
+            guard result.requestID == snapshot.requestID,
+              result.revision == snapshot.revision,
+              self.generationSnapshotIsCurrent(snapshot, version: version, client: client)
+            else {
+              try? request.cancel()
+              self.finishGeneration(request, version: version)
+              return
+            }
+            let existing = Set(response.candidates.map(\.text))
+            let suggestions = result.candidates.filter { !existing.contains($0.text) }
+            self.finishGeneration(request, version: version)
+            guard !suggestions.isEmpty else { return }
+            self.presentGeneratedCandidates(suggestions, for: client) {
+              [weak self, weak client] candidate, target in
+              guard let self, let client, target === client,
+                self.generationSnapshotIsCurrent(snapshot, version: version, client: client),
+                let session = self.session
+              else { return false }
+              do {
+                let cleared = try session.send(.escape)
+                self.apply(cleared, to: target)
+                target.insertText(
+                  candidate.text,
+                  replacementRange: NSRange(location: NSNotFound, length: 0)
+                )
+                self.recentContext = String((snapshot.context + candidate.text).suffix(80))
+                return true
+              } catch {
+                self.report(error, operation: "select generated candidate")
+                return false
+              }
+            }
+            return
+          case .failed, .cancelled, .stale:
+            self.finishGeneration(request, version: version)
+            return
+          }
+        }
+      } catch {
+        guard let self, self.generationVersion == version else { return }
+        self.finishGeneration(self.generationRequest, version: version)
+      }
+    }
+  }
+
+  private func makeGenerationRequest(
+    session: FeatherSession,
+    snapshot: GenerationSnapshot
+  ) throws -> any FeatherGenerationRequesting {
+    if let generationRequestFactory {
+      return try generationRequestFactory(
+        session,
+        snapshot.requestID,
+        snapshot.revision,
+        snapshot.context,
+        snapshot.input,
+        snapshot.schema,
+        3
+      )
+    }
+    return try session.startGeneration(
+      requestID: snapshot.requestID,
+      revision: snapshot.revision,
+      context: snapshot.context,
+      input: snapshot.input,
+      schema: snapshot.schema,
+      count: 3
+    )
+  }
+
+  private func generationSnapshotIsCurrent(
+    _ snapshot: GenerationSnapshot,
+    version: UUID,
+    client: IMKTextInput
+  ) -> Bool {
+    active && generationEnabled() && !secureInputEnabled()
+      && generationVersion == version
+      && activeClient === client
+      && currentResponse?.revision == snapshot.revision
+      && currentResponse?.preedit == snapshot.input
+      && activeScheme.rawValue == snapshot.schema
+      && recentContext == snapshot.context
+      && NSEqualRanges(client.selectedRange(), snapshot.selection)
+  }
+
+  private func finishGeneration(
+    _ request: (any FeatherGenerationRequesting)?,
+    version: UUID
+  ) {
+    request?.close()
+    guard generationVersion == version else { return }
+    generationRequest = nil
+    generationTask = nil
+  }
+
+  private func cancelGeneration(clearContext: Bool = false) {
+    generationVersion = UUID()
+    generationTask?.cancel()
+    generationTask = nil
+    try? generationRequest?.cancel()
+    generationRequest?.close()
+    generationRequest = nil
     clearGeneratedCandidates()
+    if clearContext {
+      recentContext = ""
+    }
+  }
+
+  private func refreshContext(from client: IMKTextInput) {
+    if let generationContextProvider {
+      if let context = generationContextProvider(client) {
+        recentContext = String(context.suffix(80))
+      }
+      return
+    }
+    let selection = client.selectedRange()
+    guard selection.location != NSNotFound, selection.location >= 0 else { return }
+    let count = min(selection.location, 320)
+    guard count > 0 else {
+      recentContext = ""
+      return
+    }
+    let range = NSRange(location: selection.location - count, length: count)
+    var actual = NSRange(location: NSNotFound, length: 0)
+    let plain = client.string(from: range, actualRange: &actual)
+    let text: String?
+    if let plain, NSEqualRanges(actual, range), plain.utf16.count == count {
+      text = plain
+    } else if let attributed = client.attributedSubstring(from: range), attributed.length == count {
+      text = attributed.string
+    } else {
+      text = nil
+    }
+    if let text {
+      recentContext = String(text.suffix(80))
+    }
+  }
+
+  private func openExpandedCandidates(for client: IMKTextInput) {
+    cancelGeneration()
     guard let response = currentResponse, !response.candidates.isEmpty else { return }
     do {
       let compactPageSize = max(1, min(9, response.candidates.count))
@@ -910,7 +1128,7 @@ final class InputController: IMKInputController {
   }
 
   private func cancelEngineComposition() {
-    clearGeneratedCandidates()
+    cancelGeneration()
     guard hasComposition, let session else { return }
     currentResponse = try? session.send(.escape)
     expandedCandidates = nil

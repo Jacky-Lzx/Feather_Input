@@ -47,6 +47,14 @@ enum FeatherGenerationState: Equatable {
   case stale
 }
 
+@MainActor
+protocol FeatherGenerationRequesting: AnyObject {
+  func poll(currentRequestID: UInt64, currentRevision: UInt64) throws
+    -> FeatherGenerationState
+  func cancel() throws
+  func close()
+}
+
 enum FeatherBridgeError: LocalizedError {
   case unsupportedABI(UInt32)
   case missingCapabilities(UInt64)
@@ -433,7 +441,7 @@ final class FeatherSession {
 }
 
 @MainActor
-final class FeatherGenerationRequest {
+final class FeatherGenerationRequest: FeatherGenerationRequesting {
   private var handle: OpaquePointer?
 
   fileprivate init(handle: OpaquePointer) {
