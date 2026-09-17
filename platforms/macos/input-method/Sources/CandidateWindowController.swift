@@ -177,6 +177,7 @@ enum CandidateWindowAction {
 protocol CandidatePresenting: AnyObject {
   var actionHandler: ((CandidateWindowAction) -> Void)? { get set }
   var compactLayout: CandidateLayout { get }
+  var frame: NSRect { get }
 
   func update(
     candidates: [FeatherCandidateValue],
@@ -195,17 +196,31 @@ protocol CandidatePresenting: AnyObject {
 }
 
 @MainActor
-final class CandidateWindowController: NSObject, CandidatePresenting {
+protocol GeneratedCandidatePresenting: AnyObject {
+  var generatedActionHandler: ((Int) -> Void)? { get set }
+  var isVisible: Bool { get }
+
+  func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect)
+  func hide()
+}
+
+@MainActor
+final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedCandidatePresenting {
   var actionHandler: ((CandidateWindowAction) -> Void)?
+  var generatedActionHandler: ((Int) -> Void)?
   private let layoutSettings: CandidateLayoutSettings
   private let fontSettings: CandidateFontSettings
   private(set) var resolvedCompactLayout = CandidateLayout.vertical
   private(set) var numberedExpandedIndices: [Int] = []
   private(set) var appliedFontSize = CandidateFontSettings.defaultSize
+  private(set) var displayedGeneratedCandidateCount = 0
   var compactLayout: CandidateLayout { resolvedCompactLayout }
+  var frame: NSRect { panel.frame }
   var currentPanelSize: NSSize { panel.frame.size }
+  var isVisible: Bool { panel.isVisible }
 
   private var candidates: [FeatherCandidateValue] = []
+  private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
   private lazy var panel = makePanel()
   private lazy var candidateStack = makeCandidateStack()
   private lazy var expandedHeader = makeExpandedHeader()
@@ -234,6 +249,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     }
 
     self.candidates = candidates
+    generatedCandidates = []
+    displayedGeneratedCandidateCount = 0
     appliedFontSize = fontSettings.size
     candidateStack.isHidden = false
     expandedHeader.isHidden = true
@@ -241,6 +258,24 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     removeArrangedSubviews(from: expandedGrid)
     let contentWidth = rebuildCandidateRows(highlighted: highlighted, anchor: anchor)
     resizeAndShow(at: anchor, contentWidth: contentWidth)
+  }
+
+  func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect) {
+    guard !candidates.isEmpty else {
+      hide()
+      return
+    }
+
+    self.candidates = []
+    generatedCandidates = Array(candidates.prefix(3))
+    displayedGeneratedCandidateCount = generatedCandidates.count
+    appliedFontSize = fontSettings.size
+    candidateStack.isHidden = false
+    expandedHeader.isHidden = true
+    expandedGrid.isHidden = true
+    removeArrangedSubviews(from: expandedGrid)
+    let contentWidth = rebuildCandidateRows(highlighted: nil, anchor: anchor)
+    resizeAndShow(beside: anchor, contentWidth: contentWidth)
   }
 
   func updateExpanded(
@@ -257,6 +292,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     }
 
     self.candidates = candidates
+    generatedCandidates = []
+    displayedGeneratedCandidateCount = 0
     appliedFontSize = fontSettings.size
     candidateStack.isHidden = true
     expandedHeader.isHidden = false
@@ -275,6 +312,18 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
   }
 
   private func resizeAndShow(at anchor: NSRect, contentWidth: CGFloat) {
+    resize(contentWidth: contentWidth)
+    positionPanel(at: anchor)
+    panel.orderFrontRegardless()
+  }
+
+  private func resizeAndShow(beside anchor: NSRect, contentWidth: CGFloat) {
+    resize(contentWidth: contentWidth)
+    positionPanel(beside: anchor)
+    panel.orderFrontRegardless()
+  }
+
+  private func resize(contentWidth: CGFloat) {
     panel.contentView = backgroundView
     backgroundView.layoutSubtreeIfNeeded()
     let fittingSize = backgroundView.fittingSize
@@ -288,18 +337,22 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
         ),
         height: fittingSize.height
       ))
-    positionPanel(at: anchor)
-    panel.orderFrontRegardless()
   }
 
   func hide() {
     candidates = []
+    generatedCandidates = []
+    displayedGeneratedCandidateCount = 0
     if panel.isVisible {
       panel.orderOut(nil)
     }
   }
 
   @objc private func selectCandidate(_ sender: NSButton) {
+    if generatedCandidates.indices.contains(sender.tag) {
+      generatedActionHandler?(sender.tag)
+      return
+    }
     guard candidates.indices.contains(sender.tag) else { return }
     actionHandler?(.select(candidates[sender.tag]))
   }
@@ -369,10 +422,10 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     let metrics = currentMetrics
     var buttons: [CandidateRowButton] = []
     var widths: [CGFloat] = []
-    for (index, candidate) in candidates.enumerated() {
+    for (index, text) in visibleCandidateTexts.enumerated() {
       let button = CandidateRowButton(
         index: String(index + 1),
-        text: candidate.text,
+        text: text,
         metrics: metrics,
         target: self,
         action: #selector(selectCandidate(_:))
@@ -397,7 +450,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
       max(0, availableScreenWidth - horizontalInsets)
     )
     resolvedCompactLayout =
-      layoutSettings.layout == .horizontal && horizontalContentWidth <= horizontalLimit
+      generatedCandidates.isEmpty && layoutSettings.layout == .horizontal
+        && horizontalContentWidth <= horizontalLimit
       ? .horizontal : .vertical
     candidateStack.orientation = resolvedCompactLayout == .horizontal ? .horizontal : .vertical
     candidateStack.alignment = resolvedCompactLayout == .horizontal ? .centerY : .leading
@@ -515,7 +569,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     for index in range {
       let button = CandidateRowButton(
         index: "1",
-        text: candidates[index].text,
+        text: visibleCandidateTexts[index],
         metrics: metrics,
         target: nil,
         action: nil
@@ -527,6 +581,10 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
 
   private var currentMetrics: CandidateWindowMetrics {
     CandidateWindowStyle.metrics(fontSize: appliedFontSize)
+  }
+
+  private var visibleCandidateTexts: [String] {
+    generatedCandidates.isEmpty ? candidates.map(\.text) : generatedCandidates.map(\.text)
   }
 
   private func removeArrangedSubviews(from stack: NSStackView) {
@@ -543,6 +601,26 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     var origin = NSPoint(x: anchor.minX, y: anchor.minY - panel.frame.height - gap)
     if origin.y < visibleFrame.minY {
       origin.y = anchor.maxY + gap
+    }
+    let inset = CandidateWindowStyle.screenInset
+    origin.x = min(
+      max(origin.x, visibleFrame.minX + inset),
+      visibleFrame.maxX - panel.frame.width - inset
+    )
+    origin.y = min(
+      max(origin.y, visibleFrame.minY + inset),
+      visibleFrame.maxY - panel.frame.height - inset
+    )
+    panel.setFrameOrigin(origin)
+  }
+
+  private func positionPanel(beside anchor: NSRect) {
+    let visibleFrame =
+      screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+    let gap = CandidateWindowStyle.panelGap
+    var origin = NSPoint(x: anchor.maxX + gap, y: anchor.maxY - panel.frame.height)
+    if origin.x + panel.frame.width > visibleFrame.maxX - CandidateWindowStyle.screenInset {
+      origin.x = anchor.minX - panel.frame.width - gap
     }
     let inset = CandidateWindowStyle.screenInset
     origin.x = min(

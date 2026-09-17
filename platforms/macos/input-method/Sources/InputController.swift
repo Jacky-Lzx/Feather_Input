@@ -26,6 +26,12 @@ final class InputController: IMKInputController {
     get { injectedCandidatePresenter ?? ownedCandidatePresenter }
     set { injectedCandidatePresenter = newValue }
   }
+  private var injectedGeneratedCandidatePresenter: GeneratedCandidatePresenting?
+  private lazy var ownedGeneratedCandidatePresenter = OwnedGeneratedCandidatePresenter()
+  var generatedCandidatePresenter: GeneratedCandidatePresenting {
+    get { injectedGeneratedCandidatePresenter ?? ownedGeneratedCandidatePresenter }
+    set { injectedGeneratedCandidatePresenter = newValue }
+  }
   private var injectedModePresenter: ModeIndicatorPresenting?
   private lazy var ownedModePresenter = OwnedModeIndicatorPresenter()
   var modePresenter: ModeIndicatorPresenting {
@@ -61,6 +67,9 @@ final class InputController: IMKInputController {
   private var capsLockSwitch = CapsLockSwitch()
   private var focusIndicatorTask: Task<Void, Never>?
   private var focusIndicatorVersion = UUID()
+  private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
+  private var generatedSelectionHandler: ((FeatherGeneratedCandidateValue, IMKTextInput) -> Bool)?
+  private var consumedGeneratedShortcutKey: UInt16?
 
   override func activateServer(_ sender: Any!) {
     cancelFocusIndicator()
@@ -78,6 +87,9 @@ final class InputController: IMKInputController {
     if injectedCandidatePresenter == nil {
       ownedCandidatePresenter.activate()
     }
+    if injectedGeneratedCandidatePresenter == nil {
+      ownedGeneratedCandidatePresenter.activate()
+    }
     if injectedModePresenter == nil {
       ownedModePresenter.activate()
     }
@@ -86,6 +98,9 @@ final class InputController: IMKInputController {
     }
     candidatePresenter.actionHandler = { [weak self] action in
       self?.handleCandidateWindowAction(action)
+    }
+    generatedCandidatePresenter.generatedActionHandler = { [weak self] index in
+      self?.selectGeneratedCandidate(at: index)
     }
     do {
       activeScheme = schemeMemory.load()
@@ -128,10 +143,15 @@ final class InputController: IMKInputController {
       rightControlTap.reset()
       candidatePresenter.actionHandler = nil
       candidatePresenter.hide()
+      generatedCandidatePresenter.generatedActionHandler = nil
+      clearGeneratedCandidates()
       modePresenter.hide()
       persistentModePresenter.hide()
       if injectedCandidatePresenter == nil {
         ownedCandidatePresenter.deactivate()
+      }
+      if injectedGeneratedCandidatePresenter == nil {
+        ownedGeneratedCandidatePresenter.deactivate()
       }
       if injectedModePresenter == nil {
         ownedModePresenter.deactivate()
@@ -157,10 +177,15 @@ final class InputController: IMKInputController {
     rightControlTap.reset()
     candidatePresenter.actionHandler = nil
     candidatePresenter.hide()
+    generatedCandidatePresenter.generatedActionHandler = nil
+    clearGeneratedCandidates()
     modePresenter.hide()
     persistentModePresenter.hide()
     if injectedCandidatePresenter == nil {
       ownedCandidatePresenter.deactivate()
+    }
+    if injectedGeneratedCandidatePresenter == nil {
+      ownedGeneratedCandidatePresenter.deactivate()
     }
     if injectedModePresenter == nil {
       ownedModePresenter.deactivate()
@@ -186,6 +211,14 @@ final class InputController: IMKInputController {
       persistentModePresenter.hide()
       cancelEngineComposition()
       return false
+    }
+
+    if event.type == .flagsChanged {
+      if !event.modifierFlags.contains(.option) {
+        consumedGeneratedShortcutKey = nil
+      }
+    } else if handleGeneratedCandidateShortcut(event, client: client) {
+      return true
     }
 
     guard textInputAvailable(client) else {
@@ -368,6 +401,7 @@ final class InputController: IMKInputController {
   }
 
   private func apply(_ response: FeatherResponseValue, to client: IMKTextInput) {
+    clearGeneratedCandidates()
     expandedCandidates = nil
     currentResponse = response
     if let commit = response.commit, !commit.isEmpty {
@@ -414,7 +448,73 @@ final class InputController: IMKInputController {
     }
   }
 
+  func presentGeneratedCandidates(
+    _ candidates: [FeatherGeneratedCandidateValue],
+    for client: IMKTextInput,
+    onSelect: @escaping (FeatherGeneratedCandidateValue, IMKTextInput) -> Bool
+  ) {
+    guard activeClient === client, !candidates.isEmpty else {
+      clearGeneratedCandidates()
+      return
+    }
+    generatedCandidates = Array(candidates.prefix(3))
+    generatedSelectionHandler = onSelect
+    generatedCandidatePresenter.update(
+      candidates: generatedCandidates,
+      beside: candidatePresenter.frame
+    )
+  }
+
+  private func handleGeneratedCandidateShortcut(_ event: NSEvent, client: IMKTextInput) -> Bool {
+    let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+    guard modifiers == .option else {
+      consumedGeneratedShortcutKey = nil
+      return false
+    }
+    if event.isARepeat, consumedGeneratedShortcutKey == event.keyCode {
+      return true
+    }
+    let index: Int?
+    switch event.keyCode {
+    case 18, 83: index = 0
+    case 19, 84: index = 1
+    case 20, 85: index = 2
+    case 49: index = 0
+    default: index = nil
+    }
+    guard let index, generatedCandidatePresenter.isVisible else { return false }
+    _ = selectGeneratedCandidate(at: index, client: client)
+    consumedGeneratedShortcutKey = event.keyCode
+    return true
+  }
+
+  @discardableResult
+  private func selectGeneratedCandidate(at index: Int, client: IMKTextInput? = nil) -> Bool {
+    guard generatedCandidatePresenter.isVisible,
+      generatedCandidates.indices.contains(index),
+      let target = client ?? (activeClient as? IMKTextInput),
+      activeClient === target,
+      let generatedSelectionHandler
+    else {
+      clearGeneratedCandidates()
+      return false
+    }
+    let selected = generatedSelectionHandler(generatedCandidates[index], target)
+    if selected {
+      clearGeneratedCandidates()
+    }
+    return selected
+  }
+
+  private func clearGeneratedCandidates() {
+    generatedCandidatePresenter.hide()
+    generatedCandidates = []
+    generatedSelectionHandler = nil
+    consumedGeneratedShortcutKey = nil
+  }
+
   private func openExpandedCandidates(for client: IMKTextInput) {
+    clearGeneratedCandidates()
     guard let response = currentResponse, !response.candidates.isEmpty else { return }
     do {
       let compactPageSize = max(1, min(9, response.candidates.count))
@@ -810,6 +910,7 @@ final class InputController: IMKInputController {
   }
 
   private func cancelEngineComposition() {
+    clearGeneratedCandidates()
     guard hasComposition, let session else { return }
     currentResponse = try? session.send(.escape)
     expandedCandidates = nil

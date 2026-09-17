@@ -60,6 +60,10 @@ final class OwnedCandidatePresenter: CandidatePresenting {
     store.presenter(for: ownershipID)?.compactLayout ?? .vertical
   }
 
+  var frame: NSRect {
+    store.presenter(for: ownershipID)?.frame ?? .zero
+  }
+
   func activate() {
     store.activate(ownershipID)
   }
@@ -96,6 +100,83 @@ final class OwnedCandidatePresenter: CandidatePresenting {
       hasMore: hasMore,
       anchor: anchor
     )
+  }
+
+  func hide() {
+    store.presenter(for: ownershipID)?.hide()
+  }
+}
+
+@MainActor
+final class GeneratedCandidateOverlayStore {
+  static let shared = GeneratedCandidateOverlayStore(presenter: CandidateWindowController())
+
+  private let presenter: GeneratedCandidatePresenting
+  private var ownerID: UUID?
+
+  init(presenter: GeneratedCandidatePresenting) {
+    self.presenter = presenter
+  }
+
+  func activate(_ id: UUID) {
+    guard ownerID != id else { return }
+    presenter.generatedActionHandler = nil
+    presenter.hide()
+    ownerID = id
+  }
+
+  func deactivate(_ id: UUID) {
+    guard ownerID == id else { return }
+    presenter.generatedActionHandler = nil
+    presenter.hide()
+    ownerID = nil
+  }
+
+  func presenter(for id: UUID) -> GeneratedCandidatePresenting? {
+    ownerID == id ? presenter : nil
+  }
+}
+
+@MainActor
+final class OwnedGeneratedCandidatePresenter: GeneratedCandidatePresenting {
+  private let ownershipID = UUID()
+  private let store: GeneratedCandidateOverlayStore
+
+  init() {
+    store = GeneratedCandidateOverlayStore.shared
+  }
+
+  init(store: GeneratedCandidateOverlayStore) {
+    self.store = store
+  }
+
+  deinit {
+    let ownershipID = ownershipID
+    let store = store
+    Task { @MainActor in
+      store.deactivate(ownershipID)
+    }
+  }
+
+  var generatedActionHandler: ((Int) -> Void)? {
+    get { store.presenter(for: ownershipID)?.generatedActionHandler }
+    set { store.presenter(for: ownershipID)?.generatedActionHandler = newValue }
+  }
+
+  var isVisible: Bool {
+    store.presenter(for: ownershipID)?.isVisible ?? false
+  }
+
+  func activate() {
+    store.activate(ownershipID)
+  }
+
+  func deactivate() {
+    store.deactivate(ownershipID)
+  }
+
+  func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect) {
+    store.presenter(for: ownershipID)?.update(candidates: candidates, beside: anchor)
   }
 
   func hide() {

@@ -48,6 +48,7 @@ struct InputMethodSmokeMain {
     try verifySettingsWindow()
     try verifyCandidateLayouts()
     try verifyCandidateOverlayOwnership()
+    try verifyGeneratedCandidateOverlayOwnership()
     try verifyModeIndicatorOwnership()
     try verifyPersistentModeIndicatorOwnership()
     try verifyPersistentModeIndicatorPresentation()
@@ -56,6 +57,7 @@ struct InputMethodSmokeMain {
     }
     controller.secureInputEnabled = { false }
     let presenter = SmokeCandidatePresenter()
+    let generatedPresenter = SmokeGeneratedCandidatePresenter()
     let modePresenter = SmokeModePresenter()
     let persistentModePresenter = SmokePersistentModePresenter()
     let modeDefaultsName = "FeatherInputMethodSmoke-\(UUID().uuidString)"
@@ -64,6 +66,7 @@ struct InputMethodSmokeMain {
     }
     defer { modeDefaults.removePersistentDomain(forName: modeDefaultsName) }
     controller.candidatePresenter = presenter
+    controller.generatedCandidatePresenter = generatedPresenter
     controller.modePresenter = modePresenter
     controller.persistentModePresenter = persistentModePresenter
     controller.modeMemory = InputModeMemory(defaults: modeDefaults)
@@ -87,6 +90,54 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("获得焦点时没有按默认设置显示中文模式提示")
     }
     let focusShowCount = modePresenter.showCount
+
+    let generated = [
+      FeatherGeneratedCandidateValue(text: "世界", score: -0.4),
+      FeatherGeneratedCandidateValue(text: "视界", score: -0.6),
+      FeatherGeneratedCandidateValue(text: "诗界", score: -0.8),
+    ]
+    client.bundleIdentifierValue = "com.eusoft.eudic.LightPeek"
+    client.selectionAvailable = false
+    controller.presentGeneratedCandidates(generated, for: client) { candidate, target in
+      target.insertText(
+        candidate.text,
+        replacementRange: NSRange(location: NSNotFound, length: 0)
+      )
+      return true
+    }
+    guard
+      controller.handle(key("2", code: 19, modifiers: .option), client: client),
+      client.committed == "视界",
+      !generatedPresenter.isVisible,
+      controller.handle(
+        key("2", code: 19, modifiers: .option, isARepeat: true),
+        client: client
+      )
+    else {
+      throw SmokeFailure.expectation("欧路词典中 Option + 数字没有优先选择 AI 候选")
+    }
+    _ = controller.handle(flags(code: 58, modifiers: [], timestamp: 0.5), client: client)
+    controller.presentGeneratedCandidates(generated, for: client) { candidate, target in
+      target.insertText(
+        candidate.text,
+        replacementRange: NSRange(location: NSNotFound, length: 0)
+      )
+      return true
+    }
+    guard
+      controller.handle(key(" ", code: 49, modifiers: .option), client: client),
+      client.committed == "视界世界",
+      !generatedPresenter.isVisible
+    else {
+      throw SmokeFailure.expectation("欧路词典中 Option + Space 没有优先选择第一个 AI 候选")
+    }
+    _ = controller.handle(flags(code: 58, modifiers: [], timestamp: 0.6), client: client)
+    guard !controller.handle(key(" ", code: 49, modifiers: .option), client: client) else {
+      throw SmokeFailure.expectation("AI 候选窗关闭后仍然拦截 Option + Space")
+    }
+    client.bundleIdentifierValue = "im.feather.inputmethod.rustdev.smoke"
+    client.selectionAvailable = true
+    client.committed = ""
 
     for (character, keyCode) in zip("nihao", [45, 34, 4, 0, 31]) {
       guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
@@ -584,6 +635,43 @@ struct InputMethodSmokeMain {
     }
   }
 
+  @MainActor
+  private static func verifyGeneratedCandidateOverlayOwnership() throws {
+    let presenter = SmokeGeneratedCandidatePresenter()
+    let store = GeneratedCandidateOverlayStore(presenter: presenter)
+    let first = OwnedGeneratedCandidatePresenter(store: store)
+    let second = OwnedGeneratedCandidatePresenter(store: store)
+    let firstCandidate = FeatherGeneratedCandidateValue(text: "世界", score: -0.4)
+    let secondCandidate = FeatherGeneratedCandidateValue(text: "视界", score: -0.7)
+    var firstSelectionCount = 0
+    var secondSelectionCount = 0
+
+    first.activate()
+    first.generatedActionHandler = { _ in firstSelectionCount += 1 }
+    first.update(candidates: [firstCandidate], beside: .zero)
+
+    second.activate()
+    second.generatedActionHandler = { _ in secondSelectionCount += 1 }
+    second.update(candidates: [secondCandidate], beside: .zero)
+
+    first.generatedActionHandler = nil
+    first.hide()
+    first.deactivate()
+    presenter.select(at: 0)
+    guard
+      presenter.candidates == [secondCandidate],
+      firstSelectionCount == 0,
+      secondSelectionCount == 1
+    else {
+      throw SmokeFailure.expectation("旧控制器修改了新控制器持有的共享 AI 推荐窗")
+    }
+
+    second.deactivate()
+    guard presenter.candidates.isEmpty else {
+      throw SmokeFailure.expectation("当前控制器释放后共享 AI 推荐窗没有隐藏")
+    }
+  }
+
   private static func verifyInputModeMemory() throws {
     let suiteName = "FeatherInputModeMemory-\(UUID().uuidString)"
     guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -764,6 +852,27 @@ struct InputMethodSmokeMain {
     guard presenter.numberedExpandedIndices == Array(compact.count..<(compact.count * 2)) else {
       throw SmokeFailure.expectation("横排全词候选没有只给当前行显示编号")
     }
+
+    var generatedSelection: Int?
+    presenter.generatedActionHandler = { generatedSelection = $0 }
+    presenter.update(
+      candidates: [
+        FeatherGeneratedCandidateValue(text: "视界", score: -0.4),
+        FeatherGeneratedCandidateValue(text: "诗界", score: -0.6),
+        FeatherGeneratedCandidateValue(text: "世杰", score: -0.8),
+        FeatherGeneratedCandidateValue(text: "事件", score: -1.0),
+      ],
+      beside: presenter.frame
+    )
+    guard presenter.displayedGeneratedCandidateCount == 3,
+      presenter.resolvedCompactLayout == .vertical
+    else {
+      throw SmokeFailure.expectation("AI 推荐窗没有限制为三个竖排候选")
+    }
+    presenter.generatedActionHandler?(1)
+    guard generatedSelection == 1 else {
+      throw SmokeFailure.expectation("AI 推荐窗没有传递点击的候选位置")
+    }
     presenter.hide()
   }
 
@@ -877,7 +986,8 @@ struct InputMethodSmokeMain {
     }
 
     let finalCount = NSApplication.shared.windows.filter { $0 is NSPanel }.count
-    guard finalCount <= baseline + 3 else {
+    // 主候选窗、AI 推荐窗、短暂模式提示和常驻模式提示各保留一个进程级面板。
+    guard finalCount <= baseline + 4 else {
       throw SmokeFailure.expectation(
         "多个输入控制器创建了 \(finalCount - baseline) 个输入浮层"
       )
@@ -889,7 +999,8 @@ struct InputMethodSmokeMain {
     _ characters: String,
     code: UInt16,
     modifiers: NSEvent.ModifierFlags = [],
-    charactersIgnoringModifiers: String? = nil
+    charactersIgnoringModifiers: String? = nil,
+    isARepeat: Bool = false
   ) -> NSEvent {
     NSEvent.keyEvent(
       with: .keyDown,
@@ -900,7 +1011,7 @@ struct InputMethodSmokeMain {
       context: nil,
       characters: characters,
       charactersIgnoringModifiers: charactersIgnoringModifiers ?? characters,
-      isARepeat: false,
+      isARepeat: isARepeat,
       keyCode: code
     )!
   }

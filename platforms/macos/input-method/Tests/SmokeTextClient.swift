@@ -6,6 +6,7 @@ final class SmokeTextClient: NSObject, IMKTextInput {
   var marked = ""
   var markedSelection = NSRange(location: 0, length: 0)
   var selectionAvailable = true
+  var bundleIdentifierValue = "im.feather.inputmethod.rustdev.smoke"
   var lastAttributesCharacterIndex: Int?
   var caretRectangle = NSRect(x: 100, y: 100, width: 1, height: 20)
 
@@ -55,7 +56,7 @@ final class SmokeTextClient: NSObject, IMKTextInput {
   func overrideKeyboard(withKeyboardNamed name: String!) {}
   func selectMode(_ modeIdentifier: String!) {}
   func supportsUnicode() -> Bool { true }
-  func bundleIdentifier() -> String! { "im.feather.inputmethod.rustdev.smoke" }
+  func bundleIdentifier() -> String! { bundleIdentifierValue }
   func windowLevel() -> CGWindowLevel { 0 }
   func supportsProperty(_ property: TSMDocumentPropertyTag) -> Bool { false }
   func uniqueClientIdentifierString() -> String! { "feather-rust-dev-smoke" }

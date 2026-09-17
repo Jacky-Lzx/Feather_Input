@@ -6,6 +6,11 @@ struct FeatherCandidateValue: Equatable {
   let text: String
 }
 
+struct FeatherGeneratedCandidateValue: Equatable {
+  let text: String
+  let score: Double
+}
+
 @MainActor
 private final class PreviewWindow: NSWindow {
   var keyHandler: ((NSEvent) -> Bool)?
@@ -27,6 +32,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
   }
 
   private let candidatePresenter = CandidateWindowController()
+  private let generatedPresenter = CandidateWindowController()
   private let anchorView = NSTextField(string: "shijie  |")
   private let statusLabel = NSTextField(labelWithString: "候选窗操作会显示在这里")
   private let appearanceControl = NSSegmentedControl(
@@ -64,6 +70,11 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
   private var expandedLayout = CandidateLayout.vertical
   private var compositionActive = true
   private var currentCandidates: [FeatherCandidateValue] = []
+  private let generatedCandidates = [
+    FeatherGeneratedCandidateValue(text: "视界", score: -0.41),
+    FeatherGeneratedCandidateValue(text: "诗界", score: -0.68),
+    FeatherGeneratedCandidateValue(text: "世杰", score: -0.83),
+  ]
 
   init() {
     let window = PreviewWindow(
@@ -84,6 +95,9 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     window.center()
     candidatePresenter.actionHandler = { [weak self] action in
       self?.handle(action)
+    }
+    generatedPresenter.generatedActionHandler = { [weak self] index in
+      self?.selectGeneratedCandidate(at: index, source: "点击")
     }
   }
 
@@ -110,6 +124,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
 
   func windowWillClose(_ notification: Notification) {
     candidatePresenter.hide()
+    generatedPresenter.hide()
   }
 
   private func buildInterface(in window: NSWindow) {
@@ -121,7 +136,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
 
     let help = NSTextField(
       wrappingLabelWithString:
-        "这个程序只渲染候选窗，不链接输入法引擎，也不会安装、注册或切换系统输入源。窗口获得焦点后，可用与输入法相同的方向键、翻页键、数字键、空格、回车和 Esc 模拟操作。"
+        "这个程序只渲染候选窗，不链接输入法引擎，也不会安装、注册或切换系统输入源。窗口获得焦点后，可用与输入法相同的方向键、翻页键、数字键、空格、回车和 Esc 模拟操作；常规场景还可用 Option + 1/2/3 或 Option + Space 选择 AI 候选。"
     )
     help.font = .systemFont(ofSize: 13)
     help.textColor = .secondaryLabelColor
@@ -292,7 +307,20 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
   }
 
   private func handleKeyEvent(_ event: NSEvent) -> Bool {
-    guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+    let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+    if modifiers == .option, generatedPresenter.isVisible {
+      let index: Int?
+      switch event.keyCode {
+      case 18, 83, 49: index = 0
+      case 19, 84: index = 1
+      case 20, 85: index = 2
+      default: index = nil
+      }
+      guard let index else { return false }
+      selectGeneratedCandidate(at: index, source: "快捷键")
+      return true
+    }
+    guard modifiers.isEmpty else {
       return false
     }
     guard compositionActive else { return false }
@@ -427,6 +455,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     guard window?.isVisible == true else { return }
     guard compositionActive else {
       candidatePresenter.hide()
+      generatedPresenter.hide()
       currentCandidates = []
       return
     }
@@ -451,6 +480,7 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
         anchor: anchorRectOnScreen()
       )
     }
+    refreshGeneratedCandidates()
   }
 
   private func refreshPosition() {
@@ -471,6 +501,27 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
         anchor: anchorRectOnScreen()
       )
     }
+    refreshGeneratedCandidates()
+  }
+
+  private func refreshGeneratedCandidates() {
+    guard scenario == .standard, !expanded, compositionActive else {
+      generatedPresenter.hide()
+      return
+    }
+    generatedPresenter.update(
+      candidates: generatedCandidates,
+      beside: candidatePresenter.frame
+    )
+  }
+
+  private func selectGeneratedCandidate(at index: Int, source: String) {
+    guard generatedCandidates.indices.contains(index), generatedPresenter.isVisible else { return }
+    statusLabel.stringValue = "已用\(source)选择 AI 候选：\(generatedCandidates[index].text)"
+    compositionActive = false
+    currentCandidates = []
+    candidatePresenter.hide()
+    generatedPresenter.hide()
   }
 
   private func anchorRectOnScreen() -> NSRect {
