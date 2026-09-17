@@ -98,6 +98,26 @@ FEATHER_SKIP_INPUT_SOURCE_REGISTRATION=true \
 scripts/install-macos-release.sh --allow-local
 ```
 
+安装器按 `CFBundleShortVersionString` 的数字段比较版本；版本相同时再比较数字
+`CFBundleVersion`。默认拒绝降级，确需回退时必须显式添加 `--allow-downgrade`。例如当前
+正式版是 `0.1.0 (60)`，构建号为 1 的本地验证包不会覆盖它。
+
+正式卸载默认保留用户词库和配置：
+
+```sh
+scripts/uninstall-macos-release.sh
+```
+
+只有显式指定以下参数才会同时清除
+`~/Library/Application Support/FeatherInput`：
+
+```sh
+scripts/uninstall-macos-release.sh --purge-user-data
+```
+
+卸载器会先确认目标身份并禁用输入源，再把 app 和可选用户数据移动到各自文件系统内的
+临时移除目录；全部移动成功后才真正删除。中途失败会恢复 app、用户数据和原启用状态。
+
 不安装 bundle 的进程内 IMK 客户端测试：
 
 ```sh

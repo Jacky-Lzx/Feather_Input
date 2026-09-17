@@ -8,15 +8,29 @@ default_install_root="${HOME:?}/Library/Input Methods"
 install_root=${FEATHER_INSTALL_ROOT:-$default_install_root}
 source_app="$repo_root/.build/macos-release/$app_name"
 allow_local=false
+allow_downgrade=false
 skip_registration=${FEATHER_SKIP_INPUT_SOURCE_REGISTRATION:-false}
 manager_override=${FEATHER_INPUT_SOURCE_MANAGER:-}
 
-if [ "$#" -gt 0 ] && [ "$1" = --allow-local ]; then
-    allow_local=true
-    shift
-fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --allow-local)
+            allow_local=true
+            shift
+            ;;
+        --allow-downgrade)
+            allow_downgrade=true
+            shift
+            ;;
+        --*)
+            echo "用法：$0 [--allow-local] [--allow-downgrade] [FeatherInput.app]" >&2
+            exit 1
+            ;;
+        *) break ;;
+    esac
+done
 if [ "$#" -gt 1 ]; then
-    echo "用法：$0 [--allow-local] [FeatherInput.app]" >&2
+    echo "用法：$0 [--allow-local] [--allow-downgrade] [FeatherInput.app]" >&2
     exit 1
 fi
 if [ "$#" -eq 1 ]; then
@@ -78,17 +92,51 @@ read_plist() {
     /usr/libexec/PlistBuddy -c "Print :$1" "$2/Contents/Info.plist"
 }
 
+valid_marketing_version() {
+    case "$1" in
+        '' | *[!0-9.]* | .* | *. | *..*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+version_relation() {
+    awk -v candidate="$1" -v installed="$2" 'BEGIN {
+        candidate_count = split(candidate, candidate_parts, ".")
+        installed_count = split(installed, installed_parts, ".")
+        count = candidate_count > installed_count ? candidate_count : installed_count
+        for (index = 1; index <= count; index++) {
+            candidate_part = index <= candidate_count ? candidate_parts[index] + 0 : 0
+            installed_part = index <= installed_count ? installed_parts[index] + 0 : 0
+            if (candidate_part < installed_part) { print -1; exit }
+            if (candidate_part > installed_part) { print 1; exit }
+        }
+        print 0
+    }'
+}
+
 verify_bundle() {
     candidate=$1
     candidate_id=$(read_plist CFBundleIdentifier "$candidate")
     candidate_executable=$(read_plist CFBundleExecutable "$candidate")
     candidate_data=$(read_plist FeatherUserDataDirectory "$candidate")
+    candidate_version=$(read_plist CFBundleShortVersionString "$candidate")
+    candidate_build=$(read_plist CFBundleVersion "$candidate")
     if [ "$candidate_id" != "$bundle_id" ] ||
         [ "$candidate_executable" != FeatherInput ] ||
         [ "$candidate_data" != FeatherInput ]; then
         echo "拒绝安装身份或数据目录不符合约定的 bundle：$candidate" >&2
         exit 1
     fi
+    if ! valid_marketing_version "$candidate_version"; then
+        echo "拒绝安装版本号无效的 bundle：$candidate_version" >&2
+        exit 1
+    fi
+    case "$candidate_build" in
+        '' | *[!0-9]*)
+            echo "拒绝安装构建号无效的 bundle：$candidate_build" >&2
+            exit 1
+            ;;
+    esac
     codesign --verify --deep --strict --verbose=2 "$candidate"
     "$repo_root/scripts/check-macos-bundle-dependencies.sh" "$candidate"
     find "$candidate/Contents/MacOS" "$candidate/Contents/Frameworks" -type f -print |
@@ -173,6 +221,33 @@ if [ -e "$destination" ]; then
     if [ "$installed_id" != "$bundle_id" ] || [ "$installed_executable" != FeatherInput ]; then
         echo "拒绝覆盖目标位置的其他应用：$installed_id" >&2
         exit 1
+    fi
+    candidate_version=$(read_plist CFBundleShortVersionString "$staged_app")
+    candidate_build=$(read_plist CFBundleVersion "$staged_app")
+    installed_version=$(read_plist CFBundleShortVersionString "$destination")
+    installed_build=$(read_plist CFBundleVersion "$destination")
+    if [ "$allow_downgrade" != true ]; then
+        if ! valid_marketing_version "$candidate_version" ||
+            ! valid_marketing_version "$installed_version"; then
+            echo "无法比较版本号；如确需回退，请显式使用 --allow-downgrade。" >&2
+            exit 1
+        fi
+        case "$installed_build" in
+            '' | *[!0-9]*)
+                echo "无法比较构建号；如确需回退，请显式使用 --allow-downgrade。" >&2
+                exit 1
+                ;;
+        esac
+        relation=$(version_relation "$candidate_version" "$installed_version")
+        build_relation=$(version_relation "$candidate_build" "$installed_build")
+        if [ "$relation" -lt 0 ] ||
+            { [ "$relation" -eq 0 ] && [ "$build_relation" -lt 0 ]; }; then
+            echo "拒绝降级：已安装 $installed_version ($installed_build)，候选版本 $candidate_version ($candidate_build)。" >&2
+            echo "如确需回退，请重新运行并显式添加 --allow-downgrade。" >&2
+            exit 1
+        fi
+    else
+        echo "警告：已显式允许版本回退。"
     fi
     if [ "$install_root" = "$default_install_root" ]; then
         pkill -x FeatherInput 2>/dev/null || true

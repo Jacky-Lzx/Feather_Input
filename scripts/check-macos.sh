@@ -84,6 +84,7 @@ sh -n \
     scripts/package-macos-release.sh \
     scripts/run-macos-client-acceptance.sh \
     scripts/status-macos-input-method.sh \
+    scripts/uninstall-macos-release.sh \
     scripts/uninstall-macos-input-method.sh \
     scripts/test-macos-dev-harness.sh \
     scripts/test-macos-input-method.sh \
@@ -105,6 +106,7 @@ shellcheck \
     scripts/package-macos-release.sh \
     scripts/run-macos-client-acceptance.sh \
     scripts/status-macos-input-method.sh \
+    scripts/uninstall-macos-release.sh \
     scripts/uninstall-macos-input-method.sh \
     scripts/test-macos-dev-harness.sh \
     scripts/test-macos-input-method.sh \
