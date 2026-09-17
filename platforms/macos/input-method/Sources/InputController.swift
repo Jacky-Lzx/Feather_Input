@@ -7,6 +7,14 @@ private enum NormalizedInput {
   case text(String)
 }
 
+private struct ExpandedCandidateState {
+  let revision: UInt64
+  var candidates: [FeatherCandidateValue]
+  var highlighted: Int
+  let rows: Int
+  var hasMore: Bool
+}
+
 @objc(FeatherRustInputController)
 @MainActor
 final class InputController: IMKInputController {
@@ -19,6 +27,7 @@ final class InputController: IMKInputController {
   }
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
+  private var expandedCandidates: ExpandedCandidateState?
   private weak var activeClient: AnyObject?
   private var active = false
 
@@ -44,6 +53,7 @@ final class InputController: IMKInputController {
     guard let session else {
       active = false
       currentResponse = nil
+      expandedCandidates = nil
       activeClient = nil
       candidatePresenter.actionHandler = nil
       candidatePresenter.hide()
@@ -62,6 +72,7 @@ final class InputController: IMKInputController {
     }
     active = false
     currentResponse = nil
+    expandedCandidates = nil
     activeClient = nil
     candidatePresenter.actionHandler = nil
     candidatePresenter.hide()
@@ -83,12 +94,21 @@ final class InputController: IMKInputController {
       return false
     }
 
-    if event.keyCode == 53, hasComposition {
-      return dispatch(.escape, to: client)
-    }
     guard textInputAvailable(client) else {
       cancelEngineComposition()
       return false
+    }
+    if let handled = handleExpandedEvent(event, client: client) {
+      return handled
+    }
+    if event.keyCode == 53, hasComposition {
+      return dispatch(.escape, to: client)
+    }
+    if event.keyCode == 124, hasComposition, currentResponse?.candidates.isEmpty == false,
+      event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+    {
+      openExpandedCandidates(for: client)
+      return true
     }
     let shortcutModifiers = event.modifierFlags.intersection([.command, .control, .option])
     guard shortcutModifiers.isEmpty, let input = normalizedInput(for: event) else {
@@ -176,6 +196,7 @@ final class InputController: IMKInputController {
   }
 
   private func apply(_ response: FeatherResponseValue, to client: IMKTextInput) {
+    expandedCandidates = nil
     currentResponse = response
     if let commit = response.commit, !commit.isEmpty {
       client.insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -221,6 +242,168 @@ final class InputController: IMKInputController {
     }
   }
 
+  private func openExpandedCandidates(for client: IMKTextInput) {
+    guard let response = currentResponse, !response.candidates.isEmpty else { return }
+    do {
+      let rows = max(1, min(9, response.candidates.count))
+      let pageSize = rows * CandidateWindowStyle.expandedColumnCount
+      let slice = try ensureActive().candidateSlice(
+        revision: response.revision, offset: 0, limit: pageSize)
+      guard currentResponse?.revision == slice.revision, !slice.candidates.isEmpty else { return }
+      let highlightedID = response.highlighted.flatMap { index in
+        response.candidates.indices.contains(index) ? response.candidates[index] : nil
+      }
+      let highlighted =
+        highlightedID.flatMap { candidate in
+          slice.candidates.firstIndex { $0.value == candidate.value }
+        } ?? 0
+      expandedCandidates = ExpandedCandidateState(
+        revision: slice.revision,
+        candidates: slice.candidates,
+        highlighted: highlighted,
+        rows: rows,
+        hasMore: slice.hasMore
+      )
+      renderExpandedCandidates(for: client)
+    } catch {
+      expandedCandidates = nil
+      report(error, operation: "open expanded candidates")
+    }
+  }
+
+  private func loadMoreExpandedCandidates() -> Bool {
+    guard var expandedCandidates, expandedCandidates.hasMore, let session else { return false }
+    do {
+      let slice = try session.candidateSlice(
+        revision: expandedCandidates.revision,
+        offset: expandedCandidates.candidates.count,
+        limit: expandedCandidates.rows * CandidateWindowStyle.expandedColumnCount
+      )
+      guard currentResponse?.revision == slice.revision else {
+        self.expandedCandidates = nil
+        return false
+      }
+      expandedCandidates.candidates.append(contentsOf: slice.candidates)
+      expandedCandidates.hasMore = slice.hasMore
+      self.expandedCandidates = expandedCandidates
+      return true
+    } catch {
+      self.expandedCandidates = nil
+      report(error, operation: "load expanded candidates")
+      return false
+    }
+  }
+
+  private func renderExpandedCandidates(for client: IMKTextInput) {
+    guard let expandedCandidates else { return }
+    candidatePresenter.updateExpanded(
+      candidates: expandedCandidates.candidates,
+      highlighted: expandedCandidates.highlighted,
+      rows: expandedCandidates.rows,
+      hasMore: expandedCandidates.hasMore,
+      anchor: candidateAnchor(for: client)
+    )
+  }
+
+  private func closeExpandedCandidates(for client: IMKTextInput) {
+    expandedCandidates = nil
+    guard let response = currentResponse, !response.preedit.isEmpty, !response.candidates.isEmpty
+    else {
+      candidatePresenter.hide()
+      return
+    }
+    candidatePresenter.update(
+      candidates: response.candidates,
+      highlighted: response.highlighted,
+      anchor: candidateAnchor(for: client)
+    )
+  }
+
+  private func handleExpandedEvent(_ event: NSEvent, client: IMKTextInput) -> Bool? {
+    guard var expandedCandidates else { return nil }
+    let modifiers = event.modifierFlags.intersection([.command, .control, .option])
+    guard modifiers.isEmpty else {
+      closeExpandedCandidates(for: client)
+      return nil
+    }
+
+    if event.keyCode == 48 {
+      return false
+    }
+    if event.keyCode == 53 {
+      self.expandedCandidates = nil
+      return dispatch(.escape, to: client)
+    }
+    if event.keyCode == 49 || event.keyCode == 36 || event.keyCode == 76 {
+      selectExpandedCandidate(
+        expandedCandidates.candidates[expandedCandidates.highlighted], client: client)
+      return true
+    }
+    if let characters = event.charactersIgnoringModifiers,
+      let number = Int(characters),
+      (1...expandedCandidates.rows).contains(number)
+    {
+      let column = expandedCandidates.highlighted / expandedCandidates.rows
+      let index = column * expandedCandidates.rows + number - 1
+      if expandedCandidates.candidates.indices.contains(index) {
+        selectExpandedCandidate(expandedCandidates.candidates[index], client: client)
+      }
+      return true
+    }
+
+    let movement: (horizontal: Int, vertical: Int)
+    switch event.keyCode {
+    case 123: movement = (-1, 0)
+    case 124: movement = (1, 0)
+    case 125: movement = (0, 1)
+    case 126: movement = (0, -1)
+    default:
+      closeExpandedCandidates(for: client)
+      return nil
+    }
+    let horizontal = movement.horizontal
+    let vertical = movement.vertical
+
+    let currentColumn = expandedCandidates.highlighted / expandedCandidates.rows
+    if horizontal > 0,
+      (currentColumn + 1) * expandedCandidates.rows >= expandedCandidates.candidates.count,
+      expandedCandidates.hasMore
+    {
+      guard loadMoreExpandedCandidates() else {
+        closeExpandedCandidates(for: client)
+        return true
+      }
+      guard let loaded = self.expandedCandidates else { return true }
+      expandedCandidates = loaded
+    }
+    let maximumColumn = (expandedCandidates.candidates.count - 1) / expandedCandidates.rows
+    let column = min(maximumColumn, max(0, currentColumn + horizontal))
+    let currentRow = expandedCandidates.highlighted % expandedCandidates.rows
+    let maximumRow = min(
+      expandedCandidates.rows - 1,
+      expandedCandidates.candidates.count - 1 - column * expandedCandidates.rows
+    )
+    let row = min(maximumRow, max(0, currentRow + vertical))
+    expandedCandidates.highlighted = column * expandedCandidates.rows + row
+    self.expandedCandidates = expandedCandidates
+    renderExpandedCandidates(for: client)
+    return true
+  }
+
+  private func selectExpandedCandidate(
+    _ candidate: FeatherCandidateValue,
+    client: IMKTextInput
+  ) {
+    do {
+      let response = try ensureActive().select(candidate)
+      guard response.handled else { return }
+      apply(response, to: client)
+    } catch {
+      expandedCandidates = nil
+      report(error, operation: "select expanded candidate")
+    }
+  }
+
   private func candidateAnchor(for client: IMKTextInput) -> NSRect {
     let range =
       client.markedRange().location == NSNotFound
@@ -262,6 +445,7 @@ final class InputController: IMKInputController {
   private func cancelEngineComposition() {
     guard hasComposition, let session else { return }
     currentResponse = try? session.send(.escape)
+    expandedCandidates = nil
     candidatePresenter.hide()
   }
 

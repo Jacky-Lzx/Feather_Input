@@ -76,6 +76,22 @@ final class OwnedCandidatePresenter: CandidatePresenting {
     )
   }
 
+  func updateExpanded(
+    candidates: [FeatherCandidateValue],
+    highlighted: Int,
+    rows: Int,
+    hasMore: Bool,
+    anchor: NSRect
+  ) {
+    store.presenter(for: ownershipID)?.updateExpanded(
+      candidates: candidates,
+      highlighted: highlighted,
+      rows: rows,
+      hasMore: hasMore,
+      anchor: anchor
+    )
+  }
+
   func hide() {
     store.presenter(for: ownershipID)?.hide()
   }

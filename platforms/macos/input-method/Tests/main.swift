@@ -115,11 +115,11 @@ struct InputMethodSmokeMain {
       }
     }
     let updateCountBeforePaging = presenter.updateCount
-    guard controller.handle(key("", code: 124, modifiers: .function), client: client) else {
-      throw SmokeFailure.expectation("向右键没有触发候选下一页")
+    guard controller.handle(key("", code: 121, modifiers: .function), client: client) else {
+      throw SmokeFailure.expectation("Page Down 没有触发候选下一页")
     }
     guard presenter.updateCount > updateCountBeforePaging else {
-      throw SmokeFailure.expectation("向右翻页没有刷新候选窗口")
+      throw SmokeFailure.expectation("Page Down 翻页没有刷新候选窗口")
     }
     let updateCountBeforePreviousPage = presenter.updateCount
     guard controller.handle(key("", code: 123, modifiers: .function), client: client) else {
@@ -141,6 +141,75 @@ struct InputMethodSmokeMain {
     }
     guard controller.handle(key("\u{1b}", code: 53), client: client), client.marked.isEmpty else {
       throw SmokeFailure.expectation("清除大写英文预编辑失败")
+    }
+
+    for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("全词候选测试无法输入拼音：\(character)")
+      }
+    }
+    let compactCount = presenter.candidates.count
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client) else {
+      throw SmokeFailure.expectation("紧凑候选窗的向右键没有展开全词候选窗")
+    }
+    guard presenter.expanded, presenter.candidates.count > compactCount else {
+      throw SmokeFailure.expectation("全词候选窗没有加载当前页之外的候选")
+    }
+    let expandedPageSize = compactCount * CandidateWindowStyle.expandedColumnCount
+    guard presenter.candidates.count == expandedPageSize else {
+      throw SmokeFailure.expectation(
+        "全词候选首次加载了 \(presenter.candidates.count) 项，而不是完整一页 \(expandedPageSize) 项"
+      )
+    }
+    guard presenter.expandedHasMore, let expandedStart = presenter.highlighted else {
+      throw SmokeFailure.expectation("全词候选翻页测试需要至少两页候选")
+    }
+    let firstExpandedPage = presenter.candidates
+    let startingColumn = expandedStart / compactCount
+    for _ in startingColumn..<CandidateWindowStyle.expandedColumnCount {
+      guard controller.handle(key("", code: 124, modifiers: .function), client: client) else {
+        throw SmokeFailure.expectation("全词候选窗无法向右移动到下一页")
+      }
+    }
+    guard presenter.highlighted != expandedStart,
+      presenter.candidates.count > firstExpandedPage.count,
+      Array(presenter.candidates.prefix(firstExpandedPage.count)) == firstExpandedPage
+    else {
+      throw SmokeFailure.expectation("全词候选翻页后改变了已加载候选的位置")
+    }
+    let appendedCount = presenter.candidates.count - firstExpandedPage.count
+    guard !presenter.expandedHasMore || appendedCount == expandedPageSize else {
+      throw SmokeFailure.expectation(
+        "全词候选后续只加载了 \(appendedCount) 项，而不是完整一页 \(expandedPageSize) 项"
+      )
+    }
+    guard !controller.handle(key("\t", code: 48), client: client), presenter.expanded else {
+      throw SmokeFailure.expectation("Tab 不应被用于关闭全词候选窗")
+    }
+    guard controller.handle(key("", code: 53), client: client), !presenter.expanded,
+      presenter.candidates.isEmpty, client.marked.isEmpty
+    else {
+      throw SmokeFailure.expectation("Esc 没有取消组合并关闭全词候选窗")
+    }
+    for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("Esc 取消后无法重新输入拼音：\(character)")
+      }
+    }
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client),
+      presenter.expanded
+    else {
+      throw SmokeFailure.expectation("Esc 取消后新的组合不能展开全词候选窗")
+    }
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client) else {
+      throw SmokeFailure.expectation("数字选词前无法切换到下一列")
+    }
+    let expandedSelection = presenter.candidates[compactCount]
+    guard controller.handle(key("1", code: 18), client: client) else {
+      throw SmokeFailure.expectation("数字键没有选择当前列对应位置的候选")
+    }
+    guard client.committed.hasSuffix(expandedSelection.text), !presenter.expanded else {
+      throw SmokeFailure.expectation("数字键没有按当前列的不透明候选 ID 上屏")
     }
 
     guard !controller.handle(key("c", code: 8, modifiers: .command), client: client) else {

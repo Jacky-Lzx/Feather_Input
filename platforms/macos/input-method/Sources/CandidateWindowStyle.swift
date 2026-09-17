@@ -14,7 +14,12 @@ enum CandidateWindowStyle {
   static let indexWidth: CGFloat = 14
   static let panelGap: CGFloat = 7
   static let screenInset: CGFloat = 6
+  static let fallbackColumnWidth: CGFloat = 72
+  static let expandedColumnCount = 5
+  static let expandedColumnSpacing: CGFloat = 4
+  static let expandedHeaderHeight: CGFloat = 18
 
   static let candidateFont = NSFont.systemFont(ofSize: 15.5, weight: .regular)
   static let indexFont = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .semibold)
+  static let expandedHeaderFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
 }
