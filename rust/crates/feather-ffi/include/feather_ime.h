@@ -37,7 +37,9 @@ enum FeatherCapability {
     FEATHER_CAP_EXPLICIT_CLOSE = UINT64_C(1) << 2,
     FEATHER_CAP_STRUCTURED_ERROR = UINT64_C(1) << 3,
     FEATHER_CAP_MULTI_SESSION = UINT64_C(1) << 4,
-    FEATHER_CAP_CANDIDATE_SLICES = UINT64_C(1) << 5
+    FEATHER_CAP_CANDIDATE_SLICES = UINT64_C(1) << 5,
+    FEATHER_CAP_SCHEMA_SELECTION = UINT64_C(1) << 6,
+    FEATHER_CAP_PAGE_SIZE = UINT64_C(1) << 7
 };
 
 struct FeatherError {
@@ -122,6 +124,10 @@ FeatherStatus feather_ime_set_schema(FeatherIme *ime,
                                      const char *schema,
                                      FeatherResponse **out_response,
                                      FeatherError **out_error);
+FeatherStatus feather_ime_set_page_size(FeatherIme *ime,
+                                        size_t page_size,
+                                        FeatherResponse **out_response,
+                                        FeatherError **out_error);
 FeatherStatus feather_ime_key(FeatherIme *ime,
                               uint32_t kind,
                               const uint8_t *text,

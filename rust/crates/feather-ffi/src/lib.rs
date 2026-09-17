@@ -17,6 +17,7 @@ const CAP_STRUCTURED_ERROR: u64 = 1 << 3;
 const CAP_MULTI_SESSION: u64 = 1 << 4;
 const CAP_CANDIDATE_SLICES: u64 = 1 << 5;
 const CAP_SCHEMA_SELECTION: u64 = 1 << 6;
+const CAP_PAGE_SIZE: u64 = 1 << 7;
 const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
 
 #[repr(u32)]
@@ -428,6 +429,7 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_MULTI_SESSION
         | CAP_CANDIDATE_SLICES
         | CAP_SCHEMA_SELECTION
+        | CAP_PAGE_SIZE
 }
 
 #[no_mangle]
@@ -614,6 +616,32 @@ pub unsafe extern "C" fn feather_ime_set_schema(
         output_call(out_response, out_error, || {
             let schema = supported_schema(utf8_argument(schema, "schema")?)?;
             dispatch_impl(ime, InputEvent::SetSchema(schema.to_owned()))
+        })
+    }
+}
+
+#[no_mangle]
+/// Changes the engine candidate page size.
+///
+/// # Safety
+///
+/// `ime` must be a live handle used on its owner thread. `page_size` must be
+/// between 1 and 9. Output pointers follow `feather_ime_new`.
+pub unsafe extern "C" fn feather_ime_set_page_size(
+    ime: *mut FeatherIme,
+    page_size: usize,
+    out_response: *mut *mut FeatherResponse,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        output_call(out_response, out_error, || {
+            if !(1..=9).contains(&page_size) {
+                return Err(FfiFailure::new(
+                    StatusCode::InvalidArgument,
+                    format!("每页候选数量超出范围：{page_size}"),
+                ));
+            }
+            dispatch_impl(ime, InputEvent::SetPageSize(page_size))
         })
     }
 }
@@ -855,6 +883,7 @@ mod tests {
                 | CAP_MULTI_SESSION
                 | CAP_CANDIDATE_SLICES
                 | CAP_SCHEMA_SELECTION
+                | CAP_PAGE_SIZE
         );
     }
 
@@ -980,6 +1009,15 @@ mod tests {
         assert_eq!(status, StatusCode::InvalidArgument.value());
         assert!(response.is_null());
         assert!(unsafe { error_message(error) }.contains("不支持的输入方案"));
+        unsafe { feather_error_free(error) };
+
+        let mut response = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let status =
+            unsafe { feather_ime_set_page_size(ime, 0, &raw mut response, &raw mut error) };
+        assert_eq!(status, StatusCode::InvalidArgument.value());
+        assert!(response.is_null());
+        assert!(unsafe { error_message(error) }.contains("每页候选数量"));
         unsafe {
             feather_error_free(error);
             feather_ime_free(ime);

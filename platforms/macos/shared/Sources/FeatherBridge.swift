@@ -75,6 +75,7 @@ final class FeatherSession {
   private static let requiredCapabilities: UInt64 = 0b1_1111
   private static let candidateSlicesCapability: UInt64 = 1 << 5
   private static let schemaSelectionCapability: UInt64 = 1 << 6
+  private static let pageSizeCapability: UInt64 = 1 << 7
 
   private var handle: OpaquePointer?
   private let capabilities: UInt64
@@ -171,6 +172,16 @@ final class FeatherSession {
       schema.withCString { schemaName in
         feather_ime_set_schema(handle, schemaName, &response, &error)
       }
+    }
+  }
+
+  func setPageSize(_ pageSize: Int) throws -> FeatherResponseValue {
+    let missing = Self.pageSizeCapability & ~capabilities
+    guard missing == 0 else {
+      throw FeatherBridgeError.missingCapabilities(missing)
+    }
+    return try perform("set page size") { handle, response, error in
+      feather_ime_set_page_size(handle, pageSize, &response, &error)
     }
   }
 

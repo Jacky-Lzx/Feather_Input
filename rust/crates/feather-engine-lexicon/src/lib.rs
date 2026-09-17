@@ -126,7 +126,9 @@ impl InputEngine for LexiconEngine {
                     self.mutate();
                 }
             }
-            EngineCommand::Delete | EngineCommand::SelectSchema(_) => response.handled = false,
+            EngineCommand::Delete
+            | EngineCommand::SelectSchema(_)
+            | EngineCommand::SetPageSize(_) => response.handled = false,
             EngineCommand::Cancel => {
                 if self.input.is_empty() {
                     response.handled = false;

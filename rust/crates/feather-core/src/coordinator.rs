@@ -101,6 +101,7 @@ impl InputCoordinator {
             }
             InputEvent::SetMode(mode) => self.set_mode(mode),
             InputEvent::SetSchema(schema) => self.set_schema(schema),
+            InputEvent::SetPageSize(page_size) => self.set_page_size(page_size),
             InputEvent::SelectCandidate(id) => self.select_candidate(id),
             InputEvent::Key(key) => self.handle_key(key),
         }
@@ -136,6 +137,17 @@ impl InputCoordinator {
                 InputEffect::HideCandidates,
                 InputEffect::SchemaChanged(schema),
             ],
+        })
+    }
+
+    fn set_page_size(&mut self, page_size: usize) -> Result<DispatchResult, EngineError> {
+        let response = self.engine.handle(EngineCommand::SetPageSize(page_size))?;
+        if !response.handled {
+            return Ok(DispatchResult::default());
+        }
+        Ok(DispatchResult {
+            handled: true,
+            effects: vec![InputEffect::PageSizeChanged(page_size)],
         })
     }
 

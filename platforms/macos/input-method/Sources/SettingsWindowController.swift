@@ -5,27 +5,33 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   static let shared = SettingsWindowController(
     modeMemory: .shared,
     schemeMemory: .shared,
-    focusIndicatorSettings: .shared
+    focusIndicatorSettings: .shared,
+    candidatePageSettings: .shared
   )
 
   private let modeMemory: InputModeMemory
   private let schemeMemory: InputSchemeMemory
   private let focusIndicatorSettings: FocusIndicatorSettings
+  private let candidatePageSettings: CandidatePageSettings
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
   private weak var policyPopup: NSPopUpButton?
   private weak var focusUntilInputButton: NSButton?
   private weak var focusDurationValue: NSTextField?
   private weak var focusDurationStepper: NSStepper?
+  private weak var candidateCountValue: NSTextField?
+  private weak var candidateCountStepper: NSStepper?
 
   init(
     modeMemory: InputModeMemory,
     schemeMemory: InputSchemeMemory,
-    focusIndicatorSettings: FocusIndicatorSettings
+    focusIndicatorSettings: FocusIndicatorSettings,
+    candidatePageSettings: CandidatePageSettings
   ) {
     self.modeMemory = modeMemory
     self.schemeMemory = schemeMemory
     self.focusIndicatorSettings = focusIndicatorSettings
+    self.candidatePageSettings = candidatePageSettings
   }
 
   func show() {
@@ -60,11 +66,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func selectCandidateCount(_ count: Int) {
+    candidatePageSettings.updateCount(count)
+    refreshControls()
+  }
+
   private func requireWindow() -> NSWindow {
     if let window { return window }
 
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 500, height: 390),
+      contentRect: NSRect(x: 0, y: 0, width: 500, height: 465),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -144,10 +155,33 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusDurationHelp.font = .systemFont(ofSize: 12)
     focusDurationHelp.textColor = .secondaryLabelColor
 
+    let candidateCountValue = NSTextField(labelWithString: "")
+    candidateCountValue.alignment = .right
+    candidateCountValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    self.candidateCountValue = candidateCountValue
+    let candidateCountStepper = NSStepper()
+    candidateCountStepper.minValue = Double(CandidatePageSettings.minimumCount)
+    candidateCountStepper.maxValue = Double(CandidatePageSettings.maximumCount)
+    candidateCountStepper.increment = 1
+    candidateCountStepper.target = self
+    candidateCountStepper.action = #selector(candidateCountChanged(_:))
+    self.candidateCountStepper = candidateCountStepper
+    let candidateCountControls = NSStackView(views: [candidateCountValue, candidateCountStepper])
+    candidateCountControls.orientation = .horizontal
+    candidateCountControls.alignment = .centerY
+    candidateCountControls.spacing = 8
+
+    let candidateCountHelp = NSTextField(
+      wrappingLabelWithString: "完成当前拼音后生效，无需重启。"
+    )
+    candidateCountHelp.font = .systemFont(ofSize: 12)
+    candidateCountHelp.textColor = .secondaryLabelColor
+
     let emptyPolicyHelp = NSTextField(labelWithString: "")
     let emptyFocusToggle = NSTextField(labelWithString: "")
     let emptyFocusHelp = NSTextField(labelWithString: "")
     let emptyDurationHelp = NSTextField(labelWithString: "")
+    let emptyCandidateCountHelp = NSTextField(labelWithString: "")
 
     let grid = NSGridView(views: [
       [schemeLabel, schemePopup],
@@ -157,6 +191,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [emptyFocusHelp, focusHelp],
       [NSTextField(labelWithString: "焦点提示显示"), focusDurationControls],
       [emptyDurationHelp, focusDurationHelp],
+      [NSTextField(labelWithString: "拼音每页候选"), candidateCountControls],
+      [emptyCandidateCountHelp, candidateCountHelp],
     ])
     grid.column(at: 0).xPlacement = .trailing
     grid.column(at: 1).xPlacement = .fill
@@ -174,6 +210,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     policyHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     focusHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     focusDurationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    candidateCountHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
       stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
@@ -198,6 +235,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     focusDurationValue?.stringValue = String(format: "%.1f 秒", focusIndicatorSettings.duration)
     focusDurationStepper?.doubleValue = focusIndicatorSettings.duration
     focusDurationStepper?.isEnabled = !waitsUntilInput
+    candidateCountValue?.stringValue = "\(candidatePageSettings.count)"
+    candidateCountStepper?.integerValue = candidatePageSettings.count
   }
 
   @objc private func schemeChanged(_ sender: NSPopUpButton) {
@@ -220,5 +259,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   @objc private func focusDurationChanged(_ sender: NSStepper) {
     selectFocusIndicatorDuration(sender.doubleValue)
+  }
+
+  @objc private func candidateCountChanged(_ sender: NSStepper) {
+    selectCandidateCount(sender.integerValue)
   }
 }

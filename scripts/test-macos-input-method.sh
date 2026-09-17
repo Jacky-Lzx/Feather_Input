@@ -50,6 +50,7 @@ swiftc \
     "$shared_root"/Sources/*.swift \
     "$source_root"/Sources/CandidateWindowStyle.swift \
     "$source_root"/Sources/CandidateWindowController.swift \
+    "$source_root"/Sources/CandidatePageSettings.swift \
     "$source_root"/Sources/FeatherInputEnvironment.swift \
     "$source_root"/Sources/FocusIndicatorSettings.swift \
     "$source_root"/Sources/InputModeMemory.swift \

@@ -16,6 +16,7 @@ pub enum EngineCommand {
     PageNext,
     Select(EngineCandidateId),
     SelectSchema(String),
+    SetPageSize(usize),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

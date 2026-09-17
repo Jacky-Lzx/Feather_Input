@@ -63,6 +63,8 @@ struct InputMethodSmokeMain {
     controller.modeMemory = InputModeMemory(defaults: modeDefaults)
     controller.schemeMemory = InputSchemeMemory(defaults: modeDefaults)
     controller.focusIndicatorSettings = FocusIndicatorSettings(defaults: modeDefaults)
+    let candidatePageSettings = CandidatePageSettings(defaults: modeDefaults)
+    controller.candidatePageSettings = candidatePageSettings
     controller.focusIndicatorRetryDelaysMilliseconds = []
     let client = SmokeTextClient()
     controller.activateServer(client)
@@ -94,6 +96,10 @@ struct InputMethodSmokeMain {
     guard presenter.candidates.contains(where: { $0.text == "你好" }) else {
       throw SmokeFailure.expectation("候选窗口没有收到“你好”")
     }
+    guard presenter.candidates.count == CandidatePageSettings.defaultCount else {
+      throw SmokeFailure.expectation("librime 没有按默认值返回每页 7 个候选")
+    }
+    candidatePageSettings.updateCount(8)
     guard client.lastAttributesCharacterIndex == 0,
       presenter.anchor == client.caretRectangle
     else {
@@ -105,6 +111,9 @@ struct InputMethodSmokeMain {
     }
     guard client.marked == markedBeforeBoundaryPaging, !presenter.candidates.isEmpty else {
       throw SmokeFailure.expectation("第一页按左键不应取消组合或隐藏候选窗口")
+    }
+    guard presenter.candidates.count == CandidatePageSettings.defaultCount else {
+      throw SmokeFailure.expectation("修改每页候选数量影响了尚未完成的当前拼音")
     }
     let initialHighlight = presenter.highlighted
     let updateCountBeforeNavigation = presenter.updateCount
@@ -238,6 +247,9 @@ struct InputMethodSmokeMain {
       guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
         throw SmokeFailure.expectation("拼音按键没有被处理：\(character)")
       }
+    }
+    guard presenter.candidates.count == 8 else {
+      throw SmokeFailure.expectation("完成当前拼音后没有应用新的每页候选数量")
     }
     let updateCountBeforePaging = presenter.updateCount
     guard controller.handle(key("", code: 121, modifiers: .function), client: client) else {
@@ -447,18 +459,24 @@ struct InputMethodSmokeMain {
     let settings = SettingsWindowController(
       modeMemory: modeMemory,
       schemeMemory: schemeMemory,
-      focusIndicatorSettings: FocusIndicatorSettings(defaults: defaults)
+      focusIndicatorSettings: FocusIndicatorSettings(defaults: defaults),
+      candidatePageSettings: CandidatePageSettings(defaults: defaults)
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
-    guard !focusSettings.waitsUntilInput, focusSettings.duration == 3.0 else {
-      throw SmokeFailure.expectation("焦点状态提示默认值不是关闭持续显示并保持 3.0 秒")
+    let candidatePageSettings = CandidatePageSettings(defaults: defaults)
+    guard !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
+      candidatePageSettings.count == CandidatePageSettings.defaultCount
+    else {
+      throw SmokeFailure.expectation("设置窗口的焦点提示或每页候选默认值错误")
     }
     settings.selectScheme(.flypy)
     settings.selectModePolicy(.perApplication)
     settings.selectFocusIndicatorWaitsUntilInput(true)
     settings.selectFocusIndicatorDuration(2.4)
+    settings.selectCandidateCount(8)
     guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
-      focusSettings.waitsUntilInput, focusSettings.duration == 2.4
+      focusSettings.waitsUntilInput, focusSettings.duration == 2.4,
+      candidatePageSettings.count == 8
     else {
       throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
     }

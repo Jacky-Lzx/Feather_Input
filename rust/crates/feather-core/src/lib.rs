@@ -167,4 +167,12 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn page_size_is_dispatched_as_an_engine_setting() {
+        let mut core = InputCoordinator::new(FakeEngine::default());
+        let result = core.dispatch(InputEvent::SetPageSize(7)).unwrap();
+        assert!(result.handled);
+        assert_eq!(result.effects, vec![InputEffect::PageSizeChanged(7)]);
+    }
 }

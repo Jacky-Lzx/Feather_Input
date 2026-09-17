@@ -34,6 +34,7 @@ final class InputController: IMKInputController {
   var modeMemory = InputModeMemory.shared
   var schemeMemory = InputSchemeMemory.shared
   var focusIndicatorSettings = FocusIndicatorSettings.shared
+  var candidatePageSettings = CandidatePageSettings.shared
   var focusIndicatorRetryDelaysMilliseconds: [UInt64] = [80, 120, 200]
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
@@ -43,6 +44,7 @@ final class InputController: IMKInputController {
   private var lastCaret: NSRect?
   private var activeApplication = "unknown"
   private var activeScheme = InputScheme.fullPinyin
+  private var activePageSize: Int?
   private var rightControlTap = RightControlTap()
   private var focusIndicatorTask: Task<Void, Never>?
   private var focusIndicatorVersion = UUID()
@@ -73,6 +75,9 @@ final class InputController: IMKInputController {
       let session = try requireSession()
       _ = try session.activate()
       _ = try session.setSchema(activeScheme.rawValue)
+      let pageSize = candidatePageSettings.count
+      _ = try session.setPageSize(pageSize)
+      activePageSize = pageSize
       currentResponse = try session.setMode(
         direct: modeMemory.activate(application: activeApplication)
       )
@@ -157,6 +162,7 @@ final class InputController: IMKInputController {
     cancelFocusIndicator()
     if event.type == .keyDown {
       modePresenter.hide()
+      synchronizeCandidatePageSizeIfIdle()
     }
     if event.type == .flagsChanged {
       if rightControlTap.flagsChanged(
@@ -552,9 +558,14 @@ final class InputController: IMKInputController {
 
   func selectInputScheme(_ scheme: InputScheme, for client: IMKTextInput) -> Bool {
     do {
-      let response = try ensureActive().setSchema(scheme.rawValue)
+      let session = try ensureActive()
+      let schemaResponse = try session.setSchema(scheme.rawValue)
+      guard schemaResponse.handled else { return false }
+      let pageSize = candidatePageSettings.count
+      let response = try session.setPageSize(pageSize)
       guard response.handled else { return false }
       activeScheme = scheme
+      activePageSize = pageSize
       schemeMemory.update(scheme)
       apply(response, to: client)
       return true
@@ -594,6 +605,19 @@ final class InputController: IMKInputController {
     }
     return lastCaret
       ?? NSRect(origin: NSEvent.mouseLocation, size: NSSize(width: 1, height: 20))
+  }
+
+  private func synchronizeCandidatePageSizeIfIdle() {
+    let pageSize = candidatePageSettings.count
+    guard !hasComposition, activePageSize != pageSize, let session else { return }
+    do {
+      let response = try session.setPageSize(pageSize)
+      guard response.handled else { return }
+      activePageSize = pageSize
+      currentResponse = response
+    } catch {
+      report(error, operation: "set page size \(pageSize)")
+    }
   }
 
   @discardableResult

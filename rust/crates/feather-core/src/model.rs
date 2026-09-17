@@ -108,6 +108,7 @@ pub enum InputEvent {
     SelectCandidate(CandidateId),
     SetMode(InputMode),
     SetSchema(String),
+    SetPageSize(usize),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,6 +120,7 @@ pub enum InputEffect {
     HideCandidates,
     ModeChanged(InputMode),
     SchemaChanged(String),
+    PageSizeChanged(usize),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

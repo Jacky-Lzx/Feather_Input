@@ -50,6 +50,21 @@ int feather_rime_select_schema(uintptr_t session, const char *schema) {
   return 1;
 }
 
+int feather_rime_set_page_size(uintptr_t session, const char *schema,
+                               int page_size) {
+  if (api == NULL || session == 0 || schema == NULL || page_size < 1 ||
+      page_size > 9 || !RIME_PROVIDED(api, config_set_int))
+    return 0;
+  RimeConfig config = {0};
+  if (!api->schema_open(schema, &config)) return 0;
+  int configured = api->config_set_int(&config, "menu/page_size", page_size);
+  api->config_close(&config);
+  if (!configured || !api->select_schema(session, schema)) return 0;
+  api->clear_composition(session);
+  api->set_option(session, "simplification", True);
+  return 1;
+}
+
 void feather_rime_destroy_session(uintptr_t session) {
   if (api != NULL && session != 0) api->destroy_session(session);
 }

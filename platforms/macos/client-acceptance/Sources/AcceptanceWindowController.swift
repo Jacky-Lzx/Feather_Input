@@ -130,6 +130,7 @@ final class AcceptanceWindowController: NSWindowController {
       "组合过程中打开设置不会意外上屏文字",
       "输入框获得焦点时在插入点旁显示当前中英文状态",
       "焦点状态提示按设置自动消失或保持到开始输入",
+      "修改拼音每页候选后，下一次组合的页大小与翻页边界同步变化",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
     let itemsPerColumn = (checklistItems.count + 1) / 2

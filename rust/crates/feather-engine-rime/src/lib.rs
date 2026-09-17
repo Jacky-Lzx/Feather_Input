@@ -25,6 +25,8 @@ unsafe extern "C" {
     fn feather_rime_finalize();
     fn feather_rime_create_session(schema: *const c_char) -> usize;
     fn feather_rime_select_schema(session: usize, schema: *const c_char) -> c_int;
+    fn feather_rime_set_page_size(session: usize, schema: *const c_char, page_size: c_int)
+        -> c_int;
     fn feather_rime_destroy_session(session: usize);
     fn feather_rime_process_key(session: usize, key: c_int, modifiers: c_int) -> c_int;
     fn feather_rime_clear(session: usize);
@@ -244,6 +246,7 @@ impl RimeRuntime {
             lease: Arc::clone(&self.lease),
             session,
             revision: 1,
+            schema: schema.to_string_lossy().into_owned(),
         })
     }
 }
@@ -252,6 +255,7 @@ pub struct RimeEngine {
     lease: Arc<RuntimeLease>,
     session: usize,
     revision: u64,
+    schema: String,
 }
 
 impl RimeEngine {
@@ -264,6 +268,32 @@ impl RimeEngine {
             return Err(EngineError::new(format!(
                 "无法选择 Rime schema：{}",
                 schema.to_string_lossy()
+            )));
+        }
+        self.revision = next_revision(self.revision);
+        self.schema = schema.to_string_lossy().into_owned();
+        Ok(true)
+    }
+
+    fn set_page_size(&mut self, page_size: usize) -> Result<bool, EngineError> {
+        if !(1..=9).contains(&page_size) {
+            return Err(EngineError::new(format!(
+                "Rime 每页候选数量超出范围：{page_size}"
+            )));
+        }
+        if !self.snapshot()?.preedit.is_empty() {
+            return Ok(false);
+        }
+        let schema = CString::new(self.schema.as_str())
+            .map_err(|_| EngineError::new("Rime schema 名称包含 NUL 字符"))?;
+        let page_size = c_int::try_from(page_size)
+            .map_err(|_| EngineError::new("Rime 每页候选数量无法转换为 C 整数"))?;
+        let _registry = self.lease.lock()?;
+        let handled =
+            unsafe { feather_rime_set_page_size(self.session, schema.as_ptr(), page_size) } != 0;
+        if !handled {
+            return Err(EngineError::new(format!(
+                "无法设置 Rime 每页候选数量：{page_size}"
             )));
         }
         self.revision = next_revision(self.revision);
@@ -335,6 +365,7 @@ impl InputEngine for RimeEngine {
             EngineCommand::PageNext => self.process_key(KEY_PAGE_DOWN)?,
             EngineCommand::Select(id) => self.select_candidate(id)?,
             EngineCommand::SelectSchema(schema) => self.select_schema(&schema)?,
+            EngineCommand::SetPageSize(page_size) => self.set_page_size(page_size)?,
         };
         let commit = if handled { self.take_commit()? } else { None };
         Ok(EngineResponse { handled, commit })
