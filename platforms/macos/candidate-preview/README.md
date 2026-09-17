@@ -17,7 +17,7 @@ open -n .build/macos-candidate-preview/FeatherCandidatePreview.app
 预览器支持：
 
 - 跟随系统、浅色和深色三种外观；
-- 常规、长文本和九项候选三种内容；
+- 常规、长文本和全词候选三种内容；
 - 切换高亮候选；
 - 点击候选；
 - 移动或缩放主窗口，检查候选窗是否持续跟随锚点。

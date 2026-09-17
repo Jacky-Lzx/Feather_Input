@@ -5,19 +5,19 @@ final class AcceptanceWindowController: NSWindowController {
   private let textView = ShortcutTextView()
   private let secureField = NSSecureTextField()
   private let compositionStatus = NSTextField(labelWithString: "尚未输入")
-  private let shortcutStatus = NSTextField(labelWithString: "尚未收到快捷键")
-  private let progressStatus = NSTextField(labelWithString: "0 / 7 项已确认")
+  private let clientEventStatus = NSTextField(labelWithString: "尚未收到客户端按键")
+  private let progressStatus = NSTextField(labelWithString: "0 / 14 项已确认")
   private var checks: [NSButton] = []
 
   init() {
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 760, height: 720),
+      contentRect: NSRect(x: 0, y: 0, width: 920, height: 760),
       styleMask: [.titled, .closable, .miniaturizable, .resizable],
       backing: .buffered,
       defer: false
     )
     window.title = "Feather Input Rust Dev 客户端验收"
-    window.minSize = NSSize(width: 640, height: 620)
+    window.minSize = NSSize(width: 820, height: 700)
     super.init(window: window)
     buildInterface(in: window)
     installMenu()
@@ -48,7 +48,7 @@ final class AcceptanceWindowController: NSWindowController {
   }
 
   @objc private func recordMenuShortcut(_ sender: Any?) {
-    shortcutStatus.stringValue = "客户端收到快捷键：Command + Option + K"
+    clientEventStatus.stringValue = "客户端收到按键：Command + Option + K"
   }
 
   @objc private func updateProgress(_ sender: NSButton) {
@@ -65,7 +65,7 @@ final class AcceptanceWindowController: NSWindowController {
       font: .systemFont(ofSize: 24, weight: .semibold)
     )
     let instructions = label(
-      "先从菜单栏切换到 Feather Rust Dev。在下方输入 shijie，检查预编辑、候选窗口和“世界”上屏。这个应用不链接 Rust 或 librime。",
+      "先从菜单栏切换到 Feather Rust Dev。在下方输入 shijie 检查基本候选；输入 shi 检查全词候选、跨列导航和超过 40 项后的继续加载。这个应用不链接 Rust 或 librime。",
       font: .systemFont(ofSize: 14)
     )
     instructions.textColor = .secondaryLabelColor
@@ -74,8 +74,8 @@ final class AcceptanceWindowController: NSWindowController {
     textView.isRichText = false
     textView.isAutomaticQuoteSubstitutionEnabled = false
     textView.isAutomaticDashSubstitutionEnabled = false
-    textView.shortcutHandler = { [weak self] description in
-      self?.shortcutStatus.stringValue = "客户端收到快捷键：\(description)"
+    textView.clientEventHandler = { [weak self] description in
+      self?.clientEventStatus.stringValue = "客户端收到按键：\(description)"
     }
     NotificationCenter.default.addObserver(
       self,
@@ -97,33 +97,44 @@ final class AcceptanceWindowController: NSWindowController {
     secureField.placeholderString = "在这里输入时不应出现预编辑或候选窗口"
     secureField.font = .systemFont(ofSize: 16)
 
-    let shortcutTitle = label("快捷键放行检查", font: .systemFont(ofSize: 16, weight: .medium))
-    let shortcutHelp = label(
-      "在普通文本框中按 Control + K、Option + K 或 Command + Option + K。",
+    let clientEventTitle = label(
+      "客户端按键检查", font: .systemFont(ofSize: 16, weight: .medium))
+    let clientEventHelp = label(
+      "在普通文本框中按 Tab、Control + K、Option + K 或 Command + Option + K。若输入法放行，下面会显示对应按键。",
       font: .systemFont(ofSize: 13)
     )
-    shortcutHelp.textColor = .secondaryLabelColor
-    shortcutStatus.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+    clientEventHelp.textColor = .secondaryLabelColor
+    clientEventStatus.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
 
     let checklistTitle = label("人工验收清单", font: .systemFont(ofSize: 16, weight: .medium))
-    let checklist = NSStackView()
-    checklist.orientation = .vertical
-    checklist.alignment = .leading
-    checklist.spacing = 4
-    for item in [
+    let checklistItems = [
       "shijie 出现预编辑和“世界”候选",
-      "上下键会改变候选高亮",
-      "Page Up / Page Down 会翻页",
-      "空格和鼠标点击均能上屏",
+      "紧凑窗上下键会改变候选高亮",
+      "紧凑窗左键和 Page Up / Page Down 会翻页",
+      "紧凑窗右键会展开全词候选",
+      "全词窗四个方向键可以跨行、跨列移动",
+      "全词窗只有当前列显示数字",
+      "数字键选择当前列对应候选并上屏",
+      "Tab 由客户端接收，输入法不主动关闭全词候选",
+      "Esc 取消组合并关闭候选窗，不产生上屏文字",
+      "输入 shi，右移越过第 40 项后仍能继续加载候选",
+      "空格、回车和鼠标点击均能上屏",
       "客户端能够收到 Command / Control / Option 快捷键",
       "密码框中不出现预编辑或候选窗口",
       "浅色与深色模式下候选内容均清晰可见",
-    ] {
+    ]
+    let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
+    for (index, item) in checklistItems.enumerated() {
       let button = NSButton(
         checkboxWithTitle: item, target: self, action: #selector(updateProgress(_:)))
       checks.append(button)
-      checklist.addArrangedSubview(button)
+      checklistColumns[index / 7].addArrangedSubview(button)
     }
+    let checklist = NSStackView(views: checklistColumns)
+    checklist.orientation = .horizontal
+    checklist.alignment = .top
+    checklist.distribution = .fillEqually
+    checklist.spacing = 18
 
     progressStatus.font = .systemFont(ofSize: 13, weight: .semibold)
     let reset = NSButton(title: "清空输入", target: self, action: #selector(resetFields(_:)))
@@ -141,9 +152,9 @@ final class AcceptanceWindowController: NSWindowController {
       compositionStatus,
       secureTitle,
       secureField,
-      shortcutTitle,
-      shortcutHelp,
-      shortcutStatus,
+      clientEventTitle,
+      clientEventHelp,
+      clientEventStatus,
       checklistTitle,
       checklist,
       footer,
@@ -157,6 +168,7 @@ final class AcceptanceWindowController: NSWindowController {
     instructions.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     secureField.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    checklist.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     footer.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
@@ -199,11 +211,19 @@ final class AcceptanceWindowController: NSWindowController {
     label.font = font
     return label
   }
+
+  private func makeChecklistColumn() -> NSStackView {
+    let column = NSStackView()
+    column.orientation = .vertical
+    column.alignment = .leading
+    column.spacing = 4
+    return column
+  }
 }
 
 @MainActor
 private final class ShortcutTextView: NSTextView {
-  var shortcutHandler: ((String) -> Void)?
+  var clientEventHandler: ((String) -> Void)?
 
   override func keyDown(with event: NSEvent) {
     let modifiers = event.modifierFlags.intersection([.command, .control, .option])
@@ -213,8 +233,16 @@ private final class ShortcutTextView: NSTextView {
       if modifiers.contains(.control) { names.append("Control") }
       if modifiers.contains(.option) { names.append("Option") }
       let key = event.charactersIgnoringModifiers?.uppercased() ?? "?"
-      shortcutHandler?((names + [key]).joined(separator: " + "))
+      clientEventHandler?((names + [key]).joined(separator: " + "))
     }
     super.keyDown(with: event)
+  }
+
+  override func doCommand(by selector: Selector) {
+    let command = NSStringFromSelector(selector)
+    if command == "insertTab:" || command == "insertTabIgnoringFieldEditor:" {
+      clientEventHandler?("Tab（\(command)）")
+    }
+    super.doCommand(by: selector)
   }
 }
