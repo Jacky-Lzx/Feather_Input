@@ -47,7 +47,7 @@ macOS IMK / Windows TSF / Linux Fcitx 或 IBus
 
 - 管理激活状态、输入模式、标准化事件分派和平台效果。
 - 拒绝来自旧 revision 的候选选择。
-- 提供包含不透明候选 ID 的不可变候选快照。
+- 提供包含不透明候选 ID 的不可变候选快照，以及按 revision 绑定的完整候选批次。
 - 不依赖 AppKit、TSF、Fcitx、librime、HTTP 或模型运行时。
 
 ### 输入引擎
@@ -66,8 +66,13 @@ macOS IMK / Windows TSF / Linux Fcitx 或 IBus
 
 ## 候选身份
 
-公开候选 ID 由 `(revision, engine_id)` 组成。只有两部分都仍然存在于当前快照时，
-平台返回的候选选择才会被接受。
+公开候选 ID 由 `(revision, engine_id)` 组成。核心先确认 revision 仍是当前版本，再由
+引擎解析 `engine_id`；因此不在当前可见页、但来自同一完整候选列表的候选仍可选择。
+旧 revision 或引擎无法识别的 ID 都不会产生提交。
+
+`InputEngine::candidate_slice` 按 offset 和 limit 读取完整候选列表。核心会把请求绑定到
+当前 revision，平台通过 `has_more` 继续取下一批。批次接口不改变当前页或高亮状态，
+也不允许平台把数组位置当作候选身份。
 
 候选文字仅用于显示，不能充当选择身份。重复候选文字是合法的，而且 AI 调整后的
 显示顺序可能与引擎顺序不同。
@@ -119,8 +124,9 @@ Rime 按键事件和候选迭代操作。未来的 Rust 实现可以使用解析
 持有独立的 Rime session；关闭其中一个不会影响其他 session。不同数据目录不能在
 同一 runtime 生命周期内混用，调用方会收到明确的初始化错误。
 
-`feather-ffi` 当前提供 ABI v2：显式输出指针、结构化错误、能力查询、同线程检查和
-幂等关闭。公开头文件同时接受 C11 与 C++17 语法检查。
+`feather-ffi` 当前提供 ABI v2：显式输出指针、结构化错误、能力查询、同线程检查、
+幂等关闭，以及带过期版本检查的完整候选批次。公开头文件同时接受 C11 与 C++17
+语法检查。
 
 `platforms/macos/dev-harness` 提供普通 AppKit 调试应用，用来验证 Swift、C ABI、
 Rust 核心和 librime 的真实链路。它不会注册 InputMethodKit 输入源，使用独立用户

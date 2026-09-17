@@ -15,6 +15,8 @@ const CAP_OPAQUE_CANDIDATE_ID: u64 = 1 << 1;
 const CAP_EXPLICIT_CLOSE: u64 = 1 << 2;
 const CAP_STRUCTURED_ERROR: u64 = 1 << 3;
 const CAP_MULTI_SESSION: u64 = 1 << 4;
+const CAP_CANDIDATE_SLICES: u64 = 1 << 5;
+const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,6 +31,7 @@ enum StatusCode {
     EngineOperationFailed = 8,
     SnapshotFailed = 9,
     InternalError = 10,
+    StaleRevision = 11,
 }
 
 impl StatusCode {
@@ -69,6 +72,21 @@ struct ResponseStorage {
     preedit: CString,
     _texts: Vec<CString>,
     candidates: Vec<FeatherCandidate>,
+}
+
+struct CandidateSliceStorage {
+    _texts: Vec<CString>,
+    candidates: Vec<FeatherCandidate>,
+}
+
+#[repr(C)]
+pub struct FeatherCandidateSlice {
+    pub revision: u64,
+    pub offset: usize,
+    pub candidates: *const FeatherCandidate,
+    pub candidate_count: usize,
+    pub has_more: u8,
+    pub storage: *mut c_void,
 }
 
 #[repr(C)]
@@ -167,6 +185,61 @@ fn response(
     Ok(Box::into_raw(Box::new(FeatherResponse {
         storage: storage.cast(),
         ..response
+    })))
+}
+
+fn candidate_slice(
+    core: &InputCoordinator,
+    revision: u64,
+    offset: usize,
+    limit: usize,
+) -> Result<*mut FeatherCandidateSlice, FfiFailure> {
+    if limit == 0 || limit > MAX_CANDIDATE_SLICE_LIMIT {
+        return Err(FfiFailure::new(
+            StatusCode::InvalidArgument,
+            format!("候选批次大小必须在 1..={MAX_CANDIDATE_SLICE_LIMIT} 之间"),
+        ));
+    }
+    let slice = core
+        .candidate_slice(revision, offset, limit)
+        .map_err(|error| {
+            FfiFailure::new(
+                StatusCode::SnapshotFailed,
+                format!("无法读取完整候选列表：{error}"),
+            )
+        })?
+        .ok_or_else(|| FfiFailure::new(StatusCode::StaleRevision, "候选版本已经过期"))?;
+    let texts = slice
+        .candidates
+        .iter()
+        .map(|candidate| cstring(&candidate.text))
+        .collect::<Vec<_>>();
+    let candidates = slice
+        .candidates
+        .iter()
+        .zip(&texts)
+        .map(|(candidate, text)| FeatherCandidate {
+            revision: candidate.id.revision,
+            value: candidate.id.value,
+            text: text.as_ptr(),
+        })
+        .collect::<Vec<_>>();
+    let storage = Box::new(CandidateSliceStorage {
+        _texts: texts,
+        candidates,
+    });
+    let result = FeatherCandidateSlice {
+        revision: slice.revision,
+        offset: slice.offset,
+        candidates: storage.candidates.as_ptr(),
+        candidate_count: storage.candidates.len(),
+        has_more: u8::from(slice.has_more),
+        storage: ptr::null_mut(),
+    };
+    let storage = Box::into_raw(storage);
+    Ok(Box::into_raw(Box::new(FeatherCandidateSlice {
+        storage: storage.cast(),
+        ..result
     })))
 }
 
@@ -342,6 +415,7 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_EXPLICIT_CLOSE
         | CAP_STRUCTURED_ERROR
         | CAP_MULTI_SESSION
+        | CAP_CANDIDATE_SLICES
 }
 
 #[no_mangle]
@@ -558,6 +632,29 @@ pub unsafe extern "C" fn feather_ime_select_candidate(
 }
 
 #[no_mangle]
+/// Reads a bounded slice of the complete candidate list for one revision.
+///
+/// # Safety
+///
+/// `ime` must be a live handle used on its owner thread. Output pointers follow
+/// `feather_ime_new`.
+pub unsafe extern "C" fn feather_ime_candidate_slice(
+    ime: *mut FeatherIme,
+    revision: u64,
+    offset: usize,
+    limit: usize,
+    out_slice: *mut *mut FeatherCandidateSlice,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        output_call(out_slice, out_error, || {
+            let core = checked_core(ime)?;
+            candidate_slice(core, revision, offset, limit)
+        })
+    }
+}
+
+#[no_mangle]
 /// Releases an error returned by this library. A null pointer is accepted.
 ///
 /// # Safety
@@ -589,6 +686,24 @@ pub unsafe extern "C" fn feather_ime_response_free(response: *mut FeatherRespons
         let response = unsafe { Box::from_raw(response) };
         if !response.storage.is_null() {
             drop(unsafe { Box::from_raw(response.storage.cast::<ResponseStorage>()) });
+        }
+    }));
+}
+
+#[no_mangle]
+/// Releases a candidate slice returned by this library. A null pointer is accepted.
+///
+/// # Safety
+///
+/// `slice` must be null or a live pointer returned through `out_slice`.
+pub unsafe extern "C" fn feather_ime_candidate_slice_free(slice: *mut FeatherCandidateSlice) {
+    if slice.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let slice = unsafe { Box::from_raw(slice) };
+        if !slice.storage.is_null() {
+            drop(unsafe { Box::from_raw(slice.storage.cast::<CandidateSliceStorage>()) });
         }
     }));
 }
@@ -692,7 +807,56 @@ mod tests {
                 | CAP_EXPLICIT_CLOSE
                 | CAP_STRUCTURED_ERROR
                 | CAP_MULTI_SESSION
+                | CAP_CANDIDATE_SLICES
         );
+    }
+
+    #[test]
+    fn c_abi_v2_reads_revision_bound_candidate_slices() {
+        let ime = unsafe { new_lexicon() };
+        unsafe {
+            activate(ime);
+            type_ascii(ime, b"n");
+        }
+        let revision = unsafe {
+            (*checked_core(ime).unwrap())
+                .presentation()
+                .unwrap()
+                .revision
+        };
+        let mut slice = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        let status = unsafe {
+            feather_ime_candidate_slice(ime, revision, 0, 1, &raw mut slice, &raw mut error)
+        };
+        assert_eq!(status, StatusCode::Ok.value());
+        assert!(error.is_null());
+        assert_eq!(unsafe { (*slice).candidate_count }, 1);
+        assert_eq!(unsafe { (*slice).has_more }, 1);
+        assert_eq!(unsafe { (*(*slice).candidates).revision }, revision);
+        unsafe { feather_ime_candidate_slice_free(slice) };
+
+        unsafe { type_ascii(ime, b"i") };
+        let status = unsafe {
+            feather_ime_candidate_slice(ime, revision, 0, 1, &raw mut slice, &raw mut error)
+        };
+        assert_eq!(status, StatusCode::StaleRevision.value());
+        assert!(slice.is_null());
+        assert!(unsafe { error_message(error) }.contains("过期"));
+        unsafe { feather_error_free(error) };
+
+        let current_revision =
+            unsafe { checked_core(ime).unwrap().presentation().unwrap().revision };
+        let status = unsafe {
+            feather_ime_candidate_slice(ime, current_revision, 0, 0, &raw mut slice, &raw mut error)
+        };
+        assert_eq!(status, StatusCode::InvalidArgument.value());
+        assert!(slice.is_null());
+        assert!(unsafe { error_message(error) }.contains("1..=256"));
+        unsafe {
+            feather_error_free(error);
+            close_and_free(ime);
+        }
     }
 
     #[test]

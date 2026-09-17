@@ -19,6 +19,13 @@ struct FeatherResponseValue {
   let highlighted: Int?
 }
 
+struct FeatherCandidateSliceValue {
+  let revision: UInt64
+  let offset: Int
+  let candidates: [FeatherCandidateValue]
+  let hasMore: Bool
+}
+
 enum FeatherBridgeError: LocalizedError {
   case unsupportedABI(UInt32)
   case missingCapabilities(UInt64)
@@ -66,8 +73,10 @@ enum FeatherKey: UInt32 {
 final class FeatherSession {
   private static let expectedABI: UInt32 = 2
   private static let requiredCapabilities: UInt64 = 0b1_1111
+  private static let candidateSlicesCapability: UInt64 = 1 << 5
 
   private var handle: OpaquePointer?
+  private let capabilities: UInt64
 
   init(sharedData: URL, userData: URL, schema: String) throws {
     let version = feather_ime_abi_version()
@@ -111,6 +120,7 @@ final class FeatherSession {
     guard let newHandle else {
       throw FeatherBridgeError.sessionCreationFailed
     }
+    self.capabilities = capabilities
     handle = newHandle
   }
 
@@ -177,6 +187,56 @@ final class FeatherSession {
         &error
       )
     }
+  }
+
+  func candidateSlice(revision: UInt64, offset: Int, limit: Int) throws
+    -> FeatherCandidateSliceValue
+  {
+    let missing = Self.candidateSlicesCapability & ~capabilities
+    guard missing == 0 else {
+      throw FeatherBridgeError.missingCapabilities(missing)
+    }
+    let handle = try requireHandle()
+    var slice: UnsafeMutablePointer<FeatherCandidateSlice>?
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = feather_ime_candidate_slice(
+      handle,
+      revision,
+      offset,
+      limit,
+      &slice,
+      &ffiError
+    )
+    do {
+      try Self.check(status: status, error: ffiError, operation: "candidate slice")
+    } catch {
+      feather_ime_candidate_slice_free(slice)
+      throw error
+    }
+    guard let slice else {
+      throw FeatherBridgeError.invalidSuccess(operation: "candidate slice")
+    }
+    defer { feather_ime_candidate_slice_free(slice) }
+
+    let value = slice.pointee
+    let candidates: [FeatherCandidateValue]
+    if let base = value.candidates, value.candidate_count > 0 {
+      candidates = UnsafeBufferPointer(start: base, count: value.candidate_count).map {
+        FeatherCandidateValue(
+          revision: $0.revision,
+          value: $0.value,
+          text: $0.text.map(String.init(cString:)) ?? ""
+        )
+      }
+    } else {
+      candidates = []
+    }
+    return FeatherCandidateSliceValue(
+      revision: value.revision,
+      offset: value.offset,
+      candidates: candidates,
+      hasMore: value.has_more != 0
+    )
   }
 
   private func requireHandle() throws -> OpaquePointer {

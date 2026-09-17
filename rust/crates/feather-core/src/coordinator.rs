@@ -1,6 +1,6 @@
 use crate::{
-    CandidateId, CandidatePresentation, DispatchResult, EngineCommand, EngineError, InputEffect,
-    InputEngine, InputEvent, InputMode, Key,
+    Candidate, CandidateId, CandidatePresentation, CandidateSlice, DispatchResult, EngineCommand,
+    EngineError, InputEffect, InputEngine, InputEvent, InputMode, Key,
 };
 
 pub struct InputCoordinator {
@@ -36,6 +36,44 @@ impl InputCoordinator {
     /// Returns an engine error when a consistent snapshot is unavailable.
     pub fn presentation(&self) -> Result<CandidatePresentation, EngineError> {
         Ok(self.engine.snapshot()?.into())
+    }
+
+    /// Reads a revision-bound slice of the engine's complete candidate list.
+    ///
+    /// `None` means the requested revision is stale.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when the current snapshot or candidate list
+    /// cannot be read consistently.
+    pub fn candidate_slice(
+        &self,
+        revision: u64,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Option<CandidateSlice>, EngineError> {
+        let snapshot = self.engine.snapshot()?;
+        if snapshot.revision != revision {
+            return Ok(None);
+        }
+        let slice = self.engine.candidate_slice(offset, limit)?;
+        Ok(Some(CandidateSlice {
+            revision,
+            offset,
+            candidates: slice
+                .candidates
+                .into_iter()
+                .map(|candidate| Candidate {
+                    id: CandidateId {
+                        revision,
+                        value: candidate.id.0,
+                    },
+                    text: candidate.text,
+                    annotation: candidate.annotation,
+                })
+                .collect(),
+            has_more: slice.has_more,
+        }))
     }
 
     /// Dispatches one normalized platform event.
@@ -88,12 +126,7 @@ impl InputCoordinator {
             return Ok(DispatchResult::default());
         }
         let snapshot = self.engine.snapshot()?;
-        if id.revision != snapshot.revision
-            || !snapshot
-                .candidates
-                .iter()
-                .any(|candidate| candidate.id.0 == id.value)
-        {
+        if id.revision != snapshot.revision {
             return Ok(DispatchResult::default());
         }
         self.run_engine(EngineCommand::Select(crate::EngineCandidateId(id.value)))

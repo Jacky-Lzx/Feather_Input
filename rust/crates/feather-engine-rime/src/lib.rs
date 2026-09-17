@@ -1,6 +1,6 @@
 use feather_core::{
-    EngineCandidate, EngineCandidateId, EngineCommand, EngineError, EngineResponse, EngineSnapshot,
-    InputEngine,
+    EngineCandidate, EngineCandidateId, EngineCandidateSlice, EngineCommand, EngineError,
+    EngineResponse, EngineSnapshot, InputEngine,
 };
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::path::{Path, PathBuf};
@@ -38,6 +38,15 @@ unsafe extern "C" {
         highlight: *mut c_int,
     ) -> c_int;
     fn feather_rime_select_candidate(session: usize, index: u64) -> c_int;
+    fn feather_rime_candidate_slice(
+        session: usize,
+        offset: usize,
+        texts: *mut *mut c_char,
+        comments: *mut *mut c_char,
+        ids: *mut u64,
+        capacity: c_int,
+        has_more: *mut c_int,
+    ) -> c_int;
     fn feather_rime_free_string(text: *mut c_char);
 }
 
@@ -367,6 +376,47 @@ impl InputEngine for RimeEngine {
             highlighted,
         })
     }
+
+    fn candidate_slice(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> Result<EngineCandidateSlice, EngineError> {
+        let capacity =
+            c_int::try_from(limit).map_err(|_| EngineError::new("Rime 候选批次大小超出范围"))?;
+        let _registry = self.lease.lock()?;
+        let mut texts = vec![ptr::null_mut(); limit];
+        let mut comments = vec![ptr::null_mut(); limit];
+        let mut ids = vec![0_u64; limit];
+        let mut has_more = 0;
+        let count = unsafe {
+            feather_rime_candidate_slice(
+                self.session,
+                offset,
+                texts.as_mut_ptr(),
+                comments.as_mut_ptr(),
+                ids.as_mut_ptr(),
+                capacity,
+                &raw mut has_more,
+            )
+        };
+        if count < 0 {
+            return Err(EngineError::new("无法读取完整 Rime 候选列表"));
+        }
+        let count = usize::try_from(count).map_err(|_| EngineError::new("Rime 候选数量无效"))?;
+        let mut candidates = Vec::with_capacity(count);
+        for index in 0..count {
+            candidates.push(EngineCandidate {
+                id: EngineCandidateId(ids[index]),
+                text: unsafe { take_string(texts[index]) }.unwrap_or_default(),
+                annotation: unsafe { take_string(comments[index]) }.filter(|text| !text.is_empty()),
+            });
+        }
+        Ok(EngineCandidateSlice {
+            candidates,
+            has_more: has_more != 0,
+        })
+    }
 }
 
 fn path_to_cstring(path: &Path) -> Result<CString, EngineError> {
@@ -453,6 +503,24 @@ mod tests {
             .candidates
             .iter()
             .any(|candidate| candidate.text == "世界"));
+
+        let presentation = core_b.presentation().unwrap();
+        let revision = presentation.revision;
+        let first = core_b.candidate_slice(revision, 0, 3).unwrap().unwrap();
+        let second = core_b.candidate_slice(revision, 3, 3).unwrap().unwrap();
+        assert_eq!(first.candidates.len(), 3);
+        assert_eq!(second.candidates.len(), 3);
+        assert!(first.has_more);
+        assert_eq!(first.candidates[0], presentation.candidates[0]);
+        assert_ne!(first.candidates[0].id, second.candidates[0].id);
+        let off_page = second.candidates[2].clone();
+        let result = core_b
+            .dispatch(InputEvent::SelectCandidate(off_page.id))
+            .unwrap();
+        assert!(result
+            .effects
+            .contains(&InputEffect::CommitText(off_page.text)));
+        type_text(&mut core_b, "shijie");
 
         select_text(&mut core_a, "你好");
         drop(core_a);

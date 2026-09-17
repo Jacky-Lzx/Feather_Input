@@ -5,8 +5,9 @@ mod model;
 pub use coordinator::InputCoordinator;
 pub use engine::{EngineCommand, EngineError, EngineResponse, InputEngine};
 pub use model::{
-    Candidate, CandidateId, CandidatePresentation, DispatchResult, EngineCandidate,
-    EngineCandidateId, EngineSnapshot, InputEffect, InputEvent, InputMode, Key,
+    Candidate, CandidateId, CandidatePresentation, CandidateSlice, DispatchResult, EngineCandidate,
+    EngineCandidateId, EngineCandidateSlice, EngineSnapshot, InputEffect, InputEvent, InputMode,
+    Key,
 };
 
 pub const ABI_VERSION: u32 = 2;
@@ -42,13 +43,16 @@ mod tests {
                         commit: (!commit.is_empty()).then_some(commit),
                     });
                 }
-                EngineCommand::Select(_) => {
+                EngineCommand::Select(EngineCandidateId(7)) => {
                     let commit = std::mem::take(&mut self.text);
                     self.revision += 1;
                     return Ok(EngineResponse {
                         handled: true,
                         commit: Some(format!("selected:{commit}")),
                     });
+                }
+                EngineCommand::Select(_) => {
+                    return Ok(EngineResponse::default());
                 }
                 _ => {}
             }
@@ -112,6 +116,39 @@ mod tests {
                 .unwrap()
                 .handled
         );
+    }
+
+    #[test]
+    fn candidate_slices_are_revision_bound_and_keep_opaque_ids() {
+        let mut core = InputCoordinator::new(FakeEngine::default());
+        core.dispatch(InputEvent::Activate).unwrap();
+        core.dispatch(InputEvent::Key(Key::Text("n".into())))
+            .unwrap();
+        let revision = core.presentation().unwrap().revision;
+        let slice = core.candidate_slice(revision, 0, 8).unwrap().unwrap();
+        assert_eq!(slice.revision, revision);
+        assert_eq!(slice.candidates[0].id, CandidateId { revision, value: 7 });
+        assert!(!slice.has_more);
+
+        core.dispatch(InputEvent::Key(Key::Text("i".into())))
+            .unwrap();
+        assert!(core.candidate_slice(revision, 0, 8).unwrap().is_none());
+    }
+
+    #[test]
+    fn unknown_candidate_identity_is_rejected_by_engine() {
+        let mut core = InputCoordinator::new(FakeEngine::default());
+        core.dispatch(InputEvent::Activate).unwrap();
+        core.dispatch(InputEvent::Key(Key::Text("n".into())))
+            .unwrap();
+        let revision = core.presentation().unwrap().revision;
+        let result = core
+            .dispatch(InputEvent::SelectCandidate(CandidateId {
+                revision,
+                value: 999,
+            }))
+            .unwrap();
+        assert!(!result.handled);
     }
 
     #[test]

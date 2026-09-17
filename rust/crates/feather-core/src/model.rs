@@ -22,6 +22,12 @@ pub struct EngineCandidate {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct EngineCandidateSlice {
+    pub candidates: Vec<EngineCandidate>,
+    pub has_more: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EngineSnapshot {
     pub revision: u64,
     pub preedit: String,
@@ -35,6 +41,14 @@ pub struct Candidate {
     pub id: CandidateId,
     pub text: String,
     pub annotation: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CandidateSlice {
+    pub revision: u64,
+    pub offset: usize,
+    pub candidates: Vec<Candidate>,
+    pub has_more: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

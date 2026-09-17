@@ -36,6 +36,7 @@ Swift、C++、AppKit 或 librime 对象，并把成功结果、失败状态和�
 new / new_rime
        ↓
 activate → key / select / set_mode
+             ↘ candidate_slice
        ↓
 deactivate（可选）
        ↓
@@ -68,6 +69,12 @@ session 独立持有。关闭一个 ABI session 不会关闭其他 session。只
 - 响应释放不影响 session，也不影响其他响应；
 - 候选选择使用 `(revision, value)` 不透明身份，不能用显示文字或数组下标替代。
 
+`feather_ime_candidate_slice()` 用同一个 revision 按 `offset`、`limit` 分批读取完整
+候选列表。`limit` 必须在 `1...256` 内。成功返回的 `FeatherCandidateSlice` 及其候选
+文字由该对象独立拥有，必须用 `feather_ime_candidate_slice_free()` 释放。组合状态
+变化后继续使用旧 revision 会返回 `FEATHER_STATUS_STALE_REVISION`，调用方应丢弃旧批次，
+而不是把新旧候选拼接起来。
+
 所有传入字符串和按键文字均使用 UTF-8。`cursor_utf8` 也是 UTF-8 字节偏移，平台层
 负责转换成原生文本 API 所要求的坐标单位。
 
@@ -80,6 +87,7 @@ ABI v2 当前公开以下能力：
 - `FEATHER_CAP_EXPLICIT_CLOSE`：支持显式、幂等关闭；
 - `FEATHER_CAP_STRUCTURED_ERROR`：支持结构化状态和错误对象；
 - `FEATHER_CAP_MULTI_SESSION`：相同数据目录的 Rime 会话可以重叠存活并相互隔离。
+- `FEATHER_CAP_CANDIDATE_SLICES`：支持按 revision 分批读取完整候选列表。
 
 平台层只应要求自身实际依赖的能力。新增可选能力时增加新的位，不改变已有位的含义。
 

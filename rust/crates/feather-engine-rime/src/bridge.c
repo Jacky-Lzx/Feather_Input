@@ -97,6 +97,40 @@ int feather_rime_candidates(uintptr_t session, char **texts, char **comments,
   return count;
 }
 
+int feather_rime_candidate_slice(uintptr_t session, size_t offset, char **texts,
+                                 char **comments, uint64_t *ids, int capacity,
+                                 int *has_more) {
+  if (api == NULL || session == 0 || texts == NULL || comments == NULL ||
+      ids == NULL || capacity <= 0 || has_more == NULL ||
+      !RIME_PROVIDED(api, candidate_list_begin)) return -1;
+
+  RimeCandidateListIterator iterator = {0};
+  Bool initialized = False;
+  if (RIME_PROVIDED(api, candidate_list_from_index) && offset <= INT32_MAX) {
+    initialized = api->candidate_list_from_index(session, &iterator, (int)offset);
+  } else {
+    initialized = api->candidate_list_begin(session, &iterator);
+    for (size_t index = 0; initialized && index < offset; ++index) {
+      initialized = api->candidate_list_next(&iterator);
+    }
+  }
+
+  Bool has_candidate =
+      initialized ? api->candidate_list_next(&iterator) : False;
+  int count = 0;
+  while (has_candidate && count < capacity) {
+    RimeCandidate *candidate = &iterator.candidate;
+    texts[count] = strdup(candidate->text != NULL ? candidate->text : "");
+    comments[count] = candidate->comment != NULL ? strdup(candidate->comment) : NULL;
+    ids[count] = (uint64_t)iterator.index;
+    ++count;
+    has_candidate = api->candidate_list_next(&iterator);
+  }
+  *has_more = has_candidate ? 1 : 0;
+  api->candidate_list_end(&iterator);
+  return count;
+}
+
 int feather_rime_select_candidate(uintptr_t session, uint64_t index) {
   if (api == NULL || session == 0 || !RIME_PROVIDED(api, select_candidate)) return 0;
   return api->select_candidate(session, (size_t)index);

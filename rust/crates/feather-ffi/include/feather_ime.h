@@ -13,6 +13,7 @@ extern "C" {
 typedef struct FeatherIme FeatherIme;
 typedef struct FeatherError FeatherError;
 typedef struct FeatherResponse FeatherResponse;
+typedef struct FeatherCandidateSlice FeatherCandidateSlice;
 typedef uint32_t FeatherStatus;
 
 enum FeatherStatusCode {
@@ -26,7 +27,8 @@ enum FeatherStatusCode {
     FEATHER_STATUS_ENGINE_INITIALIZATION_FAILED = 7,
     FEATHER_STATUS_ENGINE_OPERATION_FAILED = 8,
     FEATHER_STATUS_SNAPSHOT_FAILED = 9,
-    FEATHER_STATUS_INTERNAL_ERROR = 10
+    FEATHER_STATUS_INTERNAL_ERROR = 10,
+    FEATHER_STATUS_STALE_REVISION = 11
 };
 
 enum FeatherCapability {
@@ -34,7 +36,8 @@ enum FeatherCapability {
     FEATHER_CAP_OPAQUE_CANDIDATE_ID = UINT64_C(1) << 1,
     FEATHER_CAP_EXPLICIT_CLOSE = UINT64_C(1) << 2,
     FEATHER_CAP_STRUCTURED_ERROR = UINT64_C(1) << 3,
-    FEATHER_CAP_MULTI_SESSION = UINT64_C(1) << 4
+    FEATHER_CAP_MULTI_SESSION = UINT64_C(1) << 4,
+    FEATHER_CAP_CANDIDATE_SLICES = UINT64_C(1) << 5
 };
 
 struct FeatherError {
@@ -60,6 +63,15 @@ struct FeatherResponse {
     const FeatherCandidate *candidates;
     size_t candidate_count;
     ptrdiff_t highlighted;
+    void *_storage;
+};
+
+struct FeatherCandidateSlice {
+    uint64_t revision;
+    size_t offset;
+    const FeatherCandidate *candidates;
+    size_t candidate_count;
+    uint8_t has_more;
     void *_storage;
 };
 
@@ -117,9 +129,16 @@ FeatherStatus feather_ime_select_candidate(FeatherIme *ime,
                                            uint64_t value,
                                            FeatherResponse **out_response,
                                            FeatherError **out_error);
+FeatherStatus feather_ime_candidate_slice(FeatherIme *ime,
+                                          uint64_t revision,
+                                          size_t offset,
+                                          size_t limit,
+                                          FeatherCandidateSlice **out_slice,
+                                          FeatherError **out_error);
 
 void feather_error_free(FeatherError *error);
 void feather_ime_response_free(FeatherResponse *response);
+void feather_ime_candidate_slice_free(FeatherCandidateSlice *slice);
 
 #ifdef __cplusplus
 }

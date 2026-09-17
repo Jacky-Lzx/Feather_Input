@@ -1,4 +1,4 @@
-use crate::{EngineCandidateId, EngineSnapshot};
+use crate::{EngineCandidateId, EngineCandidateSlice, EngineSnapshot};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -63,4 +63,29 @@ pub trait InputEngine: Send {
     /// Returns an error when the engine session can no longer provide a
     /// consistent composition and candidate snapshot.
     fn snapshot(&self) -> Result<EngineSnapshot, EngineError>;
+
+    /// Reads a bounded slice of the complete candidate list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the engine cannot provide a consistent candidate
+    /// list for its current composition.
+    fn candidate_slice(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> Result<EngineCandidateSlice, EngineError> {
+        let snapshot = self.snapshot()?;
+        let total = snapshot.candidates.len();
+        let candidates = snapshot
+            .candidates
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        Ok(EngineCandidateSlice {
+            has_more: offset.saturating_add(candidates.len()) < total,
+            candidates,
+        })
+    }
 }
