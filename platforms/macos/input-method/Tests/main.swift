@@ -44,6 +44,7 @@ struct InputMethodSmokeMain {
     }
     try verifyInputModeMemory()
     try verifyInputSchemeMemory()
+    try verifyCapsLockSwitch()
     try verifySettingsWindow()
     try verifyCandidateLayouts()
     try verifyCandidateOverlayOwnership()
@@ -68,6 +69,7 @@ struct InputMethodSmokeMain {
     controller.candidatePageSettings = candidatePageSettings
     let englishCandidateSettings = EnglishCandidateSettings(defaults: modeDefaults)
     controller.englishCandidateSettings = englishCandidateSettings
+    controller.capsLockState = { false }
     controller.focusIndicatorRetryDelaysMilliseconds = []
     let client = SmokeTextClient()
     controller.activateServer(client)
@@ -202,6 +204,19 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("Control + Shift + Space 没有切回中文模式")
     }
+    guard controller.handle(key("n", code: 45), client: client), !client.marked.isEmpty else {
+      throw SmokeFailure.expectation("Caps Lock 测试无法创建组合")
+    }
+    guard controller.handle(flags(code: 57, modifiers: .capsLock, timestamp: 1.15), client: client),
+      client.marked.isEmpty,
+      presenter.candidates.isEmpty,
+      modePresenter.directMode == true,
+      !controller.handle(key("n", code: 45), client: client),
+      controller.handle(flags(code: 57, modifiers: [], timestamp: 1.16), client: client),
+      modePresenter.directMode == false
+    else {
+      throw SmokeFailure.expectation("Caps Lock 没有切换模式并取消现有组合")
+    }
     let shortcutShowCount = modePresenter.showCount
     guard
       !controller.handle(
@@ -217,7 +232,7 @@ struct InputMethodSmokeMain {
         flags(code: 62, modifiers: [.control], timestamp: 2), client: client),
       !controller.handle(key("c", code: 8, modifiers: .control), client: client),
       !controller.handle(flags(code: 62, modifiers: [], timestamp: 2.1), client: client),
-      modePresenter.showCount == focusShowCount + 2
+      modePresenter.showCount == shortcutShowCount
     else {
       throw SmokeFailure.expectation("右 Control 快捷键结束后错误切换了输入模式")
     }
@@ -583,6 +598,20 @@ struct InputMethodSmokeMain {
     memory.update(.flypy)
     guard memory.load() == .flypy else {
       throw SmokeFailure.expectation("没有持久化小鹤双拼方案")
+    }
+  }
+
+  private static func verifyCapsLockSwitch() throws {
+    var tracker = CapsLockSwitch()
+    tracker.reset(isLocked: true)
+    guard !tracker.flagsChanged(keyCode: 57, flags: 1 << 16),
+      tracker.flagsChanged(keyCode: 57, flags: 0),
+      !tracker.flagsChanged(keyCode: 57, flags: 0),
+      !tracker.flagsChanged(keyCode: 57, flags: (1 << 16) | (1 << 17)),
+      !tracker.flagsChanged(keyCode: 55, flags: 0),
+      tracker.flagsChanged(keyCode: 0, flags: 1 << 16)
+    else {
+      throw SmokeFailure.expectation("Caps Lock latch 边沿或组合修饰键判断错误")
     }
   }
 

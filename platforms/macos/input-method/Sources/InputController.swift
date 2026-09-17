@@ -37,6 +37,9 @@ final class InputController: IMKInputController {
   var focusIndicatorSettings = FocusIndicatorSettings.shared
   var candidatePageSettings = CandidatePageSettings.shared
   var englishCandidateSettings = EnglishCandidateSettings.shared
+  var capsLockState: () -> Bool = {
+    CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
+  }
   var focusIndicatorRetryDelaysMilliseconds: [UInt64] = [80, 120, 200]
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
@@ -49,6 +52,7 @@ final class InputController: IMKInputController {
   private var activePageSize: Int?
   private var activeEnglishCandidateMinimum: Int?
   private var rightControlTap = RightControlTap()
+  private var capsLockSwitch = CapsLockSwitch()
   private var focusIndicatorTask: Task<Void, Never>?
   private var focusIndicatorVersion = UUID()
 
@@ -57,6 +61,7 @@ final class InputController: IMKInputController {
     activeClient = sender as AnyObject?
     lastCaret = nil
     rightControlTap.reset()
+    capsLockSwitch.reset(isLocked: capsLockState())
     if let client = sender as? IMKTextInput {
       activeApplication =
         client.bundleIdentifier()
@@ -172,6 +177,13 @@ final class InputController: IMKInputController {
       synchronizeEnglishCandidateMinimumIfIdle()
     }
     if event.type == .flagsChanged {
+      if capsLockSwitch.flagsChanged(
+        keyCode: event.keyCode,
+        flags: event.modifierFlags.rawValue
+      ) {
+        rightControlTap.cancel()
+        return toggleInputMode(for: client)
+      }
       if rightControlTap.flagsChanged(
         keyCode: event.keyCode,
         flags: event.modifierFlags.rawValue,
