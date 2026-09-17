@@ -126,6 +126,16 @@ scripts/test-macos-input-method.sh
 
 该测试不会注册输入源，也不会写入正式或开发输入法的用户数据目录。
 
+只验收候选窗视觉、不启动输入法引擎时，可以运行独立预览器：
+
+```sh
+scripts/build-macos-candidate-preview.sh
+open -n .build/macos-candidate-preview/FeatherCandidatePreview.app
+```
+
+它使用固定示例数据，可切换明暗外观、长文本和多候选场景；不会链接 Rust、librime 或
+InputMethodKit，也不会安装、注册或切换输入源。
+
 ## 安装生命周期
 
 开发输入法使用固定目标 `~/Library/Input Methods/FeatherInputRustDev.app`。安装脚本会先

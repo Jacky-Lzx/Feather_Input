@@ -2,34 +2,158 @@ import AppKit
 
 @MainActor
 private final class CandidateRowButton: NSButton {
+  private let indexLabel = NSTextField(labelWithString: "")
+  private let candidateLabel = NSTextField(labelWithString: "")
+  private var trackingArea: NSTrackingArea?
+  private var hovering = false {
+    didSet { needsDisplay = true }
+  }
+
   var candidateHighlighted = false {
     didSet { needsDisplay = true }
   }
 
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    configureView()
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    configureView()
+  }
+
+  convenience init(
+    index: Int,
+    text: String,
+    target: AnyObject?,
+    action: Selector?
+  ) {
+    self.init(frame: .zero)
+    self.target = target
+    self.action = action
+    indexLabel.stringValue = String(index)
+    candidateLabel.stringValue = text
+    setAccessibilityLabel("候选 \(index)：\(text)")
+  }
+
   override var wantsUpdateLayer: Bool { true }
+
+  override var intrinsicContentSize: NSSize {
+    NSSize(
+      width: CandidateWindowStyle.candidateHorizontalPadding * 2
+        + CandidateWindowStyle.indexWidth
+        + CandidateWindowStyle.candidateLabelSpacing
+        + candidateLabel.intrinsicContentSize.width,
+      height: CandidateWindowStyle.candidateHeight
+    )
+  }
 
   override func updateLayer() {
     super.updateLayer()
     guard let layer else { return }
     let darkAppearance =
       effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-    let background =
-      candidateHighlighted
-      ? (darkAppearance
-        ? NSColor.selectedContentBackgroundColor
-        : NSColor.unemphasizedSelectedContentBackgroundColor)
-      : NSColor.clear
+    let background: NSColor
+    if candidateHighlighted {
+      background =
+        darkAppearance
+        ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor
+    } else if hovering {
+      background = NSColor.unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.55)
+    } else {
+      background = .clear
+    }
     let foreground: NSColor =
       candidateHighlighted && darkAppearance ? .selectedControlTextColor : .labelColor
     layer.backgroundColor = background.cgColor
-    layer.cornerRadius = 6
-    attributedTitle = NSAttributedString(
-      string: title,
-      attributes: [
-        .font: NSFont.systemFont(ofSize: 16),
-        .foregroundColor: foreground,
-      ]
+    layer.cornerRadius = CandidateWindowStyle.candidateCornerRadius
+    indexLabel.textColor =
+      candidateHighlighted ? foreground.withAlphaComponent(0.78) : .secondaryLabelColor
+    candidateLabel.textColor = foreground
+  }
+
+  override func updateTrackingAreas() {
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+    let area = NSTrackingArea(
+      rect: bounds,
+      options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+      owner: self,
+      userInfo: nil
     )
+    addTrackingArea(area)
+    trackingArea = area
+    super.updateTrackingAreas()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    hovering = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    hovering = false
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  private func configureView() {
+    title = ""
+    isBordered = false
+    setButtonType(.momentaryPushIn)
+    focusRingType = .none
+    wantsLayer = true
+
+    indexLabel.alignment = .left
+    indexLabel.font = CandidateWindowStyle.indexFont
+    indexLabel.lineBreakMode = .byClipping
+    indexLabel.maximumNumberOfLines = 1
+    candidateLabel.font = CandidateWindowStyle.candidateFont
+    candidateLabel.lineBreakMode = .byTruncatingTail
+    candidateLabel.maximumNumberOfLines = 1
+    candidateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    addSubview(indexLabel)
+    addSubview(candidateLabel)
+    indexLabel.translatesAutoresizingMaskIntoConstraints = false
+    candidateLabel.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      heightAnchor.constraint(greaterThanOrEqualToConstant: CandidateWindowStyle.candidateHeight),
+      indexLabel.leadingAnchor.constraint(
+        equalTo: leadingAnchor,
+        constant: CandidateWindowStyle.candidateHorizontalPadding
+      ),
+      indexLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+      indexLabel.widthAnchor.constraint(equalToConstant: CandidateWindowStyle.indexWidth),
+      candidateLabel.leadingAnchor.constraint(
+        equalTo: indexLabel.trailingAnchor,
+        constant: CandidateWindowStyle.candidateLabelSpacing
+      ),
+      candidateLabel.trailingAnchor.constraint(
+        equalTo: trailingAnchor,
+        constant: -CandidateWindowStyle.candidateHorizontalPadding
+      ),
+      candidateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+    ])
+  }
+}
+
+@MainActor
+private final class CandidateBackgroundView: NSVisualEffectView {
+  override var wantsUpdateLayer: Bool { true }
+
+  override func updateLayer() {
+    super.updateLayer()
+    layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.52).cgColor
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
   }
 }
 
@@ -78,7 +202,10 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     let fittingSize = backgroundView.fittingSize
     panel.setContentSize(
       NSSize(
-        width: max(220, min(fittingSize.width, 520)),
+        width: max(
+          CandidateWindowStyle.minimumWidth,
+          min(fittingSize.width, CandidateWindowStyle.maximumWidth)
+        ),
         height: fittingSize.height
       ))
     positionPanel(at: anchor)
@@ -95,14 +222,6 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
   @objc private func selectCandidate(_ sender: NSButton) {
     guard candidates.indices.contains(sender.tag) else { return }
     actionHandler?(.select(candidates[sender.tag]))
-  }
-
-  @objc private func showPreviousPage(_ sender: Any?) {
-    actionHandler?(.pageUp)
-  }
-
-  @objc private func showNextPage(_ sender: Any?) {
-    actionHandler?(.pageDown)
   }
 
   private func makePanel() -> NSPanel {
@@ -126,36 +245,32 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     let stack = NSStackView()
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 2
+    stack.spacing = CandidateWindowStyle.candidateSpacing
     return stack
   }
 
   private func makeContentStack() -> NSStackView {
-    let previous = pageButton(title: "◀", action: #selector(showPreviousPage(_:)))
-    previous.toolTip = "上一页"
-    let next = pageButton(title: "▶", action: #selector(showNextPage(_:)))
-    next.toolTip = "下一页"
-
-    let footer = NSStackView(views: [previous, next])
-    footer.orientation = .horizontal
-    footer.alignment = .centerY
-    footer.spacing = 4
-
-    let stack = NSStackView(views: [candidateStack, footer])
+    let stack = NSStackView(views: [candidateStack])
     stack.orientation = .vertical
     stack.alignment = .leading
-    stack.spacing = 6
-    stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+    stack.edgeInsets = CandidateWindowStyle.contentInsets
+    let horizontalInsets =
+      CandidateWindowStyle.contentInsets.left + CandidateWindowStyle.contentInsets.right
+    candidateStack.widthAnchor.constraint(
+      equalTo: stack.widthAnchor,
+      constant: -horizontalInsets
+    ).isActive = true
     return stack
   }
 
   private func makeBackgroundView() -> NSVisualEffectView {
-    let background = NSVisualEffectView()
+    let background = CandidateBackgroundView()
     background.material = .popover
     background.blendingMode = .behindWindow
     background.state = .active
     background.wantsLayer = true
-    background.layer?.cornerRadius = 9
+    background.layer?.cornerRadius = CandidateWindowStyle.cornerRadius
+    background.layer?.borderWidth = CandidateWindowStyle.borderWidth
     background.layer?.masksToBounds = true
     background.addSubview(contentStack)
     contentStack.translatesAutoresizingMaskIntoConstraints = false
@@ -168,14 +283,6 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
     return background
   }
 
-  private func pageButton(title: String, action: Selector) -> NSButton {
-    let button = NSButton(title: title, target: self, action: action)
-    button.bezelStyle = .roundRect
-    button.controlSize = .small
-    button.setButtonType(.momentaryPushIn)
-    return button
-  }
-
   private func rebuildCandidateRows(highlighted: Int?) {
     for view in candidateStack.arrangedSubviews {
       candidateStack.removeArrangedSubview(view)
@@ -184,30 +291,35 @@ final class CandidateWindowController: NSObject, CandidatePresenting {
 
     for (index, candidate) in candidates.enumerated() {
       let button = CandidateRowButton(
-        title: "\(index + 1).  \(candidate.text)",
+        index: index + 1,
+        text: candidate.text,
         target: self,
         action: #selector(selectCandidate(_:))
       )
       button.tag = index
-      button.alignment = .left
-      button.setButtonType(.momentaryPushIn)
-      button.isBordered = false
       button.candidateHighlighted = highlighted == index
-      button.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
       candidateStack.addArrangedSubview(button)
+      button.widthAnchor.constraint(equalTo: candidateStack.widthAnchor).isActive = true
     }
   }
 
   private func positionPanel(at anchor: NSRect) {
     let visibleFrame =
       screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-    let gap: CGFloat = 6
+    let gap = CandidateWindowStyle.panelGap
     var origin = NSPoint(x: anchor.minX, y: anchor.minY - panel.frame.height - gap)
     if origin.y < visibleFrame.minY {
       origin.y = anchor.maxY + gap
     }
-    origin.x = min(max(origin.x, visibleFrame.minX), visibleFrame.maxX - panel.frame.width)
-    origin.y = min(max(origin.y, visibleFrame.minY), visibleFrame.maxY - panel.frame.height)
+    let inset = CandidateWindowStyle.screenInset
+    origin.x = min(
+      max(origin.x, visibleFrame.minX + inset),
+      visibleFrame.maxX - panel.frame.width - inset
+    )
+    origin.y = min(
+      max(origin.y, visibleFrame.minY + inset),
+      visibleFrame.maxY - panel.frame.height - inset
+    )
     panel.setFrameOrigin(origin)
   }
 

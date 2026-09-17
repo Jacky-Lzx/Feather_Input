@@ -10,11 +10,23 @@ xcrun swift-format lint \
     --strict \
     --recursive \
     platforms/macos/shared/Sources \
+    platforms/macos/candidate-preview/Sources \
     platforms/macos/client-acceptance/Sources \
     platforms/macos/dev-harness/Sources \
     platforms/macos/input-method/Sources \
     platforms/macos/input-method/Tests \
     platforms/macos/input-method/Tools
+
+echo "正在检查候选窗预览器 Swift 类型……"
+mkdir -p "$module_cache"
+swiftc \
+    -typecheck \
+    -parse-as-library \
+    -module-cache-path "$module_cache" \
+    -framework AppKit \
+    platforms/macos/input-method/Sources/CandidateWindowStyle.swift \
+    platforms/macos/input-method/Sources/CandidateWindowController.swift \
+    platforms/macos/candidate-preview/Sources/*.swift
 
 echo "正在检查客户端验收应用 Swift 类型……"
 mkdir -p "$module_cache"
@@ -70,6 +82,7 @@ xcrun clang++ \
 
 echo "正在检查 shell 脚本……"
 sh -n \
+    scripts/build-macos-candidate-preview.sh \
     scripts/build-macos-client-acceptance.sh \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
@@ -92,6 +105,7 @@ sh -n \
     scripts/format-macos.sh \
     scripts/check-macos.sh
 shellcheck \
+    scripts/build-macos-candidate-preview.sh \
     scripts/build-macos-client-acceptance.sh \
     scripts/build-macos-dev-harness.sh \
     scripts/build-macos-input-method.sh \
@@ -116,6 +130,7 @@ shellcheck \
 
 echo "正在检查应用元数据……"
 plutil -lint \
+    platforms/macos/candidate-preview/Info.plist \
     platforms/macos/client-acceptance/Info.plist \
     platforms/macos/dev-harness/Info.plist \
     platforms/macos/input-method/Info.plist \
