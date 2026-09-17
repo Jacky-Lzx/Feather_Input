@@ -13,6 +13,10 @@ const TRACES: &[(&str, &str)] = &[
         include_str!("../../../traces/common/raw_commit_and_cancel.json"),
     ),
     (
+        "raw_symbol_commit.json",
+        include_str!("../../../traces/common/raw_symbol_commit.json"),
+    ),
+    (
         "stale_candidate.json",
         include_str!("../../../traces/common/stale_candidate.json"),
     ),
@@ -39,17 +43,24 @@ fn common_traces_pass_with_real_rime() {
     );
     for (index, (file, source)) in TRACES.iter().enumerate() {
         let user = TemporaryUserDirectory::new(index);
-        run_one(file, source, &shared, user.path());
+        run_one(file, source, &shared, user.path(), "luna_pinyin_simp");
         user.cleanup();
         eprintln!("通过：{file}");
     }
+
+    let file = "raw_symbol_commit.json (小鹤双拼)";
+    let source = include_str!("../../../traces/common/raw_symbol_commit.json");
+    let user = TemporaryUserDirectory::new(TRACES.len());
+    run_one(file, source, &shared, user.path(), "double_pinyin_flypy");
+    user.cleanup();
+    eprintln!("通过：{file}");
 }
 
-fn run_one(file: &str, source: &str, shared: &Path, user: &Path) {
+fn run_one(file: &str, source: &str, shared: &Path, user: &Path, schema: &str) {
     let runtime = RimeRuntime::initialize(&RimePaths::new(shared, user))
         .unwrap_or_else(|error| panic!("{file}: {error}"));
     let engine = runtime
-        .create_engine("luna_pinyin_simp")
+        .create_engine(schema)
         .unwrap_or_else(|error| panic!("{file}: {error}"));
     let trace = parse_trace(source).unwrap_or_else(|error| panic!("{file}: {error}"));
     run_trace(&trace, engine).unwrap_or_else(|error| panic!("{file}: {error}"));

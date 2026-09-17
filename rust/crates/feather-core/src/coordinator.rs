@@ -198,7 +198,12 @@ impl InputCoordinator {
         }
 
         let command = match key {
-            Key::Text(text) => EngineCommand::Insert(text),
+            Key::Text(text) => {
+                if is_ascii_symbol_text(&text) && !self.engine.snapshot()?.preedit.is_empty() {
+                    return self.commit_raw_with_suffix(&text);
+                }
+                EngineCommand::Insert(text)
+            }
             Key::Backspace => EngineCommand::Backspace,
             Key::Delete => EngineCommand::Delete,
             Key::Space => EngineCommand::CommitHighlighted,
@@ -211,6 +216,23 @@ impl InputCoordinator {
             Key::ToggleMode => unreachable!("mode toggle handled above"),
         };
         self.run_engine(command)
+    }
+
+    fn commit_raw_with_suffix(&mut self, suffix: &str) -> Result<DispatchResult, EngineError> {
+        let mut result = self.run_engine(EngineCommand::CommitRaw)?;
+        if !result.handled {
+            return Ok(result);
+        }
+        let Some(commit) = result.effects.iter_mut().find_map(|effect| match effect {
+            InputEffect::CommitText(text) => Some(text),
+            _ => None,
+        }) else {
+            return Err(EngineError::new(
+                "输入引擎接受原样提交，但没有返回待提交文字",
+            ));
+        };
+        commit.push_str(suffix);
+        Ok(result)
     }
 
     fn run_engine(&mut self, command: EngineCommand) -> Result<DispatchResult, EngineError> {
@@ -239,4 +261,8 @@ impl InputCoordinator {
             effects,
         })
     }
+}
+
+fn is_ascii_symbol_text(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_punctuation())
 }

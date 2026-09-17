@@ -152,6 +152,27 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("提交后候选窗口没有隐藏")
     }
 
+    let committedBeforeSymbol = client.committed
+    for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("符号原样提交测试无法输入拼音：\(character)")
+      }
+    }
+    guard
+      controller.handle(
+        key(
+          "@", code: 19, modifiers: .shift,
+          charactersIgnoringModifiers: "2"
+        ),
+        client: client
+      ),
+      client.committed == committedBeforeSymbol + "shijie@",
+      client.marked.isEmpty,
+      presenter.candidates.isEmpty
+    else {
+      throw SmokeFailure.expectation("中文组合中输入符号时没有原样提交拼音与符号")
+    }
+
     guard
       !controller.handle(
         flags(code: 62, modifiers: [.control], timestamp: 1), client: client)
@@ -327,8 +348,9 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("Escape 没有取消翻页后的组合")
     }
 
+    let committedBeforeUppercase = client.committed
     guard controller.handle(key("A", code: 0, modifiers: .shift), client: client),
-      client.committed == "你好", client.marked == "A"
+      client.committed == committedBeforeUppercase, client.marked == "A"
     else {
       throw SmokeFailure.expectation(
         "中文模式没有保留 Shift 输入的大写字母：committed=\(client.committed)，marked=\(client.marked)"
@@ -336,6 +358,29 @@ struct InputMethodSmokeMain {
     }
     guard controller.handle(key("\u{1b}", code: 53), client: client), client.marked.isEmpty else {
       throw SmokeFailure.expectation("清除大写英文预编辑失败")
+    }
+
+    let committedBeforeExpandedSymbol = client.committed
+    for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("全词窗符号测试无法输入拼音：\(character)")
+      }
+    }
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client),
+      presenter.expanded,
+      controller.handle(
+        key(
+          "@", code: 19, modifiers: .shift,
+          charactersIgnoringModifiers: "2"
+        ),
+        client: client
+      ),
+      client.committed == committedBeforeExpandedSymbol + "shijie@",
+      !presenter.expanded,
+      presenter.candidates.isEmpty,
+      client.marked.isEmpty
+    else {
+      throw SmokeFailure.expectation("全词候选窗把 Shift 符号误当成数字选词")
     }
 
     for (character, keyCode) in zip("shijie", [1, 4, 34, 38, 34, 14]) {
@@ -716,7 +761,8 @@ struct InputMethodSmokeMain {
   private static func key(
     _ characters: String,
     code: UInt16,
-    modifiers: NSEvent.ModifierFlags = []
+    modifiers: NSEvent.ModifierFlags = [],
+    charactersIgnoringModifiers: String? = nil
   ) -> NSEvent {
     NSEvent.keyEvent(
       with: .keyDown,
@@ -726,7 +772,7 @@ struct InputMethodSmokeMain {
       windowNumber: 0,
       context: nil,
       characters: characters,
-      charactersIgnoringModifiers: characters,
+      charactersIgnoringModifiers: charactersIgnoringModifiers ?? characters,
       isARepeat: false,
       keyCode: code
     )!

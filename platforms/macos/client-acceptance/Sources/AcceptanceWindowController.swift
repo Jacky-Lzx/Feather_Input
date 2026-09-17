@@ -134,6 +134,7 @@ final class AcceptanceWindowController: NSWindowController {
       "横排超宽时回退竖排，键盘语义与实际排列一致",
       "全拼和小鹤双拼的中文模式都能输入 GitHub 英文候选",
       "英文候选最少输入阈值在当前组合结束后生效",
+      "组合中输入 ASCII 符号会原样上屏，不会选择当前候选",
     ]
     let checklistColumns = [makeChecklistColumn(), makeChecklistColumn()]
     let itemsPerColumn = (checklistItems.count + 1) / 2

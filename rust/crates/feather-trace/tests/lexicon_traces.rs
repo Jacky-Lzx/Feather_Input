@@ -11,6 +11,10 @@ const TRACES: &[(&str, &str)] = &[
         include_str!("../../../traces/common/raw_commit_and_cancel.json"),
     ),
     (
+        "raw_symbol_commit.json",
+        include_str!("../../../traces/common/raw_symbol_commit.json"),
+    ),
+    (
         "stale_candidate.json",
         include_str!("../../../traces/common/stale_candidate.json"),
     ),

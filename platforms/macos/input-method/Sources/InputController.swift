@@ -476,7 +476,7 @@ final class InputController: IMKInputController {
         expandedCandidates.candidates[expandedCandidates.highlighted], client: client)
       return true
     }
-    if let characters = event.charactersIgnoringModifiers,
+    if let characters = event.characters,
       let number = Int(characters),
       (1...expandedCandidates.pageSize).contains(number)
     {
@@ -755,7 +755,7 @@ final class InputController: IMKInputController {
     case 116: return .key(.pageUp)
     case 121: return .key(.pageDown)
     default:
-      guard let text = event.charactersIgnoringModifiers, isPrintableASCII(text) else {
+      guard let text = event.characters, isPrintableASCII(text) else {
         return nil
       }
       return .text(text)

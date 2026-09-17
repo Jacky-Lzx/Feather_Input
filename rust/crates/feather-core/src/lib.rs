@@ -169,6 +169,28 @@ mod tests {
     }
 
     #[test]
+    fn ascii_symbols_commit_raw_composition_without_selecting_candidate() {
+        let mut core = InputCoordinator::new(FakeEngine::default());
+        core.dispatch(InputEvent::Activate).unwrap();
+        core.dispatch(InputEvent::Key(Key::Text("ni".into())))
+            .unwrap();
+
+        let result = core
+            .dispatch(InputEvent::Key(Key::Text(".@".into())))
+            .unwrap();
+
+        assert_eq!(
+            result.effects,
+            vec![
+                InputEffect::CommitText("ni.@".into()),
+                InputEffect::ClearMarkedText,
+                InputEffect::HideCandidates,
+            ]
+        );
+        assert!(core.presentation().unwrap().preedit.is_empty());
+    }
+
+    #[test]
     fn page_size_is_dispatched_as_an_engine_setting() {
         let mut core = InputCoordinator::new(FakeEngine::default());
         let result = core.dispatch(InputEvent::SetPageSize(7)).unwrap();

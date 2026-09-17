@@ -161,6 +161,10 @@ InputMethodKit 的多控制器生命周期耦合。
 `feather_english` 作为两个中文 schema 的低优先级 `table_translator`，从 `easy_en` 导入
 英文词表。它与中文候选共用 Rime 菜单、revision 和不透明候选 ID；Rust 核心与 macOS
 候选窗口无需维护另一套候选身份或选择路径。
+组合期间的 ASCII 符号边界由 Rust 核心统一处理：核心请求引擎原样提交当前预编辑，再把
+符号附加到同一个 `CommitText` 效果中，符号本身不会发送给 librime。因此 Rime 不能把
+符号解释成默认选词，Swift 层也不需要根据候选文字猜测输入类型。macOS 仅负责使用
+`NSEvent.characters` 保留 Shift 产生的真实符号；没有组合时仍由 schema 决定标点行为。
 紧凑候选窗的竖排／横排选择是纯 macOS 呈现策略，不进入核心或 ABI。横排只在所有当前页
 候选能够放入候选窗和当前显示器时启用，否则回退竖排。展开的全词候选跟随实际紧凑排列：
 竖排按列组织并给当前列编号，横排按行组织并给当前行编号；该策略只改变平台侧排列和键盘
