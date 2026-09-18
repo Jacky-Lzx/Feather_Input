@@ -957,6 +957,10 @@ struct InputMethodSmokeMain {
     controller.secureInputEnabled = { false }
     controller.generationDebounceMilliseconds = 0
     controller.generationPollMilliseconds = 1
+    controller.scoringDebounceMilliseconds = 0
+    controller.scoringPollMilliseconds = 1
+    var scoringActive = true
+    controller.scoringEnabled = { scoringActive }
     let candidatePresenter = SmokeCandidatePresenter()
     let generatedPresenter = SmokeGeneratedCandidatePresenter()
     controller.candidatePresenter = candidatePresenter
@@ -978,6 +982,7 @@ struct InputMethodSmokeMain {
     controller.schemeMemory = schemeMemory
 
     var requests: [SmokeGenerationRequest] = []
+    var scoringRequests: [SmokeScoringRequest] = []
     var requestArguments: [(String, String, String, Int)] = []
     controller.generationRequestFactory = {
       _, requestID, revision, context, input, schema, count in
@@ -1002,6 +1007,27 @@ struct InputMethodSmokeMain {
         )
       )
       requests.append(request)
+      return request
+    }
+    controller.scoringRequestFactory = {
+      _, requestID, revision, _, _, candidates, _, _ in
+      let scored = candidates.reversed().enumerated().map { index, candidate in
+        FeatherScoredCandidateValue(
+          value: candidate.value,
+          text: candidate.text,
+          modelScore: -Double(index + 1),
+          score: -Double(index)
+        )
+      }
+      let request = SmokeScoringRequest(
+        result: FeatherScoringResultValue(
+          requestID: requestID,
+          revision: revision,
+          candidates: scored,
+          elapsedMilliseconds: 5
+        )
+      )
+      scoringRequests.append(request)
       return request
     }
 
@@ -1029,21 +1055,28 @@ struct InputMethodSmokeMain {
         throw SmokeFailure.expectation("MLX 请求测试无法输入拼音：\(character)")
       }
     }
-    let becameVisible = waitUntil({ generatedPresenter.isVisible })
+    let becameVisible = waitUntil({
+      generatedPresenter.isVisible && scoringRequests.last?.closeCount == 1
+    })
     guard becameVisible,
       generatedPresenter.candidates.map(\.text) == ["寰宙"],
       requests.count == 1,
+      scoringRequests.count == 1,
+      candidatePresenter.rerankingStates.contains(true),
+      candidatePresenter.isRerankingActive == false,
       requests[0].pollIdentities.allSatisfy({ $0.0 > 0 }),
       requests[0].closeCount == 1
     else {
       throw SmokeFailure.expectation(
-        "匹配的 MLX 结果没有去重后显示在 AI 推荐窗：visible=\(becameVisible)，"
+        "AI 重排与生成没有同时完成：visible=\(becameVisible)，"
           + "candidates=\(generatedPresenter.candidates.map(\.text))，requests=\(requests.count)，"
+          + "scoringRequests=\(scoringRequests.count)，"
           + "arguments=\(requestArguments)，"
           + "polls=\(requests.first?.pollIdentities.count ?? 0)，"
           + "closed=\(requests.first?.closeCount ?? 0)"
       )
     }
+    scoringActive = false
     guard controller.handle(key(" ", code: 49, modifiers: .option), client: client),
       client.committed == "你好寰宙", client.marked.isEmpty, !generatedPresenter.isVisible
     else {

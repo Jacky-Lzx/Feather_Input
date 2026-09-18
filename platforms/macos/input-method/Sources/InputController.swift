@@ -131,7 +131,7 @@ final class InputController: IMKInputController {
     startObservingGenerationSettings()
     startObservingRerankingSettings()
     cancelFocusIndicator()
-    cancelGeneration(clearContext: true)
+    cancelAIWork(clearContext: true)
     candidateOrderLocked = false
     candidateOrderIsReranked = false
     activeClient = sender as AnyObject?
@@ -200,7 +200,7 @@ final class InputController: IMKInputController {
     stopObservingGenerationSettings()
     stopObservingRerankingSettings()
     cancelFocusIndicator()
-    cancelGeneration(clearContext: true)
+    cancelAIWork(clearContext: true)
     guard let session else {
       active = false
       currentResponse = nil
@@ -278,7 +278,7 @@ final class InputController: IMKInputController {
       cancelFocusIndicator()
       modePresenter.hide()
       persistentModePresenter.hide()
-      cancelGeneration(clearContext: true)
+      cancelAIWork(clearContext: true)
       cancelEngineComposition()
       return false
     }
@@ -295,7 +295,7 @@ final class InputController: IMKInputController {
       cancelFocusIndicator()
       modePresenter.hide()
       persistentModePresenter.hide()
-      cancelGeneration(clearContext: true)
+      cancelAIWork(clearContext: true)
       cancelEngineComposition()
       return false
     }
@@ -504,7 +504,7 @@ final class InputController: IMKInputController {
   }
 
   private func apply(_ response: FeatherResponseValue, to client: IMKTextInput) {
-    cancelGeneration()
+    cancelAIWork()
     expandedCandidates = nil
     candidateOrderIsReranked = false
     currentResponse = response
@@ -532,9 +532,8 @@ final class InputController: IMKInputController {
       )
       if isScoringEnabled, !candidateOrderLocked {
         scheduleScoring(for: response, client: client)
-      } else {
-        scheduleGeneration(for: response, client: client)
       }
+      scheduleGeneration(for: response, client: client)
     }
   }
 
@@ -1012,7 +1011,6 @@ final class InputController: IMKInputController {
   }
 
   private func cancelGeneration(clearContext: Bool = false) {
-    cancelScoring()
     generationVersion = UUID()
     generationTask?.cancel()
     generationTask = nil
@@ -1023,6 +1021,11 @@ final class InputController: IMKInputController {
     if clearContext {
       recentContext = ""
     }
+  }
+
+  private func cancelAIWork(clearContext: Bool = false) {
+    cancelScoring()
+    cancelGeneration(clearContext: clearContext)
   }
 
   private var isGenerationEnabled: Bool {
@@ -1091,7 +1094,7 @@ final class InputController: IMKInputController {
   }
 
   private func openExpandedCandidates(for client: IMKTextInput) {
-    cancelGeneration()
+    cancelAIWork()
     guard let response = currentResponse, !response.candidates.isEmpty else { return }
     do {
       let compactPageSize = max(1, min(9, response.candidates.count))
@@ -1489,7 +1492,7 @@ final class InputController: IMKInputController {
   }
 
   private func cancelEngineComposition() {
-    cancelGeneration()
+    cancelAIWork()
     guard hasComposition, let session else { return }
     currentResponse = try? session.send(.escape)
     expandedCandidates = nil
