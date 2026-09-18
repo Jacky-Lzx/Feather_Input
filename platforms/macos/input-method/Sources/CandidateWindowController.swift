@@ -359,9 +359,12 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     contentWidth: CGFloat,
     minimumWidth: CGFloat
   ) {
-    resize(contentWidth: contentWidth, minimumWidth: minimumWidth, anchor: anchor)
-    positionPanel(at: anchor)
-    panel.orderFrontRegardless()
+    resizeAndShow(
+      anchor: anchor,
+      contentWidth: contentWidth,
+      minimumWidth: minimumWidth,
+      placeBesideAnchor: false
+    )
   }
 
   private func resizeAndShow(
@@ -369,13 +372,44 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     contentWidth: CGFloat,
     minimumWidth: CGFloat
   ) {
-    resize(contentWidth: contentWidth, minimumWidth: minimumWidth, anchor: anchor)
-    positionPanel(beside: anchor)
+    resizeAndShow(
+      anchor: anchor,
+      contentWidth: contentWidth,
+      minimumWidth: minimumWidth,
+      placeBesideAnchor: true
+    )
+  }
+
+  private func resizeAndShow(
+    anchor: NSRect,
+    contentWidth: CGFloat,
+    minimumWidth: CGFloat,
+    placeBesideAnchor: Bool
+  ) {
+    let contentSize = measuredContentSize(
+      contentWidth: contentWidth,
+      minimumWidth: minimumWidth,
+      anchor: anchor
+    )
+    let frameSize = panel.frameRect(
+      forContentRect: NSRect(origin: .zero, size: contentSize)
+    ).size
+    let frame = positionedFrame(
+      size: frameSize,
+      anchor: anchor,
+      placeBesideAnchor: placeBesideAnchor
+    )
+    panel.setFrame(frame, display: false)
+    backgroundView.layoutSubtreeIfNeeded()
+    panel.invalidateShadow()
     panel.orderFrontRegardless()
   }
 
-  private func resize(contentWidth: CGFloat, minimumWidth: CGFloat, anchor: NSRect) {
-    panel.contentView = backgroundView
+  private func measuredContentSize(
+    contentWidth: CGFloat,
+    minimumWidth: CGFloat,
+    anchor: NSRect
+  ) -> NSSize {
     backgroundView.layoutSubtreeIfNeeded()
     let fittingSize = backgroundView.fittingSize
     let horizontalInsets =
@@ -389,14 +423,13 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       ? CandidateWindowStyle.maximumWidth
       : max(CandidateWindowStyle.maximumWidth, requiredPanelWidthForPreedit)
     let maximumWidth = max(minimumWidth, min(preferredMaximumWidth, availableScreenWidth))
-    panel.setContentSize(
-      NSSize(
-        width: max(
-          minimumWidth,
-          min(contentWidth + horizontalInsets, maximumWidth)
-        ),
-        height: fittingSize.height
-      ))
+    return NSSize(
+      width: max(
+        minimumWidth,
+        min(contentWidth + horizontalInsets, maximumWidth)
+      ),
+      height: fittingSize.height
+    )
   }
 
   func setRerankingActive(_ active: Bool) {
@@ -433,7 +466,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       contentRect: .zero,
       styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
-      defer: true
+      defer: false
     )
     panel.level = .popUpMenu
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -442,6 +475,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     panel.backgroundColor = .clear
     panel.hidesOnDeactivate = false
     panel.isReleasedWhenClosed = false
+    panel.contentView = backgroundView
     return panel
   }
 
@@ -738,44 +772,36 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     }
   }
 
-  private func positionPanel(at anchor: NSRect) {
+  private func positionedFrame(
+    size: NSSize,
+    anchor: NSRect,
+    placeBesideAnchor: Bool
+  ) -> NSRect {
     let visibleFrame =
       screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
     let gap = CandidateWindowStyle.panelGap
-    var origin = NSPoint(x: anchor.minX, y: anchor.minY - panel.frame.height - gap)
-    if origin.y < visibleFrame.minY {
-      origin.y = anchor.maxY + gap
+    var origin: NSPoint
+    if placeBesideAnchor {
+      origin = NSPoint(x: anchor.maxX + gap, y: anchor.maxY - size.height)
+      if origin.x + size.width > visibleFrame.maxX - CandidateWindowStyle.screenInset {
+        origin.x = anchor.minX - size.width - gap
+      }
+    } else {
+      origin = NSPoint(x: anchor.minX, y: anchor.minY - size.height - gap)
+      if origin.y < visibleFrame.minY {
+        origin.y = anchor.maxY + gap
+      }
     }
     let inset = CandidateWindowStyle.screenInset
     origin.x = min(
       max(origin.x, visibleFrame.minX + inset),
-      visibleFrame.maxX - panel.frame.width - inset
+      visibleFrame.maxX - size.width - inset
     )
     origin.y = min(
       max(origin.y, visibleFrame.minY + inset),
-      visibleFrame.maxY - panel.frame.height - inset
+      visibleFrame.maxY - size.height - inset
     )
-    panel.setFrameOrigin(origin)
-  }
-
-  private func positionPanel(beside anchor: NSRect) {
-    let visibleFrame =
-      screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-    let gap = CandidateWindowStyle.panelGap
-    var origin = NSPoint(x: anchor.maxX + gap, y: anchor.maxY - panel.frame.height)
-    if origin.x + panel.frame.width > visibleFrame.maxX - CandidateWindowStyle.screenInset {
-      origin.x = anchor.minX - panel.frame.width - gap
-    }
-    let inset = CandidateWindowStyle.screenInset
-    origin.x = min(
-      max(origin.x, visibleFrame.minX + inset),
-      visibleFrame.maxX - panel.frame.width - inset
-    )
-    origin.y = min(
-      max(origin.y, visibleFrame.minY + inset),
-      visibleFrame.maxY - panel.frame.height - inset
-    )
-    panel.setFrameOrigin(origin)
+    return NSRect(origin: origin, size: size)
   }
 
   private func screen(containing rect: NSRect) -> NSScreen? {
