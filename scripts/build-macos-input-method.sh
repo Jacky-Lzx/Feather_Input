@@ -30,6 +30,7 @@ app="$build_root/$app_name"
 executable="$app/Contents/MacOS/$executable_name"
 frameworks="$app/Contents/Frameworks"
 resources="$app/Contents/Resources"
+localizations="$source_root/Resources/Localizations/$profile"
 macos_arch=${FEATHER_MACOS_ARCH:-$(uname -m)}
 deployment_target=${FEATHER_MACOS_DEPLOYMENT_TARGET:-13.0}
 
@@ -74,6 +75,13 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$frameworks" "$resources"
 mkdir -p "$build_root/module-cache"
 cp "$info_plist" "$app/Contents/Info.plist"
+if [ ! -d "$localizations" ]; then
+    echo "缺少 ${profile} 输入法本地化资源：$localizations" >&2
+    exit 1
+fi
+for localization in "$localizations"/*.lproj; do
+    cp -R "$localization" "$resources/"
+done
 cp "$rust_library" "$frameworks/libfeather_ffi.dylib"
 install_name_tool -id @rpath/libfeather_ffi.dylib "$frameworks/libfeather_ffi.dylib"
 
