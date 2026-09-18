@@ -471,12 +471,14 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
         pageSize: 5,
         layout: expandedLayout,
         hasMore: false,
+        preedit: "shijie",
         anchor: anchorRectOnScreen()
       )
     } else {
       candidatePresenter.update(
         candidates: currentCandidates,
         highlighted: highlightedIndex,
+        preedit: "shijie",
         anchor: anchorRectOnScreen()
       )
     }
@@ -492,12 +494,14 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
         pageSize: 5,
         layout: expandedLayout,
         hasMore: false,
+        preedit: "shijie",
         anchor: anchorRectOnScreen()
       )
     } else {
       candidatePresenter.update(
         candidates: currentCandidates,
         highlighted: highlightedIndex,
+        preedit: "shijie",
         anchor: anchorRectOnScreen()
       )
     }

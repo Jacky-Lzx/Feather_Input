@@ -3,9 +3,11 @@ import AppKit
 struct CandidateWindowMetrics {
   let candidateFont: NSFont
   let indexFont: NSFont
+  let preeditFont: NSFont
   let expandedHeaderFont: NSFont
   let candidateHeight: CGFloat
   let indexWidth: CGFloat
+  let preeditHeight: CGFloat
   let expandedHeaderHeight: CGFloat
   let fallbackColumnWidth: CGFloat
 }
@@ -33,9 +35,11 @@ enum CandidateWindowStyle {
         ofSize: max(10, fontSize * 0.74),
         weight: .semibold
       ),
+      preeditFont: .systemFont(ofSize: max(11, fontSize * 0.82), weight: .medium),
       expandedHeaderFont: .systemFont(ofSize: headerSize, weight: .medium),
       candidateHeight: ceil(fontSize * 1.4) + 12,
       indexWidth: max(14, ceil(fontSize * 0.9)),
+      preeditHeight: ceil(max(11, fontSize * 0.82)) + 7,
       expandedHeaderHeight: ceil(headerSize) + 8,
       fallbackColumnWidth: max(72, ceil(fontSize * 4.65))
     )

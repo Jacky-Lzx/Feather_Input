@@ -189,6 +189,7 @@ protocol CandidatePresenting: AnyObject {
   func update(
     candidates: [FeatherCandidateValue],
     highlighted: Int?,
+    preedit: String,
     anchor: NSRect
   )
   func updateExpanded(
@@ -197,6 +198,7 @@ protocol CandidatePresenting: AnyObject {
     pageSize: Int,
     layout: CandidateLayout,
     hasMore: Bool,
+    preedit: String,
     anchor: NSRect
   )
   func setRerankingActive(_ active: Bool)
@@ -228,11 +230,17 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   var currentPanelSize: NSSize { panel.frame.size }
   var isVisible: Bool { panel.isVisible }
   var isRerankingIndicatorVisible: Bool { !rerankingIndicator.isHidden }
+  var displayedPreedit: String { preeditLabel.stringValue }
+  var isPreeditRowVisible: Bool { !preeditRow.isHidden }
+  var preeditRowHeight: CGFloat { preeditRowHeightConstraint?.constant ?? 0 }
 
   private var candidates: [FeatherCandidateValue] = []
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
   private lazy var panel = makePanel()
   private lazy var candidateStack = makeCandidateStack()
+  private lazy var preeditLabel = makePreeditLabel()
+  private lazy var preeditRow = makePreeditRow()
+  private var preeditRowHeightConstraint: NSLayoutConstraint?
   private lazy var expandedHeader = makeExpandedHeader()
   private var expandedHeaderHeightConstraint: NSLayoutConstraint?
   private lazy var expandedGrid = makeExpandedGrid()
@@ -252,6 +260,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   func update(
     candidates: [FeatherCandidateValue],
     highlighted: Int?,
+    preedit: String,
     anchor: NSRect
   ) {
     guard !candidates.isEmpty else {
@@ -263,6 +272,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     generatedCandidates = []
     displayedGeneratedCandidateCount = 0
     appliedFontSize = fontSettings.size
+    updatePreedit(preedit)
+    preeditRow.isHidden = false
     candidateStack.isHidden = false
     expandedHeader.isHidden = true
     expandedGrid.isHidden = true
@@ -285,6 +296,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     generatedCandidates = Array(candidates.prefix(3))
     displayedGeneratedCandidateCount = generatedCandidates.count
     appliedFontSize = fontSettings.size
+    setRerankingActive(false)
+    preeditRow.isHidden = true
     candidateStack.isHidden = false
     expandedHeader.isHidden = true
     expandedGrid.isHidden = true
@@ -299,6 +312,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     pageSize: Int,
     layout: CandidateLayout,
     hasMore: Bool,
+    preedit: String,
     anchor: NSRect
   ) {
     guard !candidates.isEmpty, pageSize > 0 else {
@@ -310,6 +324,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     generatedCandidates = []
     displayedGeneratedCandidateCount = 0
     appliedFontSize = fontSettings.size
+    updatePreedit(preedit)
+    preeditRow.isHidden = false
     candidateStack.isHidden = true
     expandedHeader.isHidden = false
     expandedGrid.isHidden = false
@@ -417,7 +433,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   }
 
   private func makeContentStack() -> NSStackView {
-    let stack = NSStackView(views: [candidateStack, expandedHeader, expandedGrid])
+    let stack = NSStackView(views: [preeditRow, candidateStack, expandedHeader, expandedGrid])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.edgeInsets = CandidateWindowStyle.contentInsets
@@ -427,7 +443,59 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       equalTo: stack.widthAnchor,
       constant: -horizontalInsets
     ).isActive = true
+    preeditRow.widthAnchor.constraint(
+      equalTo: stack.widthAnchor,
+      constant: -horizontalInsets
+    ).isActive = true
     return stack
+  }
+
+  private func makePreeditLabel() -> NSTextField {
+    let label = NSTextField(labelWithString: "")
+    label.font = currentMetrics.preeditFont
+    label.textColor = .secondaryLabelColor
+    label.lineBreakMode = .byTruncatingTail
+    label.maximumNumberOfLines = 1
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return label
+  }
+
+  private func makePreeditRow() -> NSView {
+    let row = NSView()
+    row.addSubview(preeditLabel)
+    row.addSubview(rerankingIndicator)
+    preeditLabel.translatesAutoresizingMaskIntoConstraints = false
+    rerankingIndicator.translatesAutoresizingMaskIntoConstraints = false
+    let heightConstraint = row.heightAnchor.constraint(
+      equalToConstant: currentMetrics.preeditHeight)
+    heightConstraint.isActive = true
+    preeditRowHeightConstraint = heightConstraint
+    NSLayoutConstraint.activate([
+      preeditLabel.leadingAnchor.constraint(
+        equalTo: row.leadingAnchor,
+        constant: CandidateWindowStyle.candidateHorizontalPadding
+      ),
+      preeditLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+      preeditLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: rerankingIndicator.leadingAnchor,
+        constant: -6
+      ),
+      rerankingIndicator.trailingAnchor.constraint(
+        equalTo: row.trailingAnchor,
+        constant: -CandidateWindowStyle.candidateHorizontalPadding
+      ),
+      rerankingIndicator.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+      rerankingIndicator.widthAnchor.constraint(equalToConstant: 12),
+      rerankingIndicator.heightAnchor.constraint(equalToConstant: 12),
+    ])
+    return row
+  }
+
+  private func updatePreedit(_ preedit: String) {
+    preeditLabel.stringValue = preedit
+    preeditLabel.font = currentMetrics.preeditFont
+    preeditLabel.setAccessibilityLabel("当前输入：\(preedit)")
+    preeditRowHeightConstraint?.constant = currentMetrics.preeditHeight
   }
 
   private func makeBackgroundView() -> NSVisualEffectView {
@@ -440,21 +508,12 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     background.layer?.borderWidth = CandidateWindowStyle.borderWidth
     background.layer?.masksToBounds = true
     background.addSubview(contentStack)
-    background.addSubview(rerankingIndicator)
     contentStack.translatesAutoresizingMaskIntoConstraints = false
-    rerankingIndicator.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
       contentStack.leadingAnchor.constraint(equalTo: background.leadingAnchor),
       contentStack.trailingAnchor.constraint(equalTo: background.trailingAnchor),
       contentStack.topAnchor.constraint(equalTo: background.topAnchor),
       contentStack.bottomAnchor.constraint(equalTo: background.bottomAnchor),
-      rerankingIndicator.topAnchor.constraint(equalTo: background.topAnchor, constant: 4),
-      rerankingIndicator.trailingAnchor.constraint(
-        equalTo: background.trailingAnchor,
-        constant: -4
-      ),
-      rerankingIndicator.widthAnchor.constraint(equalToConstant: 12),
-      rerankingIndicator.heightAnchor.constraint(equalToConstant: 12),
     ])
     return background
   }

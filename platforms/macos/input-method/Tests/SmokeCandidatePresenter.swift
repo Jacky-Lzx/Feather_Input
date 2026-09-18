@@ -9,6 +9,7 @@ final class SmokeCandidatePresenter: CandidatePresenting {
   private(set) var candidates: [FeatherCandidateValue] = []
   private(set) var highlighted: Int?
   private(set) var anchor = NSRect.zero
+  private(set) var preedit = ""
   private(set) var updateCount = 0
   private(set) var hideCount = 0
   private(set) var expanded = false
@@ -21,11 +22,13 @@ final class SmokeCandidatePresenter: CandidatePresenting {
   func update(
     candidates: [FeatherCandidateValue],
     highlighted: Int?,
+    preedit: String,
     anchor: NSRect
   ) {
     expanded = false
     self.candidates = candidates
     self.highlighted = highlighted
+    self.preedit = preedit
     self.anchor = anchor
     updateCount += 1
   }
@@ -36,6 +39,7 @@ final class SmokeCandidatePresenter: CandidatePresenting {
     pageSize: Int,
     layout: CandidateLayout,
     hasMore: Bool,
+    preedit: String,
     anchor: NSRect
   ) {
     expanded = true
@@ -44,6 +48,7 @@ final class SmokeCandidatePresenter: CandidatePresenting {
     expandedPageSize = pageSize
     self.candidates = candidates
     self.highlighted = highlighted
+    self.preedit = preedit
     self.anchor = anchor
     updateCount += 1
   }

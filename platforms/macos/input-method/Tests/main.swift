@@ -781,6 +781,7 @@ struct InputMethodSmokeMain {
       presenter.candidates.map(\.value) == ranked.prefix(displayedCount).map(\.value),
       presenter.candidates.first?.value == submitted.last?.value,
       presenter.highlighted == highlightedBeforeRanking,
+      presenter.preedit == submittedPreedit,
       presenter.rerankingStates.contains(true),
       presenter.isRerankingActive == false,
       requests.count == 1
@@ -882,12 +883,12 @@ struct InputMethodSmokeMain {
     first.activate()
     first.actionHandler = { _ in firstSelectionCount += 1 }
     first.interactionHandler = { firstInteractionCount += 1 }
-    first.update(candidates: [firstCandidate], highlighted: 0, anchor: .zero)
+    first.update(candidates: [firstCandidate], highlighted: 0, preedit: "ni", anchor: .zero)
 
     second.activate()
     second.actionHandler = { _ in secondSelectionCount += 1 }
     second.interactionHandler = { secondInteractionCount += 1 }
-    second.update(candidates: [secondCandidate], highlighted: 0, anchor: .zero)
+    second.update(candidates: [secondCandidate], highlighted: 0, preedit: "shi", anchor: .zero)
 
     first.actionHandler = nil
     first.interactionHandler = nil
@@ -1249,15 +1250,18 @@ struct InputMethodSmokeMain {
       FeatherCandidateValue(revision: 1, value: UInt64($0.offset), text: $0.element)
     }
 
-    presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
+    presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
     let defaultPanelSize = presenter.currentPanelSize
     guard defaultPanelSize.width >= CandidateWindowStyle.minimumCompactWidth else {
       throw SmokeFailure.expectation("紧凑候选窗没有遵守最小宽度")
     }
     guard presenter.resolvedCompactLayout == .vertical,
-      presenter.appliedFontSize == CandidateFontSettings.defaultSize
+      presenter.appliedFontSize == CandidateFontSettings.defaultSize,
+      presenter.displayedPreedit == "shijie",
+      presenter.isPreeditRowVisible,
+      presenter.preeditRowHeight > 0
     else {
-      throw SmokeFailure.expectation("紧凑候选窗没有默认使用竖排")
+      throw SmokeFailure.expectation("紧凑候选窗没有显示固定高度的当前输入行")
     }
     presenter.setRerankingActive(true)
     guard presenter.isRerankingIndicatorVisible,
@@ -1273,7 +1277,7 @@ struct InputMethodSmokeMain {
     }
 
     fontSettings.updateSize(CandidateFontSettings.maximumSize)
-    presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
+    presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
     guard presenter.appliedFontSize == CandidateFontSettings.maximumSize,
       presenter.currentPanelSize.height > defaultPanelSize.height
     else {
@@ -1282,7 +1286,7 @@ struct InputMethodSmokeMain {
     fontSettings.updateSize(CandidateFontSettings.defaultSize)
 
     layoutSettings.update(.horizontal)
-    presenter.update(candidates: compact, highlighted: 0, anchor: anchor)
+    presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
     guard presenter.resolvedCompactLayout == .horizontal else {
       throw SmokeFailure.expectation("紧凑候选窗没有应用横排设置")
     }
@@ -1294,7 +1298,12 @@ struct InputMethodSmokeMain {
         text: String(repeating: $0.text, count: 12)
       )
     }
-    presenter.update(candidates: longCandidates, highlighted: 0, anchor: anchor)
+    presenter.update(
+      candidates: longCandidates,
+      highlighted: 0,
+      preedit: "shijie",
+      anchor: anchor
+    )
     guard presenter.resolvedCompactLayout == .vertical else {
       throw SmokeFailure.expectation("横排超过可用宽度时没有回退为竖排")
     }
@@ -1305,6 +1314,7 @@ struct InputMethodSmokeMain {
       pageSize: compact.count,
       layout: .horizontal,
       hasMore: false,
+      preedit: "shijie",
       anchor: anchor
     )
     guard presenter.numberedExpandedIndices == Array(compact.count..<(compact.count * 2)) else {
@@ -1323,7 +1333,8 @@ struct InputMethodSmokeMain {
       beside: presenter.frame
     )
     guard presenter.displayedGeneratedCandidateCount == 3,
-      presenter.resolvedCompactLayout == .vertical
+      presenter.resolvedCompactLayout == .vertical,
+      !presenter.isPreeditRowVisible
     else {
       throw SmokeFailure.expectation("AI 推荐窗没有限制为三个竖排候选")
     }

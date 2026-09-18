@@ -82,11 +82,13 @@ final class OwnedCandidatePresenter: CandidatePresenting {
   func update(
     candidates: [FeatherCandidateValue],
     highlighted: Int?,
+    preedit: String,
     anchor: NSRect
   ) {
     store.presenter(for: ownershipID)?.update(
       candidates: candidates,
       highlighted: highlighted,
+      preedit: preedit,
       anchor: anchor
     )
   }
@@ -97,6 +99,7 @@ final class OwnedCandidatePresenter: CandidatePresenting {
     pageSize: Int,
     layout: CandidateLayout,
     hasMore: Bool,
+    preedit: String,
     anchor: NSRect
   ) {
     store.presenter(for: ownershipID)?.updateExpanded(
@@ -105,6 +108,7 @@ final class OwnedCandidatePresenter: CandidatePresenting {
       pageSize: pageSize,
       layout: layout,
       hasMore: hasMore,
+      preedit: preedit,
       anchor: anchor
     )
   }

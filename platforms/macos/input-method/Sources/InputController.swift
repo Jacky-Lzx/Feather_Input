@@ -527,6 +527,7 @@ final class InputController: IMKInputController {
       candidatePresenter.update(
         candidates: response.candidates,
         highlighted: response.highlighted,
+        preedit: response.preedit,
         anchor: candidateAnchor(for: client)
       )
       if isScoringEnabled, !candidateOrderLocked {
@@ -632,6 +633,7 @@ final class InputController: IMKInputController {
             self.candidatePresenter.update(
               candidates: displayed,
               highlighted: highlighted,
+              preedit: response.preedit,
               anchor: self.candidateAnchor(for: client)
             )
             self.finishScoring(request, version: version)
@@ -780,6 +782,7 @@ final class InputController: IMKInputController {
     candidatePresenter.update(
       candidates: response.candidates,
       highlighted: next,
+      preedit: response.preedit,
       anchor: candidateAnchor(for: client)
     )
     return true
@@ -1150,6 +1153,7 @@ final class InputController: IMKInputController {
       pageSize: expandedCandidates.pageSize,
       layout: expandedCandidates.layout,
       hasMore: expandedCandidates.hasMore,
+      preedit: currentResponse?.preedit ?? "",
       anchor: candidateAnchor(for: client)
     )
   }
@@ -1164,6 +1168,7 @@ final class InputController: IMKInputController {
     candidatePresenter.update(
       candidates: response.candidates,
       highlighted: response.highlighted,
+      preedit: response.preedit,
       anchor: candidateAnchor(for: client)
     )
   }
