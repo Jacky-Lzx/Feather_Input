@@ -498,7 +498,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     let continuationHelp = NSTextField(
       wrappingLabelWithString:
-        "文字上屏后停顿 400 ms，侧边显示最多 3 个本地 MLX 续写候选；只可点击插入，新输入会立即取消。"
+        "文字上屏后停顿 400 ms，侧边显示最多 3 个本地 MLX 续写候选；可点击或按 Option + 数字/空格插入，其他新输入会立即取消。"
     )
     continuationHelp.font = .systemFont(ofSize: 12)
     continuationHelp.textColor = .secondaryLabelColor

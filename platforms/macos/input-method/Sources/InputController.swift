@@ -127,6 +127,7 @@ final class InputController: IMKInputController {
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
   private var generatedSelectionHandler: ((FeatherGeneratedCandidateValue, IMKTextInput) -> Bool)?
   private var generatedCandidatesAcceptShortcuts = true
+  private var generatedCandidatesAreContinuation = false
   private var consumedGeneratedShortcutKey: UInt16?
   private var generationTask: Task<Void, Never>?
   private var generationRequest: (any FeatherGenerationRequesting)?
@@ -308,16 +309,14 @@ final class InputController: IMKInputController {
       return false
     }
 
-    if event.type == .keyDown, continuationTask != nil || !generatedCandidatesAcceptShortcuts {
-      cancelContinuation()
-    }
-
     if event.type == .flagsChanged {
       if !event.modifierFlags.contains(.option) {
         consumedGeneratedShortcutKey = nil
       }
     } else if handleGeneratedCandidateShortcut(event, client: client) {
       return true
+    } else if continuationTask != nil || generatedCandidatesAreContinuation {
+      cancelContinuation()
     }
 
     guard textInputAvailable(client) else {
@@ -867,6 +866,7 @@ final class InputController: IMKInputController {
     _ candidates: [FeatherGeneratedCandidateValue],
     for client: IMKTextInput,
     acceptsShortcuts: Bool = true,
+    continuation: Bool = false,
     onSelect: @escaping (FeatherGeneratedCandidateValue, IMKTextInput) -> Bool
   ) {
     guard activeClient === client, !candidates.isEmpty else {
@@ -875,11 +875,12 @@ final class InputController: IMKInputController {
     }
     generatedCandidates = Array(candidates.prefix(3))
     generatedCandidatesAcceptShortcuts = acceptsShortcuts
+    generatedCandidatesAreContinuation = continuation
     generatedSelectionHandler = onSelect
     generatedCandidatePresenter.update(
       candidates: generatedCandidates,
       beside: candidatePresenter.frame,
-      title: acceptsShortcuts ? nil : "AI 续写"
+      title: continuation ? "AI 续写" : nil
     )
   }
 
@@ -929,6 +930,7 @@ final class InputController: IMKInputController {
     generatedCandidates = []
     generatedSelectionHandler = nil
     generatedCandidatesAcceptShortcuts = true
+    generatedCandidatesAreContinuation = false
     consumedGeneratedShortcutKey = nil
   }
 
@@ -1165,7 +1167,8 @@ final class InputController: IMKInputController {
             self.presentGeneratedCandidates(
               suggestions,
               for: client,
-              acceptsShortcuts: false
+              acceptsShortcuts: true,
+              continuation: true
             ) { [weak self, weak client] candidate, target in
               guard let self, let client, target === client,
                 self.continuationSnapshotIsCurrent(snapshot, version: version, client: client)
@@ -1224,7 +1227,7 @@ final class InputController: IMKInputController {
     try? continuationRequest?.cancel()
     continuationRequest?.close()
     continuationRequest = nil
-    if !generatedCandidatesAcceptShortcuts {
+    if generatedCandidatesAreContinuation {
       clearGeneratedCandidates()
     }
   }

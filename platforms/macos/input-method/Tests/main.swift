@@ -1250,10 +1250,10 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("MLX 续写上下文、标题或候选不正确")
     }
-    generatedPresenter.select(at: 0)
-    guard client.committed == "你好明天", !generatedPresenter.isVisible, requests.count == 1
+    guard controller.handle(key(" ", code: 49, modifiers: .option), client: client),
+      client.committed == "你好明天", !generatedPresenter.isVisible, requests.count == 1
     else {
-      throw SmokeFailure.expectation("点击 MLX 续写没有插入，或发生自动连锁请求")
+      throw SmokeFailure.expectation("Option + Space 没有优先插入首个 MLX 续写候选")
     }
 
     for (character, keyCode) in zip("ni", [45, 34]) {
