@@ -50,6 +50,7 @@ struct InputMethodSmokeMain {
     try verifyCandidateOverlayOwnership()
     try verifyGeneratedCandidateOverlayOwnership()
     try verifyCandidateReranking()
+    try verifyRerankingSettings()
     try verifyMLXScoringFlow()
     try verifyMLXGenerationFlow()
     try verifyModeIndicatorOwnership()
@@ -638,6 +639,48 @@ struct InputMethodSmokeMain {
       CandidateReranker.apply(result, requestID: 10, revision: 7, to: original) == nil
     else {
       throw SmokeFailure.expectation("AI 重排采用了身份或文字不匹配的结果")
+    }
+  }
+
+  private static func verifyRerankingSettings() throws {
+    let suiteName = "FeatherRerankingSettings-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+      throw SmokeFailure.expectation("无法创建隔离的 AI 重排设置")
+    }
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let settings = RerankingSettings(defaults: defaults)
+    guard !settings.isEnabled, settings.weight == 0.35,
+      settings.debounceMilliseconds == 120,
+      settings.adoptionDeadlineMilliseconds == 700
+    else {
+      throw SmokeFailure.expectation("AI 重排默认设置不正确")
+    }
+
+    var notifications = 0
+    let observer = NotificationCenter.default.addObserver(
+      forName: .rerankingSettingsDidChange,
+      object: settings,
+      queue: nil
+    ) { _ in
+      notifications += 1
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+    settings.updateEnabled(true)
+    settings.updateWeight(1.5)
+    settings.updateDebounceMilliseconds(3_000)
+    settings.updateAdoptionDeadlineMilliseconds(10)
+    guard settings.isEnabled, settings.weight == 1,
+      settings.debounceMilliseconds == 2_000,
+      settings.adoptionDeadlineMilliseconds == 50,
+      notifications == 4
+    else {
+      throw SmokeFailure.expectation("AI 重排设置没有保存、限幅或通知变更")
+    }
+
+    defaults.set(-1, forKey: "aiRimeRerankingDebounceMilliseconds")
+    defaults.set(-1, forKey: "aiRimeRerankingAdoptionDeadlineMilliseconds")
+    guard settings.debounceMilliseconds == 0, settings.adoptionDeadlineMilliseconds == 50 else {
+      throw SmokeFailure.expectation("AI 重排设置没有安全处理负数持久值")
     }
   }
 

@@ -67,6 +67,7 @@ swiftc \
     "$source_root"/Sources/PersistentModeIndicatorController.swift \
     "$source_root"/Sources/PersistentModeIndicatorSettings.swift \
     "$source_root"/Sources/RightControlTap.swift \
+    "$source_root"/Sources/RerankingSettings.swift \
     "$source_root"/Sources/SettingsWindowController.swift \
     "$source_root"/Sources/TextCoordinates.swift \
     "$source_root"/Tests/*.swift \

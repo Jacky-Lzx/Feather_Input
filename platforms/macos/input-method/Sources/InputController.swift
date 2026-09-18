@@ -32,6 +32,8 @@ private struct ScoringSnapshot {
   let preedit: String
   let candidates: [FeatherCandidateValue]
   let selection: NSRange
+  let weight: Double
+  let adoptionDeadlineMilliseconds: UInt64
 }
 
 @objc(FeatherRustInputController)
@@ -68,6 +70,7 @@ final class InputController: IMKInputController {
   var candidatePageSettings = CandidatePageSettings.shared
   var englishCandidateSettings = EnglishCandidateSettings.shared
   var generationSettings = GenerationSettings.shared
+  var rerankingSettings = RerankingSettings.shared
   var capsLockState: () -> Bool = {
     CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
   }
@@ -81,9 +84,10 @@ final class InputController: IMKInputController {
       (FeatherSession, UInt64, UInt64, String, String, String, Int) throws ->
         any FeatherGenerationRequesting
     )?
-  var scoringDebounceMilliseconds: UInt64 = 120
+  var scoringDebounceMilliseconds: UInt64?
+  var scoringAdoptionDeadlineMilliseconds: UInt64?
   var scoringPollMilliseconds: UInt64 = 20
-  var scoringEnabled: () -> Bool = { false }
+  var scoringEnabled: (() -> Bool)?
   var scoringRequestFactory:
     (
       (
@@ -120,9 +124,11 @@ final class InputController: IMKInputController {
   private var candidateOrderIsReranked = false
   private var recentContext = ""
   private var observesGenerationSettings = false
+  private var observesRerankingSettings = false
 
   override func activateServer(_ sender: Any!) {
     startObservingGenerationSettings()
+    startObservingRerankingSettings()
     cancelFocusIndicator()
     cancelGeneration(clearContext: true)
     candidateOrderLocked = false
@@ -188,6 +194,7 @@ final class InputController: IMKInputController {
 
   override func deactivateServer(_ sender: Any!) {
     stopObservingGenerationSettings()
+    stopObservingRerankingSettings()
     cancelFocusIndicator()
     cancelGeneration(clearContext: true)
     guard let session else {
@@ -536,18 +543,23 @@ final class InputController: IMKInputController {
       context: recentContext,
       preedit: response.preedit,
       candidates: response.candidates,
-      selection: client.selectedRange()
+      selection: client.selectedRange(),
+      weight: rerankingSettings.weight,
+      adoptionDeadlineMilliseconds: scoringAdoptionDeadlineMilliseconds
+        ?? rerankingSettings.adoptionDeadlineMilliseconds
     )
     let version = scoringVersion
+    let debounce = scoringDebounceMilliseconds ?? rerankingSettings.debounceMilliseconds
     scoringTask = Task { @MainActor [weak self, weak client] in
       do {
-        if let self, self.scoringDebounceMilliseconds > 0 {
-          try await Task.sleep(nanoseconds: self.scoringDebounceMilliseconds * 1_000_000)
+        if debounce > 0 {
+          try await Task.sleep(nanoseconds: debounce * 1_000_000)
         }
         guard let self, let client,
           self.scoringSnapshotIsCurrent(snapshot, version: version, client: client),
           let session = self.session
         else { return }
+        let requestStartedAt = ProcessInfo.processInfo.systemUptime
         let request = try self.makeScoringRequest(session: session, snapshot: snapshot)
         self.scoringRequest = request
         while !Task.isCancelled {
@@ -563,7 +575,9 @@ final class InputController: IMKInputController {
           case .pending:
             try await Task.sleep(nanoseconds: self.scoringPollMilliseconds * 1_000_000)
           case .ready(let result):
-            guard self.scoringSnapshotIsCurrent(snapshot, version: version, client: client),
+            let elapsed = (ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000
+            guard elapsed <= Double(snapshot.adoptionDeadlineMilliseconds),
+              self.scoringSnapshotIsCurrent(snapshot, version: version, client: client),
               let reordered = CandidateReranker.apply(
                 result,
                 requestID: snapshot.requestID,
@@ -617,7 +631,7 @@ final class InputController: IMKInputController {
     if let scoringRequestFactory {
       return try scoringRequestFactory(
         session, snapshot.requestID, snapshot.revision, snapshot.context, snapshot.preedit,
-        snapshot.candidates, 0.35, .character)
+        snapshot.candidates, snapshot.weight, .character)
     }
     return try session.startScoring(
       requestID: snapshot.requestID,
@@ -625,7 +639,7 @@ final class InputController: IMKInputController {
       context: snapshot.context,
       preedit: snapshot.preedit,
       candidates: snapshot.candidates,
-      weight: 0.35,
+      weight: snapshot.weight,
       normalization: .character
     )
   }
@@ -664,7 +678,33 @@ final class InputController: IMKInputController {
   }
 
   private var isScoringEnabled: Bool {
-    scoringEnabled()
+    scoringEnabled?() ?? rerankingSettings.isEnabled
+  }
+
+  private func startObservingRerankingSettings() {
+    guard !observesRerankingSettings else { return }
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(rerankingSettingsChanged(_:)),
+      name: .rerankingSettingsDidChange,
+      object: nil
+    )
+    observesRerankingSettings = true
+  }
+
+  private func stopObservingRerankingSettings() {
+    guard observesRerankingSettings else { return }
+    NotificationCenter.default.removeObserver(
+      self,
+      name: .rerankingSettingsDidChange,
+      object: nil
+    )
+    observesRerankingSettings = false
+  }
+
+  @objc private func rerankingSettingsChanged(_ notification: Notification) {
+    guard notification.object as? RerankingSettings === rerankingSettings else { return }
+    cancelScoring()
   }
 
   private func handleCandidateWindowAction(_ action: CandidateWindowAction) {
