@@ -109,6 +109,10 @@ final class OwnedCandidatePresenter: CandidatePresenting {
     )
   }
 
+  func setRerankingActive(_ active: Bool) {
+    store.presenter(for: ownershipID)?.setRerankingActive(active)
+  }
+
   func hide() {
     store.presenter(for: ownershipID)?.hide()
   }

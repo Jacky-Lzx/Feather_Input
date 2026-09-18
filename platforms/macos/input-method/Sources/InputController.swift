@@ -564,15 +564,20 @@ final class InputController: IMKInputController {
     )
     let version = scoringVersion
     let debounce = scoringDebounceMilliseconds ?? rerankingSettings.debounceMilliseconds
+    candidatePresenter.setRerankingActive(true)
     scoringTask = Task { @MainActor [weak self, weak client] in
       do {
         if debounce > 0 {
           try await Task.sleep(nanoseconds: debounce * 1_000_000)
         }
-        guard let self, let client,
+        guard let self else { return }
+        guard let client,
           self.scoringSnapshotIsCurrent(snapshot, version: version, client: client),
           let session = self.session
-        else { return }
+        else {
+          self.finishScoring(nil, version: version)
+          return
+        }
         let requestStartedAt = ProcessInfo.processInfo.systemUptime
         let request = try self.makeScoringRequest(session: session, snapshot: snapshot)
         self.scoringRequest = request
@@ -685,6 +690,7 @@ final class InputController: IMKInputController {
     guard scoringVersion == version else { return }
     scoringRequest = nil
     scoringTask = nil
+    candidatePresenter.setRerankingActive(false)
   }
 
   private func cancelScoring() {
@@ -694,6 +700,7 @@ final class InputController: IMKInputController {
     try? scoringRequest?.cancel()
     scoringRequest?.close()
     scoringRequest = nil
+    candidatePresenter.setRerankingActive(false)
   }
 
   private var isScoringEnabled: Bool {

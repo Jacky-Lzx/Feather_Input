@@ -15,6 +15,8 @@ final class SmokeCandidatePresenter: CandidatePresenting {
   private(set) var expandedHasMore = false
   private(set) var expandedLayout = CandidateLayout.vertical
   private(set) var expandedPageSize = 0
+  private(set) var isRerankingActive = false
+  private(set) var rerankingStates: [Bool] = []
 
   func update(
     candidates: [FeatherCandidateValue],
@@ -47,9 +49,15 @@ final class SmokeCandidatePresenter: CandidatePresenting {
   }
 
   func hide() {
+    setRerankingActive(false)
     expanded = false
     candidates = []
     hideCount += 1
+  }
+
+  func setRerankingActive(_ active: Bool) {
+    isRerankingActive = active
+    rerankingStates.append(active)
   }
 
   func select(text: String) {

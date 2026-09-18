@@ -781,6 +781,8 @@ struct InputMethodSmokeMain {
       presenter.candidates.map(\.value) == ranked.prefix(displayedCount).map(\.value),
       presenter.candidates.first?.value == submitted.last?.value,
       presenter.highlighted == highlightedBeforeRanking,
+      presenter.rerankingStates.contains(true),
+      presenter.isRerankingActive == false,
       requests.count == 1
     else {
       throw SmokeFailure.expectation(
@@ -841,7 +843,7 @@ struct InputMethodSmokeMain {
         throw SmokeFailure.expectation("MLX 评分取消测试无法输入拼音：\(character)")
       }
     }
-    guard waitUntil({ requests.count == 2 }) else {
+    guard waitUntil({ requests.count == 2 && presenter.isRerankingActive }) else {
       throw SmokeFailure.expectation("没有创建用于取消验证的 MLX 评分请求")
     }
     guard controller.handle(key("j", code: 38), client: client),
@@ -853,7 +855,9 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("继续输入后没有创建新的 MLX 评分请求")
     }
     presenter.beginInteraction()
-    guard requests[2].cancelCount == 1, requests[2].closeCount == 1 else {
+    guard requests[2].cancelCount == 1, requests[2].closeCount == 1,
+      presenter.isRerankingActive == false
+    else {
       throw SmokeFailure.expectation("鼠标进入候选窗没有取消并锁定 MLX 重排")
     }
     RunLoop.current.run(until: Date().addingTimeInterval(0.02))
@@ -1254,6 +1258,18 @@ struct InputMethodSmokeMain {
       presenter.appliedFontSize == CandidateFontSettings.defaultSize
     else {
       throw SmokeFailure.expectation("紧凑候选窗没有默认使用竖排")
+    }
+    presenter.setRerankingActive(true)
+    guard presenter.isRerankingIndicatorVisible,
+      presenter.currentPanelSize == defaultPanelSize
+    else {
+      throw SmokeFailure.expectation("AI 重排指示器改变了候选窗尺寸")
+    }
+    presenter.setRerankingActive(false)
+    guard !presenter.isRerankingIndicatorVisible,
+      presenter.currentPanelSize == defaultPanelSize
+    else {
+      throw SmokeFailure.expectation("AI 重排指示器停止后改变了候选窗尺寸")
     }
 
     fontSettings.updateSize(CandidateFontSettings.maximumSize)

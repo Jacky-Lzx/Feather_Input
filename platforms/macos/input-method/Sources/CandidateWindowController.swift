@@ -199,6 +199,7 @@ protocol CandidatePresenting: AnyObject {
     hasMore: Bool,
     anchor: NSRect
   )
+  func setRerankingActive(_ active: Bool)
   func hide()
 }
 
@@ -226,6 +227,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   var frame: NSRect { panel.frame }
   var currentPanelSize: NSSize { panel.frame.size }
   var isVisible: Bool { panel.isVisible }
+  var isRerankingIndicatorVisible: Bool { !rerankingIndicator.isHidden }
 
   private var candidates: [FeatherCandidateValue] = []
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
@@ -235,6 +237,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   private var expandedHeaderHeightConstraint: NSLayoutConstraint?
   private lazy var expandedGrid = makeExpandedGrid()
   private lazy var contentStack = makeContentStack()
+  private lazy var rerankingIndicator = makeRerankingIndicator()
   private lazy var backgroundView = makeBackgroundView()
 
   init(
@@ -359,7 +362,18 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       ))
   }
 
+  func setRerankingActive(_ active: Bool) {
+    if active {
+      rerankingIndicator.isHidden = false
+      rerankingIndicator.startAnimation(nil)
+    } else {
+      rerankingIndicator.stopAnimation(nil)
+      rerankingIndicator.isHidden = true
+    }
+  }
+
   func hide() {
+    setRerankingActive(false)
     candidates = []
     generatedCandidates = []
     displayedGeneratedCandidateCount = 0
@@ -426,14 +440,35 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     background.layer?.borderWidth = CandidateWindowStyle.borderWidth
     background.layer?.masksToBounds = true
     background.addSubview(contentStack)
+    background.addSubview(rerankingIndicator)
     contentStack.translatesAutoresizingMaskIntoConstraints = false
+    rerankingIndicator.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
       contentStack.leadingAnchor.constraint(equalTo: background.leadingAnchor),
       contentStack.trailingAnchor.constraint(equalTo: background.trailingAnchor),
       contentStack.topAnchor.constraint(equalTo: background.topAnchor),
       contentStack.bottomAnchor.constraint(equalTo: background.bottomAnchor),
+      rerankingIndicator.topAnchor.constraint(equalTo: background.topAnchor, constant: 4),
+      rerankingIndicator.trailingAnchor.constraint(
+        equalTo: background.trailingAnchor,
+        constant: -4
+      ),
+      rerankingIndicator.widthAnchor.constraint(equalToConstant: 12),
+      rerankingIndicator.heightAnchor.constraint(equalToConstant: 12),
     ])
     return background
+  }
+
+  private func makeRerankingIndicator() -> NSProgressIndicator {
+    let indicator = NSProgressIndicator()
+    indicator.style = .spinning
+    indicator.controlSize = .mini
+    indicator.isIndeterminate = true
+    indicator.isDisplayedWhenStopped = false
+    indicator.isHidden = true
+    indicator.toolTip = "AI 正在重排候选"
+    indicator.setAccessibilityLabel("AI 正在重排候选")
+    return indicator
   }
 
   private func rebuildCandidateRows(highlighted: Int?, anchor: NSRect) -> CGFloat {
