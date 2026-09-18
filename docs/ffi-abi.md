@@ -106,6 +106,11 @@ request_free
 静默保留 Rime 候选，不改变当前组合。`FeatherAiRequest` 的 `poll`、`cancel` 和 `free`
 必须在创建它的同一线程执行。
 
+候选评分使用独立的 `feather_ai_score_start()` 和 `FeatherAiScoringRequest`，避免改变已有
+生成结构的 ABI 布局。输入候选由不透明 `value` 和 UTF-8 文字组成；结果返回同一个
+`value`、纯模型 `lm_score` 和最终融合 `score`。评分请求使用独立的 poll、cancel、free
+函数，并遵循相同的 request ID、revision、线程所有权和终态规则。
+
 ## 能力位
 
 ABI v2 当前公开以下能力：
@@ -121,6 +126,8 @@ ABI v2 当前公开以下能力：
 - `FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM`：支持将混合英文候选的最少输入长度设置为 1–12。
 - `FEATHER_CAP_ASYNC_MLX_GENERATION`：支持带 request ID 与 revision 校验的异步 MLX
   生成请求。
+- `FEATHER_CAP_MLX_BACKEND_STATUS`：支持有界的本机 MLX 健康检查。
+- `FEATHER_CAP_ASYNC_MLX_SCORING`：支持保留 Rime 不透明候选 ID 的异步 MLX 评分请求。
 
 平台层只应要求自身实际依赖的能力。新增可选能力时增加新的位，不改变已有位的含义。
 

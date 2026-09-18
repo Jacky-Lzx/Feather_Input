@@ -1,6 +1,8 @@
 use feather_ai::{
-    AiProvider, GenerationBatch, GenerationRequest, GenerationTask, GenerationTaskState,
-    InputScheme as AiInputScheme, MlxBackendStatus, MlxProvider,
+    AiProvider, AiScoringProvider, GenerationBatch, GenerationRequest, GenerationTask,
+    GenerationTaskState, InputScheme as AiInputScheme, MlxBackendStatus, MlxProvider,
+    ScoreNormalization, ScoringBatch, ScoringCandidate, ScoringRequest, ScoringTask,
+    ScoringTaskState,
 };
 use feather_core::{
     CandidateId, DispatchResult, InputCoordinator, InputEffect, InputEvent, InputMode, Key,
@@ -26,6 +28,7 @@ const CAP_PAGE_SIZE: u64 = 1 << 7;
 const CAP_ENGLISH_CANDIDATE_MINIMUM: u64 = 1 << 8;
 const CAP_ASYNC_MLX_GENERATION: u64 = 1 << 9;
 const CAP_MLX_BACKEND_STATUS: u64 = 1 << 10;
+const CAP_ASYNC_MLX_SCORING: u64 = 1 << 11;
 const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
 
 const AI_REQUEST_PENDING: u32 = 0;
@@ -85,6 +88,11 @@ pub struct FeatherAiRequest {
     owner_thread: ThreadId,
 }
 
+pub struct FeatherAiScoringRequest {
+    task: ScoringTask,
+    owner_thread: ThreadId,
+}
+
 #[repr(C)]
 pub struct FeatherCandidate {
     pub revision: u64,
@@ -123,6 +131,35 @@ pub struct FeatherAiResult {
     pub candidate_count: usize,
     pub elapsed_ms: u64,
     pub truncated: u8,
+    pub storage: *mut c_void,
+}
+
+#[repr(C)]
+pub struct FeatherAiScoringInput {
+    pub value: u64,
+    pub text: *const c_char,
+}
+
+#[repr(C)]
+pub struct FeatherAiScoredCandidate {
+    pub value: u64,
+    pub text: *const c_char,
+    pub lm_score: f64,
+    pub score: f64,
+}
+
+struct AiScoringResultStorage {
+    _texts: Vec<CString>,
+    candidates: Vec<FeatherAiScoredCandidate>,
+}
+
+#[repr(C)]
+pub struct FeatherAiScoringResult {
+    pub request_id: u64,
+    pub revision: u64,
+    pub candidates: *const FeatherAiScoredCandidate,
+    pub candidate_count: usize,
+    pub elapsed_ms: u64,
     pub storage: *mut c_void,
 }
 
@@ -183,6 +220,16 @@ fn new_ai_request(
     }))
 }
 
+fn new_ai_scoring_request(
+    provider: Arc<dyn AiScoringProvider>,
+    request: ScoringRequest,
+) -> *mut FeatherAiScoringRequest {
+    Box::into_raw(Box::new(FeatherAiScoringRequest {
+        task: ScoringTask::start(provider, request),
+        owner_thread: thread::current().id(),
+    }))
+}
+
 fn ai_result(batch: &GenerationBatch) -> *mut FeatherAiResult {
     let texts = batch
         .candidates
@@ -213,6 +260,42 @@ fn ai_result(batch: &GenerationBatch) -> *mut FeatherAiResult {
     };
     let storage = Box::into_raw(storage);
     Box::into_raw(Box::new(FeatherAiResult {
+        storage: storage.cast(),
+        ..result
+    }))
+}
+
+fn ai_scoring_result(batch: &ScoringBatch) -> *mut FeatherAiScoringResult {
+    let texts = batch
+        .candidates
+        .iter()
+        .map(|candidate| cstring(&candidate.text))
+        .collect::<Vec<_>>();
+    let candidates = batch
+        .candidates
+        .iter()
+        .zip(&texts)
+        .map(|(candidate, text)| FeatherAiScoredCandidate {
+            value: candidate.id,
+            text: text.as_ptr(),
+            lm_score: candidate.lm_score,
+            score: candidate.score,
+        })
+        .collect::<Vec<_>>();
+    let storage = Box::new(AiScoringResultStorage {
+        _texts: texts,
+        candidates,
+    });
+    let result = FeatherAiScoringResult {
+        request_id: batch.request_id,
+        revision: batch.revision,
+        candidates: storage.candidates.as_ptr(),
+        candidate_count: storage.candidates.len(),
+        elapsed_ms: batch.elapsed_ms,
+        storage: ptr::null_mut(),
+    };
+    let storage = Box::into_raw(storage);
+    Box::into_raw(Box::new(FeatherAiScoringResult {
         storage: storage.cast(),
         ..result
     }))
@@ -372,6 +455,24 @@ unsafe fn checked_ai_request<'a>(
         return Err(FfiFailure::new(
             StatusCode::WrongThread,
             "AI 请求必须在创建它的线程上轮询和释放",
+        ));
+    }
+    Ok(request)
+}
+
+unsafe fn checked_ai_scoring_request<'a>(
+    request: *mut FeatherAiScoringRequest,
+) -> Result<&'a mut FeatherAiScoringRequest, FfiFailure> {
+    let Some(request) = (unsafe { request.as_mut() }) else {
+        return Err(FfiFailure::new(
+            StatusCode::InvalidArgument,
+            "AI 评分请求指针为空",
+        ));
+    };
+    if request.owner_thread != thread::current().id() {
+        return Err(FfiFailure::new(
+            StatusCode::WrongThread,
+            "AI 评分请求必须在创建它的线程上轮询和释放",
         ));
     }
     Ok(request)
@@ -541,6 +642,7 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_ENGLISH_CANDIDATE_MINIMUM
         | CAP_ASYNC_MLX_GENERATION
         | CAP_MLX_BACKEND_STATUS
+        | CAP_ASYNC_MLX_SCORING
 }
 
 #[no_mangle]
@@ -932,6 +1034,138 @@ pub unsafe extern "C" fn feather_ai_generate_start(
 }
 
 #[no_mangle]
+/// Starts one asynchronous MLX candidate-scoring request.
+///
+/// # Safety
+///
+/// String arguments and candidate text pointers must be valid NUL-terminated
+/// UTF-8 for the duration of this call. `candidates` must point to
+/// `candidate_count` readable entries when the count is nonzero.
+pub unsafe extern "C" fn feather_ai_score_start(
+    request_id: u64,
+    revision: u64,
+    context: *const c_char,
+    preedit: *const c_char,
+    candidates: *const FeatherAiScoringInput,
+    candidate_count: usize,
+    weight: f64,
+    normalization: u32,
+    out_request: *mut *mut FeatherAiScoringRequest,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        output_call(out_request, out_error, || {
+            if candidate_count > 64 || (candidate_count > 0 && candidates.is_null()) {
+                return Err(FfiFailure::new(
+                    StatusCode::InvalidArgument,
+                    "AI 评分候选数组无效",
+                ));
+            }
+            let normalization = match normalization {
+                1 => ScoreNormalization::Character,
+                2 => ScoreNormalization::Token,
+                3 => ScoreNormalization::None,
+                _ => {
+                    return Err(FfiFailure::new(
+                        StatusCode::InvalidArgument,
+                        "AI 评分归一化方式无效",
+                    ));
+                }
+            };
+            let inputs = if candidate_count == 0 {
+                &[]
+            } else {
+                slice::from_raw_parts(candidates, candidate_count)
+            };
+            let candidates = inputs
+                .iter()
+                .map(|candidate| {
+                    Ok(ScoringCandidate {
+                        id: candidate.value,
+                        text: utf8_argument(candidate.text, "candidate text")?.to_owned(),
+                    })
+                })
+                .collect::<Result<Vec<_>, FfiFailure>>()?;
+            let request = ScoringRequest {
+                request_id,
+                revision,
+                context: utf8_argument(context, "context")?.to_owned(),
+                preedit: utf8_argument(preedit, "preedit")?.to_owned(),
+                candidates,
+                weight,
+                normalization,
+            };
+            request.validate().map_err(|error| {
+                FfiFailure::new(
+                    StatusCode::InvalidArgument,
+                    format!("AI 评分请求无效：{error}"),
+                )
+            })?;
+            Ok(new_ai_scoring_request(
+                Arc::new(MlxProvider::default()),
+                request,
+            ))
+        })
+    }
+}
+
+#[no_mangle]
+/// Polls an asynchronous scoring request without blocking.
+///
+/// # Safety
+///
+/// The request must be live and used on its owner thread. Output pointers must
+/// point to writable storage.
+pub unsafe extern "C" fn feather_ai_scoring_request_poll(
+    request: *mut FeatherAiScoringRequest,
+    current_request_id: u64,
+    current_revision: u64,
+    out_state: *mut u32,
+    out_result: *mut *mut FeatherAiScoringResult,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe { clear_error_output(out_error) };
+    let result = catch_unwind(AssertUnwindSafe(|| unsafe {
+        let Some(out_state) = out_state.as_mut() else {
+            return Err(FfiFailure::new(
+                StatusCode::InvalidArgument,
+                "AI 评分请求状态输出指针为空",
+            ));
+        };
+        let Some(out_result) = out_result.as_mut() else {
+            return Err(FfiFailure::new(
+                StatusCode::InvalidArgument,
+                "AI 评分结果输出指针为空",
+            ));
+        };
+        *out_state = AI_REQUEST_PENDING;
+        *out_result = ptr::null_mut();
+        let request = checked_ai_scoring_request(request)?;
+        match request.task.poll(current_request_id, current_revision) {
+            ScoringTaskState::Pending => {}
+            ScoringTaskState::Ready(batch) => {
+                *out_state = AI_REQUEST_READY;
+                *out_result = ai_scoring_result(&batch);
+            }
+            ScoringTaskState::Failed(_) => *out_state = AI_REQUEST_FAILED,
+            ScoringTaskState::Cancelled => *out_state = AI_REQUEST_CANCELLED,
+            ScoringTaskState::Stale => *out_state = AI_REQUEST_STALE,
+        }
+        Ok(())
+    }))
+    .unwrap_or_else(|_| {
+        Err(FfiFailure::new(
+            StatusCode::InternalError,
+            "Rust FFI 内部发生 panic",
+        ))
+    });
+    match result {
+        Ok(()) => StatusCode::Ok.value(),
+        Err(failure) => unsafe { store_failure(&failure, out_error) },
+    }
+}
+
+#[no_mangle]
 /// Polls an asynchronous generation request without blocking.
 ///
 /// A ready result is returned only when both current identity values still
@@ -1010,6 +1244,24 @@ pub unsafe extern "C" fn feather_ai_request_cancel(
 }
 
 #[no_mangle]
+/// Cancels one asynchronous scoring request. Repeated cancellation is safe.
+///
+/// # Safety
+///
+/// `request` must be a live handle used on its owner thread.
+pub unsafe extern "C" fn feather_ai_scoring_request_cancel(
+    request: *mut FeatherAiScoringRequest,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        status_call(out_error, || {
+            checked_ai_scoring_request(request)?.task.cancel();
+            Ok(())
+        })
+    }
+}
+
+#[no_mangle]
 /// Releases an AI request handle. A null pointer is accepted.
 ///
 /// # Safety
@@ -1017,6 +1269,21 @@ pub unsafe extern "C" fn feather_ai_request_cancel(
 /// `request` must be null or a live request handle. It must be released on its
 /// owner thread and must not be used after this call.
 pub unsafe extern "C" fn feather_ai_request_free(request: *mut FeatherAiRequest) {
+    if !request.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            drop(unsafe { Box::from_raw(request) });
+        }));
+    }
+}
+
+#[no_mangle]
+/// Releases an AI scoring request handle. A null pointer is accepted.
+///
+/// # Safety
+///
+/// A nonnull request must be live, owned by the current thread, and unused
+/// after this call.
+pub unsafe extern "C" fn feather_ai_scoring_request_free(request: *mut FeatherAiScoringRequest) {
     if !request.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| {
             drop(unsafe { Box::from_raw(request) });
@@ -1038,6 +1305,24 @@ pub unsafe extern "C" fn feather_ai_result_free(result: *mut FeatherAiResult) {
         let result = unsafe { Box::from_raw(result) };
         if !result.storage.is_null() {
             drop(unsafe { Box::from_raw(result.storage.cast::<AiResultStorage>()) });
+        }
+    }));
+}
+
+#[no_mangle]
+/// Releases a scored AI result. A null pointer is accepted.
+///
+/// # Safety
+///
+/// A nonnull result must be a live pointer returned through the scoring poll.
+pub unsafe extern "C" fn feather_ai_scoring_result_free(result: *mut FeatherAiScoringResult) {
+    if result.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let result = unsafe { Box::from_raw(result) };
+        if !result.storage.is_null() {
+            drop(unsafe { Box::from_raw(result.storage.cast::<AiScoringResultStorage>()) });
         }
     }));
 }
@@ -1099,13 +1384,24 @@ pub unsafe extern "C" fn feather_ime_candidate_slice_free(slice: *mut FeatherCan
 #[cfg(test)]
 mod tests {
     use super::*;
-    use feather_ai::{AiError, GeneratedCandidate};
+    use feather_ai::{AiError, GeneratedCandidate, ScoredCandidate};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     #[derive(Debug)]
     struct StaticAiProvider {
         batch: GenerationBatch,
         delay: Duration,
+    }
+
+    #[derive(Debug)]
+    struct StaticScoringProvider {
+        batch: ScoringBatch,
+    }
+
+    impl AiScoringProvider for StaticScoringProvider {
+        fn score(&self, _request: &ScoringRequest) -> Result<ScoringBatch, AiError> {
+            Ok(self.batch.clone())
+        }
     }
 
     impl AiProvider for StaticAiProvider {
@@ -1138,6 +1434,36 @@ mod tests {
                 input: "guwu".into(),
                 scheme: AiInputScheme::FullPinyin,
                 count: 3,
+            },
+        )
+    }
+
+    fn ai_scoring_request() -> *mut FeatherAiScoringRequest {
+        new_ai_scoring_request(
+            Arc::new(StaticScoringProvider {
+                batch: ScoringBatch {
+                    request_id: 18,
+                    revision: 24,
+                    candidates: vec![ScoredCandidate {
+                        id: 91,
+                        text: "怎么样".into(),
+                        lm_score: -0.2,
+                        score: -0.3,
+                    }],
+                    elapsed_ms: 9,
+                },
+            }),
+            ScoringRequest {
+                request_id: 18,
+                revision: 24,
+                context: "今天天气".into(),
+                preedit: "zenmeyang".into(),
+                candidates: vec![ScoringCandidate {
+                    id: 91,
+                    text: "怎么样".into(),
+                }],
+                weight: 0.35,
+                normalization: ScoreNormalization::Character,
             },
         )
     }
@@ -1275,7 +1601,50 @@ mod tests {
                 | CAP_ENGLISH_CANDIDATE_MINIMUM
                 | CAP_ASYNC_MLX_GENERATION
                 | CAP_MLX_BACKEND_STATUS
+                | CAP_ASYNC_MLX_SCORING
         );
+    }
+
+    #[test]
+    fn c_abi_v2_returns_scoring_results_with_opaque_ids() {
+        let request = ai_scoring_request();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let result = loop {
+            let mut state = u32::MAX;
+            let mut result = ptr::null_mut();
+            let mut error = ptr::null_mut();
+            let status = unsafe {
+                feather_ai_scoring_request_poll(
+                    request,
+                    18,
+                    24,
+                    &raw mut state,
+                    &raw mut result,
+                    &raw mut error,
+                )
+            };
+            assert_eq!(status, StatusCode::Ok.value());
+            assert!(error.is_null());
+            match state {
+                AI_REQUEST_PENDING if Instant::now() < deadline => std::thread::yield_now(),
+                AI_REQUEST_READY => break result,
+                state => panic!("unexpected scoring state: {state}"),
+            }
+        };
+        assert_eq!(unsafe { (*result).request_id }, 18);
+        assert_eq!(unsafe { (*result).revision }, 24);
+        let candidate = unsafe { &*(*result).candidates };
+        assert_eq!(candidate.value, 91);
+        assert_eq!(
+            unsafe { CStr::from_ptr(candidate.text) }.to_str(),
+            Ok("怎么样")
+        );
+        assert!((candidate.lm_score - (-0.2)).abs() < f64::EPSILON);
+        assert!((candidate.score - (-0.3)).abs() < f64::EPSILON);
+        unsafe {
+            feather_ai_scoring_result_free(result);
+            feather_ai_scoring_request_free(request);
+        }
     }
 
     #[test]

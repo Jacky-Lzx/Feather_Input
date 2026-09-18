@@ -16,6 +16,8 @@ typedef struct FeatherResponse FeatherResponse;
 typedef struct FeatherCandidateSlice FeatherCandidateSlice;
 typedef struct FeatherAiRequest FeatherAiRequest;
 typedef struct FeatherAiResult FeatherAiResult;
+typedef struct FeatherAiScoringRequest FeatherAiScoringRequest;
+typedef struct FeatherAiScoringResult FeatherAiScoringResult;
 typedef uint32_t FeatherStatus;
 
 enum FeatherStatusCode {
@@ -43,7 +45,9 @@ enum FeatherCapability {
     FEATHER_CAP_SCHEMA_SELECTION = UINT64_C(1) << 6,
     FEATHER_CAP_PAGE_SIZE = UINT64_C(1) << 7,
     FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM = UINT64_C(1) << 8,
-    FEATHER_CAP_ASYNC_MLX_GENERATION = UINT64_C(1) << 9
+    FEATHER_CAP_ASYNC_MLX_GENERATION = UINT64_C(1) << 9,
+    FEATHER_CAP_MLX_BACKEND_STATUS = UINT64_C(1) << 10,
+    FEATHER_CAP_ASYNC_MLX_SCORING = UINT64_C(1) << 11
 };
 
 enum FeatherAiRequestState {
@@ -102,6 +106,33 @@ struct FeatherAiResult {
     uint64_t elapsed_ms;
     uint8_t truncated;
     void *_storage;
+};
+
+typedef struct {
+    uint64_t value;
+    const char *text;
+} FeatherAiScoringInput;
+
+typedef struct {
+    uint64_t value;
+    const char *text;
+    double lm_score;
+    double score;
+} FeatherAiScoredCandidate;
+
+struct FeatherAiScoringResult {
+    uint64_t request_id;
+    uint64_t revision;
+    const FeatherAiScoredCandidate *candidates;
+    size_t candidate_count;
+    uint64_t elapsed_ms;
+    void *_storage;
+};
+
+enum FeatherAiScoreNormalization {
+    FEATHER_AI_SCORE_BY_CHARACTER = 1,
+    FEATHER_AI_SCORE_BY_TOKEN,
+    FEATHER_AI_SCORE_WITHOUT_NORMALIZATION
 };
 
 enum FeatherKeyKind {
@@ -193,6 +224,26 @@ FeatherStatus feather_ai_generate_start(uint64_t request_id,
                                         size_t count,
                                         FeatherAiRequest **out_request,
                                         FeatherError **out_error);
+FeatherStatus feather_ai_score_start(uint64_t request_id,
+                                     uint64_t revision,
+                                     const char *context,
+                                     const char *preedit,
+                                     const FeatherAiScoringInput *candidates,
+                                     size_t candidate_count,
+                                     double weight,
+                                     uint32_t normalization,
+                                     FeatherAiScoringRequest **out_request,
+                                     FeatherError **out_error);
+FeatherStatus feather_ai_scoring_request_poll(FeatherAiScoringRequest *request,
+                                              uint64_t current_request_id,
+                                              uint64_t current_revision,
+                                              uint32_t *out_state,
+                                              FeatherAiScoringResult **out_result,
+                                              FeatherError **out_error);
+FeatherStatus feather_ai_scoring_request_cancel(FeatherAiScoringRequest *request,
+                                                FeatherError **out_error);
+void feather_ai_scoring_request_free(FeatherAiScoringRequest *request);
+void feather_ai_scoring_result_free(FeatherAiScoringResult *result);
 /* Performs bounded blocking loopback I/O; call outside the input event thread. */
 FeatherStatus feather_ai_mlx_backend_status(uint32_t *out_status,
                                             FeatherError **out_error);

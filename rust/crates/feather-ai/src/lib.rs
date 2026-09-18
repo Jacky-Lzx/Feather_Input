@@ -9,7 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 const DEFAULT_MLX_PORT: u16 = 1235;
-const MAX_REQUEST_BYTES: usize = 4096;
+const MAX_GENERATION_REQUEST_BYTES: usize = 4096;
+const MAX_SCORING_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
 const BUSY_RETRY_DELAYS_MS: [u64; 6] = [40, 60, 100, 160, 240, 300];
 
@@ -57,6 +58,56 @@ pub struct GenerationBatch {
     pub truncated: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScoreNormalization {
+    Character,
+    Token,
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScoringCandidate {
+    pub id: u64,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScoringRequest {
+    pub request_id: u64,
+    pub revision: u64,
+    pub context: String,
+    pub preedit: String,
+    pub candidates: Vec<ScoringCandidate>,
+    pub weight: f64,
+    pub normalization: ScoreNormalization,
+}
+
+impl ScoringRequest {
+    /// # Errors
+    ///
+    /// 上下文、预编辑、候选或融合参数超出服务边界时返回错误。
+    pub fn validate(&self) -> Result<(), AiError> {
+        validate_scoring_request(self)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScoredCandidate {
+    pub id: u64,
+    pub text: String,
+    pub lm_score: f64,
+    pub score: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScoringBatch {
+    pub request_id: u64,
+    pub revision: u64,
+    pub candidates: Vec<ScoredCandidate>,
+    pub elapsed_ms: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AiError {
     InvalidRequest,
@@ -97,6 +148,13 @@ pub trait AiProvider: Send + Sync {
     fn generate(&self, request: &GenerationRequest) -> Result<GenerationBatch, AiError>;
 }
 
+pub trait AiScoringProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// 请求无效、提供者不可用、服务繁忙或响应未通过校验时返回错误。
+    fn score(&self, request: &ScoringRequest) -> Result<ScoringBatch, AiError>;
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum GenerationTaskState {
     Pending,
@@ -112,6 +170,93 @@ pub struct GenerationTask {
     receiver: mpsc::Receiver<Result<GenerationBatch, AiError>>,
     cancelled: Arc<AtomicBool>,
     terminal: Option<GenerationTaskState>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScoringTaskState {
+    Pending,
+    Ready(ScoringBatch),
+    Failed(AiError),
+    Cancelled,
+    Stale,
+}
+
+pub struct ScoringTask {
+    request_id: u64,
+    revision: u64,
+    receiver: mpsc::Receiver<Result<ScoringBatch, AiError>>,
+    cancelled: Arc<AtomicBool>,
+    terminal: Option<ScoringTaskState>,
+}
+
+impl ScoringTask {
+    #[must_use]
+    pub fn start(provider: Arc<dyn AiScoringProvider>, request: ScoringRequest) -> Self {
+        let request_id = request.request_id;
+        let revision = request.revision;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            if worker_cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            let result = provider.score(&request);
+            if !worker_cancelled.load(Ordering::Acquire) {
+                let _ = sender.send(result);
+            }
+        });
+        Self {
+            request_id,
+            revision,
+            receiver,
+            cancelled,
+            terminal: None,
+        }
+    }
+
+    #[must_use]
+    pub fn poll(&mut self, current_request_id: u64, current_revision: u64) -> ScoringTaskState {
+        if let Some(state) = &self.terminal {
+            return state.clone();
+        }
+        if self.request_id != current_request_id || self.revision != current_revision {
+            self.cancelled.store(true, Ordering::Release);
+            let state = ScoringTaskState::Stale;
+            self.terminal = Some(state.clone());
+            return state;
+        }
+        match self.receiver.try_recv() {
+            Ok(Ok(batch)) => {
+                let state =
+                    if batch.request_id == self.request_id && batch.revision == self.revision {
+                        ScoringTaskState::Ready(batch)
+                    } else {
+                        ScoringTaskState::Stale
+                    };
+                self.terminal = Some(state.clone());
+                state
+            }
+            Ok(Err(error)) => {
+                let state = ScoringTaskState::Failed(error);
+                self.terminal = Some(state.clone());
+                state
+            }
+            Err(mpsc::TryRecvError::Empty) => ScoringTaskState::Pending,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                let state = ScoringTaskState::Failed(AiError::Unavailable);
+                self.terminal = Some(state.clone());
+                state
+            }
+        }
+    }
+
+    pub fn cancel(&mut self) {
+        if self.terminal.is_none() {
+            self.cancelled.store(true, Ordering::Release);
+            self.terminal = Some(ScoringTaskState::Cancelled);
+        }
+    }
 }
 
 impl GenerationTask {
@@ -248,7 +393,12 @@ impl LoopbackHttpTransport {
     }
 
     fn request(&self, method: &str, path: &str, body: &[u8]) -> Result<TransportResponse, AiError> {
-        if !path.starts_with('/') || body.len() > MAX_REQUEST_BYTES {
+        let maximum = if path == "/score" {
+            MAX_SCORING_REQUEST_BYTES
+        } else {
+            MAX_GENERATION_REQUEST_BYTES
+        };
+        if !path.starts_with('/') || body.len() > maximum {
             return Err(AiError::InvalidRequest);
         }
         let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, self.port).into();
@@ -341,6 +491,15 @@ struct MlxGenerationRequest<'a> {
     count: u8,
 }
 
+#[derive(Serialize)]
+struct MlxScoringRequest<'a> {
+    context: String,
+    preedit: &'a str,
+    candidates: Vec<&'a str>,
+    weight: f64,
+    normalization: ScoreNormalization,
+}
+
 #[derive(Deserialize)]
 struct MlxGenerationResponse {
     candidates: Vec<MlxGeneratedCandidate>,
@@ -352,6 +511,20 @@ struct MlxGenerationResponse {
 #[derive(Deserialize)]
 struct MlxGeneratedCandidate {
     text: String,
+    score: f64,
+}
+
+#[derive(Deserialize)]
+struct MlxScoringResponse {
+    candidates: Vec<MlxScoredCandidate>,
+    elapsed_ms: u64,
+}
+
+#[derive(Deserialize)]
+struct MlxScoredCandidate {
+    id: usize,
+    text: String,
+    lm_score: f64,
     score: f64,
 }
 
@@ -435,6 +608,67 @@ impl<T: MlxTransport> AiProvider for MlxProvider<T> {
     }
 }
 
+impl<T: MlxTransport> AiScoringProvider for MlxProvider<T> {
+    fn score(&self, request: &ScoringRequest) -> Result<ScoringBatch, AiError> {
+        validate_scoring_request(request)?;
+        let payload = MlxScoringRequest {
+            context: suffix_chars(&request.context, 80),
+            preedit: &request.preedit,
+            candidates: request
+                .candidates
+                .iter()
+                .map(|candidate| candidate.text.as_str())
+                .collect(),
+            weight: request.weight,
+            normalization: request.normalization,
+        };
+        let body = serde_json::to_vec(&payload).map_err(|_| AiError::InvalidRequest)?;
+        let response =
+            post_with_busy_retry(&self.transport, "/score", &body, self.busy_retry_limit)?;
+        if !(200..300).contains(&response.status) {
+            return Err(AiError::HttpStatus(response.status));
+        }
+        let parsed: MlxScoringResponse =
+            serde_json::from_slice(&response.body).map_err(|_| AiError::InvalidResponse)?;
+        validate_scoring_response(&parsed, request)?;
+        Ok(ScoringBatch {
+            request_id: request.request_id,
+            revision: request.revision,
+            candidates: parsed
+                .candidates
+                .into_iter()
+                .map(|candidate| ScoredCandidate {
+                    id: request.candidates[candidate.id].id,
+                    text: candidate.text,
+                    lm_score: candidate.lm_score,
+                    score: candidate.score,
+                })
+                .collect(),
+            elapsed_ms: parsed.elapsed_ms,
+        })
+    }
+}
+
+fn post_with_busy_retry<T: MlxTransport>(
+    transport: &T,
+    path: &str,
+    body: &[u8],
+    retry_limit: usize,
+) -> Result<TransportResponse, AiError> {
+    let mut busy_retries = 0;
+    loop {
+        let response = transport.post_json(path, body)?;
+        if response.status != 503 || !is_busy_response(&response.body) {
+            return Ok(response);
+        }
+        if busy_retries >= retry_limit {
+            return Err(AiError::Busy);
+        }
+        thread::sleep(Duration::from_millis(BUSY_RETRY_DELAYS_MS[busy_retries]));
+        busy_retries += 1;
+    }
+}
+
 fn validate_request(request: &GenerationRequest) -> Result<(), AiError> {
     let input_length = request.input.chars().count();
     if request.context.trim().is_empty()
@@ -447,6 +681,49 @@ fn validate_request(request: &GenerationRequest) -> Result<(), AiError> {
             .all(|byte| byte.is_ascii_lowercase() || byte == b'\'' || byte == b' ')
     {
         return Err(AiError::InvalidRequest);
+    }
+    Ok(())
+}
+
+fn validate_scoring_request(request: &ScoringRequest) -> Result<(), AiError> {
+    let mut ids = HashSet::new();
+    if request.context.trim().is_empty()
+        || request.preedit.chars().count() > 36
+        || !request.weight.is_finite()
+        || !(0.0..=1.0).contains(&request.weight)
+        || !(1..=64).contains(&request.candidates.len())
+        || request.candidates.iter().any(|candidate| {
+            candidate.text.is_empty()
+                || candidate.text.chars().count() > 64
+                || !ids.insert(candidate.id)
+        })
+    {
+        return Err(AiError::InvalidRequest);
+    }
+    Ok(())
+}
+
+fn validate_scoring_response(
+    response: &MlxScoringResponse,
+    request: &ScoringRequest,
+) -> Result<(), AiError> {
+    if response.elapsed_ms > 10_000 || response.candidates.len() != request.candidates.len() {
+        return Err(AiError::InvalidResponse);
+    }
+    let mut indexes = HashSet::new();
+    for candidate in &response.candidates {
+        let Some(original) = request.candidates.get(candidate.id) else {
+            return Err(AiError::InvalidResponse);
+        };
+        if !indexes.insert(candidate.id)
+            || candidate.text != original.text
+            || !candidate.lm_score.is_finite()
+            || !candidate.score.is_finite()
+            || candidate.lm_score > 0.0
+            || candidate.score > 0.0
+        {
+            return Err(AiError::InvalidResponse);
+        }
     }
     Ok(())
 }
@@ -522,9 +799,12 @@ mod tests {
 
     impl MlxTransport for FakeTransport {
         fn post_json(&self, path: &str, body: &[u8]) -> Result<TransportResponse, AiError> {
-            assert_eq!(path, "/generate");
             let payload: serde_json::Value = serde_json::from_slice(body).unwrap();
-            assert_eq!(payload["scheme"], "luna_pinyin_simp");
+            match path {
+                "/generate" => assert_eq!(payload["scheme"], "luna_pinyin_simp"),
+                "/score" => assert!(payload["candidates"].is_array()),
+                _ => panic!("unexpected path: {path}"),
+            }
             self.responses
                 .lock()
                 .unwrap()
@@ -550,6 +830,27 @@ mod tests {
             input: "guwu".into(),
             scheme: InputScheme::FullPinyin,
             count: 3,
+        }
+    }
+
+    fn scoring_request() -> ScoringRequest {
+        ScoringRequest {
+            request_id: 10,
+            revision: 43,
+            context: "今天北京天气".into(),
+            preedit: "zenmeyang".into(),
+            candidates: vec![
+                ScoringCandidate {
+                    id: 700,
+                    text: "怎么样".into(),
+                },
+                ScoringCandidate {
+                    id: 900,
+                    text: "怎么养".into(),
+                },
+            ],
+            weight: 0.35,
+            normalization: ScoreNormalization::Character,
         }
     }
 
@@ -624,6 +925,43 @@ mod tests {
         invalid = request();
         invalid.input = "GUWU".into();
         assert_eq!(provider.generate(&invalid), Err(AiError::InvalidRequest));
+    }
+
+    #[test]
+    fn scoring_maps_backend_indexes_to_opaque_candidate_ids() {
+        let provider = MlxProvider::new(FakeTransport::new([response(
+            200,
+            r#"{"candidates":[{"id":1,"text":"怎么养","lm_score":-1.2,"score":-1.0},{"id":0,"text":"怎么样","lm_score":-0.2,"score":-0.3}],"elapsed_ms":41}"#,
+        )]));
+        let result = provider.score(&scoring_request()).unwrap();
+        assert_eq!(result.request_id, 10);
+        assert_eq!(result.revision, 43);
+        assert_eq!(result.candidates[0].id, 900);
+        assert_eq!(result.candidates[1].id, 700);
+        assert_eq!(result.elapsed_ms, 41);
+    }
+
+    #[test]
+    fn scoring_rejects_mismatched_or_duplicate_backend_candidates() {
+        for body in [
+            r#"{"candidates":[{"id":0,"text":"不同","lm_score":-1,"score":-1},{"id":1,"text":"怎么养","lm_score":-1,"score":-1}],"elapsed_ms":1}"#,
+            r#"{"candidates":[{"id":0,"text":"怎么样","lm_score":-1,"score":-1},{"id":0,"text":"怎么样","lm_score":-1,"score":-1}],"elapsed_ms":1}"#,
+            r#"{"candidates":[{"id":0,"text":"怎么样","lm_score":1,"score":-1},{"id":1,"text":"怎么养","lm_score":-1,"score":-1}],"elapsed_ms":1}"#,
+        ] {
+            let provider = MlxProvider::new(FakeTransport::new([response(200, body)]));
+            assert_eq!(
+                provider.score(&scoring_request()),
+                Err(AiError::InvalidResponse)
+            );
+        }
+    }
+
+    #[test]
+    fn scoring_rejects_duplicate_opaque_ids_before_transport() {
+        let provider = MlxProvider::new(FakeTransport::new([]));
+        let mut invalid = scoring_request();
+        invalid.candidates[1].id = invalid.candidates[0].id;
+        assert_eq!(provider.score(&invalid), Err(AiError::InvalidRequest));
     }
 
     #[test]
