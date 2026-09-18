@@ -61,6 +61,10 @@ class ManageMLXBackendTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pinyin_generation.py, requirements.txt"):
             MODULE.validate_source(source)
 
+    def test_install_defaults_to_repository_backend(self):
+        options = MODULE.parser().parse_args(["install", "--model", "/tmp/model"])
+        self.assertEqual(options.source, MODULE.repository_backend())
+
     def test_status_distinguishes_legacy_agent_path(self):
         path = MODULE.agent_path()
         MODULE.write_plist_atomically(

@@ -20,6 +20,10 @@ LABEL = "im.feather.mlx-worker"
 DEFAULT_PORT = 1235
 
 
+def repository_backend() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parent.parent / "backend"
+
+
 def application_support_root() -> pathlib.Path:
     override = os.environ.get("FEATHER_MLX_RUNTIME_DIR")
     if override:
@@ -268,7 +272,12 @@ def parser() -> argparse.ArgumentParser:
     subparsers = result.add_subparsers(dest="command", required=True)
 
     install = subparsers.add_parser("install", help="部署稳定运行目录并安装 LaunchAgent")
-    install.add_argument("--source", type=pathlib.Path, required=True, help="包含 server.py 的后端源码目录")
+    install.add_argument(
+        "--source",
+        type=pathlib.Path,
+        default=repository_backend(),
+        help="后端源码目录；默认使用当前仓库的 backend/",
+    )
     install.add_argument("--model", type=pathlib.Path, required=True, help="本地 MLX 模型目录")
     install.add_argument("--port", type=int, default=DEFAULT_PORT)
 
