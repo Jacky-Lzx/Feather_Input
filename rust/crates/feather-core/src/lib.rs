@@ -169,6 +169,28 @@ mod tests {
     }
 
     #[test]
+    fn switching_to_direct_mode_commits_raw_composition() {
+        let mut core = InputCoordinator::new(FakeEngine::default());
+        core.dispatch(InputEvent::Activate).unwrap();
+        core.dispatch(InputEvent::Key(Key::Text("nihao".into())))
+            .unwrap();
+
+        let result = core.dispatch(InputEvent::Key(Key::ToggleMode)).unwrap();
+
+        assert_eq!(
+            result.effects,
+            vec![
+                InputEffect::CommitText("nihao".into()),
+                InputEffect::ClearMarkedText,
+                InputEffect::HideCandidates,
+                InputEffect::ModeChanged(InputMode::Direct),
+            ]
+        );
+        assert_eq!(core.mode(), InputMode::Direct);
+        assert!(core.presentation().unwrap().preedit.is_empty());
+    }
+
+    #[test]
     fn ascii_symbols_commit_raw_composition_without_selecting_candidate() {
         let mut core = InputCoordinator::new(FakeEngine::default());
         core.dispatch(InputEvent::Activate).unwrap();

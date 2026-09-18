@@ -114,6 +114,20 @@ impl InputCoordinator {
         if self.mode == mode {
             return Ok(DispatchResult::default());
         }
+        if self.mode == InputMode::Native
+            && mode == InputMode::Direct
+            && !self.engine.snapshot()?.preedit.is_empty()
+        {
+            let mut result = self.run_engine(EngineCommand::CommitRaw)?;
+            if !result.handled {
+                return Err(EngineError::new(
+                    "输入引擎拒绝提交切换到英文模式前的原始输入",
+                ));
+            }
+            self.mode = mode;
+            result.effects.push(InputEffect::ModeChanged(mode));
+            return Ok(result);
+        }
         self.engine.handle(EngineCommand::Cancel)?;
         self.mode = mode;
         Ok(DispatchResult {

@@ -266,10 +266,12 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("Control + Shift + Space 没有切回中文模式")
     }
+    let committedBeforeCapsLockSwitch = client.committed
     guard controller.handle(key("n", code: 45), client: client), !client.marked.isEmpty else {
       throw SmokeFailure.expectation("Caps Lock 测试无法创建组合")
     }
     guard controller.handle(flags(code: 57, modifiers: .capsLock, timestamp: 1.15), client: client),
+      client.committed == committedBeforeCapsLockSwitch + "n",
       client.marked.isEmpty,
       presenter.candidates.isEmpty,
       modePresenter.directMode == true,
@@ -279,7 +281,7 @@ struct InputMethodSmokeMain {
       modePresenter.directMode == false,
       persistentModePresenter.directMode == false
     else {
-      throw SmokeFailure.expectation("Caps Lock 没有切换模式并取消现有组合")
+      throw SmokeFailure.expectation("Caps Lock 没有切换模式并原样提交现有组合")
     }
     let shortcutShowCount = modePresenter.showCount
     guard
@@ -300,9 +302,11 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("右 Control 快捷键结束后错误切换了输入模式")
     }
+    let committedBeforeModeShortcut = client.committed
     guard controller.handle(key("n", code: 45), client: client), !client.marked.isEmpty,
       controller.handle(
         key(" ", code: 49, modifiers: [.control, .shift]), client: client),
+      client.committed == committedBeforeModeShortcut + "n",
       client.marked.isEmpty,
       presenter.candidates.isEmpty,
       modePresenter.directMode == true,
@@ -310,7 +314,7 @@ struct InputMethodSmokeMain {
         key(" ", code: 49, modifiers: [.control, .shift]), client: client),
       modePresenter.directMode == false
     else {
-      throw SmokeFailure.expectation("组合过程中切换模式没有清除预编辑和候选")
+      throw SmokeFailure.expectation("组合过程中切换到英文没有原样提交预编辑")
     }
 
     guard controller.selectInputScheme(.flypy, for: client), client.marked.isEmpty,
