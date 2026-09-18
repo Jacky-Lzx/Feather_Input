@@ -95,6 +95,32 @@ class ManageMLXBackendTests(unittest.TestCase):
         self.assertEqual(stop.call_count, 2)
         self.assertEqual(start.call_count, 2)
 
+    def test_start_retries_transient_launchctl_io_error(self):
+        MODULE.write_plist_atomically(MODULE.agent_path(), {"Label": MODULE.LABEL})
+        failure = MODULE.subprocess.CompletedProcess([], 5, "", "I/O error")
+        success = MODULE.subprocess.CompletedProcess([], 0, "", "")
+
+        with mock.patch.object(MODULE, "run", side_effect=[failure, failure, success]) as run:
+            with mock.patch.object(MODULE.time, "sleep") as sleep:
+                MODULE.start_agent()
+
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        sleep.assert_called_with(MODULE.BOOTSTRAP_RETRY_DELAY)
+
+    def test_start_does_not_retry_non_transient_launchctl_error(self):
+        MODULE.write_plist_atomically(MODULE.agent_path(), {"Label": MODULE.LABEL})
+        failure = MODULE.subprocess.CompletedProcess([], 78, "", "invalid plist")
+
+        with mock.patch.object(MODULE, "run", return_value=failure) as run:
+            with mock.patch.object(MODULE.time, "sleep") as sleep:
+                with self.assertRaises(MODULE.subprocess.CalledProcessError) as raised:
+                    MODULE.start_agent()
+
+        self.assertEqual(raised.exception.returncode, 78)
+        run.assert_called_once()
+        sleep.assert_not_called()
+
     def test_install_stages_backend_before_activating_agent(self):
         source = self.root / "source"
         source.mkdir()

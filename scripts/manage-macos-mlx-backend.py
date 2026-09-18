@@ -12,12 +12,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
 
 LABEL = "im.feather.mlx-worker"
 DEFAULT_PORT = 1235
+BOOTSTRAP_ATTEMPTS = 12
+BOOTSTRAP_RETRY_DELAY = 0.5
 
 
 def repository_backend() -> pathlib.Path:
@@ -137,7 +140,19 @@ def start_agent() -> None:
     path = agent_path()
     if not path.is_file():
         raise ValueError(f"LaunchAgent 尚未安装：{path}")
-    run([launchctl(), "bootstrap", launch_domain(), str(path)])
+    command = [launchctl(), "bootstrap", launch_domain(), str(path)]
+    for attempt in range(BOOTSTRAP_ATTEMPTS):
+        result = run(command, check=False, quiet=True)
+        if result.returncode == 0:
+            return
+        if result.returncode != 5 or attempt == BOOTSTRAP_ATTEMPTS - 1:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                command,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+        time.sleep(BOOTSTRAP_RETRY_DELAY)
 
 
 def activate_agent(configuration: dict) -> None:
