@@ -50,6 +50,7 @@ struct InputMethodSmokeMain {
     try verifyCandidateOverlayOwnership()
     try verifyGeneratedCandidateOverlayOwnership()
     try verifyCandidateReranking()
+    try verifyMLXScoringFlow()
     try verifyMLXGenerationFlow()
     try verifyModeIndicatorOwnership()
     try verifyPersistentModeIndicatorOwnership()
@@ -637,6 +638,139 @@ struct InputMethodSmokeMain {
       CandidateReranker.apply(result, requestID: 10, revision: 7, to: original) == nil
     else {
       throw SmokeFailure.expectation("AI 重排采用了身份或文字不匹配的结果")
+    }
+  }
+
+  @MainActor
+  private static func verifyMLXScoringFlow() throws {
+    guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
+      throw SmokeFailure.controllerCreation
+    }
+    controller.secureInputEnabled = { false }
+    controller.scoringEnabled = { true }
+    controller.scoringDebounceMilliseconds = 0
+    controller.scoringPollMilliseconds = 1
+    controller.generationEnabled = { false }
+    controller.generationContextProvider = { _ in "测试上下文" }
+    controller.focusIndicatorRetryDelaysMilliseconds = []
+    let presenter = SmokeCandidatePresenter()
+    controller.candidatePresenter = presenter
+    controller.generatedCandidatePresenter = SmokeGeneratedCandidatePresenter()
+    controller.modePresenter = SmokeModePresenter()
+    controller.persistentModePresenter = SmokePersistentModePresenter()
+
+    var requests: [SmokeScoringRequest] = []
+    var submitted: [FeatherCandidateValue] = []
+    var submittedContext = ""
+    var submittedPreedit = ""
+    var highlightedBeforeRanking: Int?
+    var shouldRemainPending = false
+    controller.scoringRequestFactory = {
+      _, requestID, revision, context, preedit, candidates, weight, normalization in
+      submitted = candidates
+      submittedContext = context
+      submittedPreedit = preedit
+      highlightedBeforeRanking = presenter.highlighted
+      guard weight == 0.35, normalization == .character else {
+        throw SmokeFailure.expectation("MLX 评分参数不正确")
+      }
+      if shouldRemainPending {
+        let request = SmokeScoringRequest(result: nil)
+        requests.append(request)
+        return request
+      }
+      let scored = candidates.reversed().enumerated().map { index, candidate in
+        FeatherScoredCandidateValue(
+          value: candidate.value,
+          text: candidate.text,
+          modelScore: -Double(index + 1),
+          score: -Double(index)
+        )
+      }
+      let request = SmokeScoringRequest(
+        result: FeatherScoringResultValue(
+          requestID: requestID,
+          revision: revision,
+          candidates: scored,
+          elapsedMilliseconds: 5
+        )
+      )
+      requests.append(request)
+      return request
+    }
+
+    let client = SmokeTextClient()
+    controller.activateServer(client)
+    defer { controller.deactivateServer(client) }
+    for (character, keyCode) in zip("nihao", [45, 34, 4, 0, 31]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("MLX 评分测试无法输入拼音：\(character)")
+      }
+    }
+    guard waitUntil({ !requests.isEmpty && requests.last?.closeCount == 1 }),
+      !submitted.isEmpty,
+      submittedContext == "测试上下文",
+      !submittedPreedit.isEmpty,
+      presenter.candidates.map(\.value) == submitted.reversed().map(\.value),
+      presenter.highlighted == highlightedBeforeRanking,
+      requests.count == 1
+    else {
+      throw SmokeFailure.expectation(
+        "有效 MLX 评分没有重排候选：requests=\(requests.count)，"
+          + "submitted=\(submitted.map(\.text))，displayed=\(presenter.candidates.map(\.text))"
+          + "，polls=\(requests.last?.pollIdentities ?? [])"
+          + "，cancelled=\(requests.last?.cancelCount ?? -1)"
+      )
+    }
+    let rerankedOrder = presenter.candidates.map(\.value)
+    let rerankedHighlight = presenter.highlighted ?? 0
+    guard controller.handle(key("", code: 125, modifiers: .function), client: client),
+      presenter.candidates.map(\.value) == rerankedOrder,
+      presenter.highlighted == min(rerankedHighlight + 1, rerankedOrder.count - 1),
+      requests.count == 1
+    else {
+      throw SmokeFailure.expectation("向下键没有按 AI 重排顺序移动高亮")
+    }
+    guard controller.handle(key("", code: 126, modifiers: .function), client: client),
+      presenter.candidates.map(\.value) == rerankedOrder,
+      presenter.highlighted == rerankedHighlight,
+      requests.count == 1
+    else {
+      throw SmokeFailure.expectation("向上键没有按 AI 重排顺序恢复高亮")
+    }
+    presenter.compactLayout = .horizontal
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client),
+      presenter.candidates.map(\.value) == rerankedOrder,
+      presenter.highlighted == min(rerankedHighlight + 1, rerankedOrder.count - 1)
+    else {
+      throw SmokeFailure.expectation("横排向右键没有按 AI 重排顺序移动高亮")
+    }
+    guard controller.handle(key("", code: 123, modifiers: .function), client: client),
+      presenter.candidates.map(\.value) == rerankedOrder,
+      presenter.highlighted == rerankedHighlight
+    else {
+      throw SmokeFailure.expectation("横排向左键没有按 AI 重排顺序恢复高亮")
+    }
+    presenter.compactLayout = .vertical
+    let expected = submitted[0].text
+    presenter.select(text: expected)
+    guard client.committed == expected else {
+      throw SmokeFailure.expectation("重排后点击没有使用原始 Rime 候选 ID")
+    }
+
+    shouldRemainPending = true
+    for (character, keyCode) in zip("shi", [1, 4, 34]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("MLX 评分取消测试无法输入拼音：\(character)")
+      }
+    }
+    guard waitUntil({ requests.count == 2 }) else {
+      throw SmokeFailure.expectation("没有创建用于取消验证的 MLX 评分请求")
+    }
+    guard controller.handle(key("j", code: 38), client: client),
+      requests[1].cancelCount == 1, requests[1].closeCount == 1
+    else {
+      throw SmokeFailure.expectation("继续输入没有取消并释放旧 MLX 评分请求")
     }
   }
 

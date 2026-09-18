@@ -25,6 +25,15 @@ private struct GenerationSnapshot {
   let selection: NSRange
 }
 
+private struct ScoringSnapshot {
+  let requestID: UInt64
+  let revision: UInt64
+  let context: String
+  let preedit: String
+  let candidates: [FeatherCandidateValue]
+  let selection: NSRange
+}
+
 @objc(FeatherRustInputController)
 @MainActor
 final class InputController: IMKInputController {
@@ -72,6 +81,16 @@ final class InputController: IMKInputController {
       (FeatherSession, UInt64, UInt64, String, String, String, Int) throws ->
         any FeatherGenerationRequesting
     )?
+  var scoringDebounceMilliseconds: UInt64 = 120
+  var scoringPollMilliseconds: UInt64 = 20
+  var scoringEnabled: () -> Bool = { false }
+  var scoringRequestFactory:
+    (
+      (
+        FeatherSession, UInt64, UInt64, String, String, [FeatherCandidateValue], Double,
+        FeatherScoreNormalization
+      ) throws -> any FeatherScoringRequesting
+    )?
   private var session: FeatherSession?
   private var currentResponse: FeatherResponseValue?
   private var expandedCandidates: ExpandedCandidateState?
@@ -93,6 +112,12 @@ final class InputController: IMKInputController {
   private var generationRequest: (any FeatherGenerationRequesting)?
   private var generationVersion = UUID()
   private var nextGenerationRequestID: UInt64 = 0
+  private var scoringTask: Task<Void, Never>?
+  private var scoringRequest: (any FeatherScoringRequesting)?
+  private var scoringVersion = UUID()
+  private var nextScoringRequestID: UInt64 = 0
+  private var candidateOrderLocked = false
+  private var candidateOrderIsReranked = false
   private var recentContext = ""
   private var observesGenerationSettings = false
 
@@ -100,6 +125,8 @@ final class InputController: IMKInputController {
     startObservingGenerationSettings()
     cancelFocusIndicator()
     cancelGeneration(clearContext: true)
+    candidateOrderLocked = false
+    candidateOrderIsReranked = false
     activeClient = sender as AnyObject?
     lastCaret = nil
     rightControlTap.reset()
@@ -310,12 +337,32 @@ final class InputController: IMKInputController {
       case .horizontal where event.keyCode == 125 || event.keyCode == 126:
         openExpandedCandidates(for: client)
         return true
-      case .horizontal where event.keyCode == 123:
+      case .horizontal where event.keyCode == 123 && !candidateOrderIsReranked:
         return dispatch(.up, to: client)
-      case .horizontal where event.keyCode == 124:
+      case .horizontal where event.keyCode == 124 && !candidateOrderIsReranked:
         return dispatch(.down, to: client)
       default:
         break
+      }
+      if candidateOrderIsReranked {
+        let movement: Int?
+        switch candidatePresenter.compactLayout {
+        case .vertical:
+          movement = event.keyCode == 126 ? -1 : event.keyCode == 125 ? 1 : nil
+        case .horizontal:
+          movement = event.keyCode == 123 ? -1 : event.keyCode == 124 ? 1 : nil
+        }
+        if let movement {
+          return moveInRerankedCandidates(by: movement, client: client)
+        }
+        if event.keyCode == 49 || event.keyCode == 36 || event.keyCode == 76 {
+          return selectRerankedCandidate(at: currentResponse?.highlighted ?? 0, client: client)
+        }
+        if let characters = event.charactersIgnoringModifiers ?? event.characters,
+          let number = Int(characters), (1...9).contains(number)
+        {
+          return selectRerankedCandidate(at: number - 1, client: client)
+        }
       }
     }
     let shortcutModifiers = event.modifierFlags.intersection([.command, .control, .option])
@@ -332,7 +379,11 @@ final class InputController: IMKInputController {
 
   override func commitComposition(_ sender: Any!) {
     guard hasComposition, let client = sender as? IMKTextInput else { return }
-    _ = dispatch(.enter, to: client)
+    if candidateOrderIsReranked {
+      _ = selectRerankedCandidate(at: currentResponse?.highlighted ?? 0, client: client)
+    } else {
+      _ = dispatch(.enter, to: client)
+    }
   }
 
   override func composedString(_ sender: Any!) -> Any! {
@@ -400,6 +451,10 @@ final class InputController: IMKInputController {
 
   private func dispatch(_ key: FeatherKey, to client: IMKTextInput) -> Bool {
     let wasComposing = hasComposition
+    if wasComposing, isCandidateNavigation(key) {
+      candidateOrderLocked = true
+      cancelScoring()
+    }
     do {
       let response = try ensureActive().send(key)
       guard response.handled else {
@@ -423,6 +478,7 @@ final class InputController: IMKInputController {
   }
 
   private func dispatch(text: String, to client: IMKTextInput) -> Bool {
+    candidateOrderLocked = false
     do {
       let response = try ensureActive().send(text: text)
       guard response.handled else { return false }
@@ -437,6 +493,7 @@ final class InputController: IMKInputController {
   private func apply(_ response: FeatherResponseValue, to client: IMKTextInput) {
     cancelGeneration()
     expandedCandidates = nil
+    candidateOrderIsReranked = false
     currentResponse = response
     if let commit = response.commit, !commit.isEmpty {
       client.insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -459,8 +516,155 @@ final class InputController: IMKInputController {
         highlighted: response.highlighted,
         anchor: candidateAnchor(for: client)
       )
-      scheduleGeneration(for: response, client: client)
+      if isScoringEnabled, !candidateOrderLocked {
+        scheduleScoring(for: response, client: client)
+      } else {
+        scheduleGeneration(for: response, client: client)
+      }
     }
+  }
+
+  private func scheduleScoring(for response: FeatherResponseValue, client: IMKTextInput) {
+    guard active, !response.directMode, !recentContext.isEmpty, !response.preedit.isEmpty,
+      !response.candidates.isEmpty
+    else { return }
+    nextScoringRequestID &+= 1
+    if nextScoringRequestID == 0 { nextScoringRequestID = 1 }
+    let snapshot = ScoringSnapshot(
+      requestID: nextScoringRequestID,
+      revision: response.revision,
+      context: recentContext,
+      preedit: response.preedit,
+      candidates: response.candidates,
+      selection: client.selectedRange()
+    )
+    let version = scoringVersion
+    scoringTask = Task { @MainActor [weak self, weak client] in
+      do {
+        if let self, self.scoringDebounceMilliseconds > 0 {
+          try await Task.sleep(nanoseconds: self.scoringDebounceMilliseconds * 1_000_000)
+        }
+        guard let self, let client,
+          self.scoringSnapshotIsCurrent(snapshot, version: version, client: client),
+          let session = self.session
+        else { return }
+        let request = try self.makeScoringRequest(session: session, snapshot: snapshot)
+        self.scoringRequest = request
+        while !Task.isCancelled {
+          guard self.scoringSnapshotIsCurrent(snapshot, version: version, client: client) else {
+            try? request.cancel()
+            self.finishScoring(request, version: version)
+            return
+          }
+          switch try request.poll(
+            currentRequestID: snapshot.requestID,
+            currentRevision: snapshot.revision
+          ) {
+          case .pending:
+            try await Task.sleep(nanoseconds: self.scoringPollMilliseconds * 1_000_000)
+          case .ready(let result):
+            guard self.scoringSnapshotIsCurrent(snapshot, version: version, client: client),
+              let reordered = CandidateReranker.apply(
+                result,
+                requestID: snapshot.requestID,
+                revision: snapshot.revision,
+                to: snapshot.candidates
+              )
+            else {
+              try? request.cancel()
+              self.finishScoring(request, version: version)
+              return
+            }
+            let highlighted = response.highlighted.flatMap { index in
+              reordered.indices.contains(index) ? index : nil
+            }
+            let updated = FeatherResponseValue(
+              handled: response.handled,
+              active: response.active,
+              directMode: response.directMode,
+              commit: response.commit,
+              preedit: response.preedit,
+              cursorUTF8: response.cursorUTF8,
+              revision: response.revision,
+              candidates: reordered,
+              highlighted: highlighted
+            )
+            self.currentResponse = updated
+            self.candidateOrderIsReranked = true
+            self.candidatePresenter.update(
+              candidates: reordered,
+              highlighted: highlighted,
+              anchor: self.candidateAnchor(for: client)
+            )
+            self.finishScoring(request, version: version)
+            return
+          case .failed, .cancelled, .stale:
+            self.finishScoring(request, version: version)
+            return
+          }
+        }
+      } catch {
+        guard let self, self.scoringVersion == version else { return }
+        self.finishScoring(self.scoringRequest, version: version)
+      }
+    }
+  }
+
+  private func makeScoringRequest(
+    session: FeatherSession,
+    snapshot: ScoringSnapshot
+  ) throws -> any FeatherScoringRequesting {
+    if let scoringRequestFactory {
+      return try scoringRequestFactory(
+        session, snapshot.requestID, snapshot.revision, snapshot.context, snapshot.preedit,
+        snapshot.candidates, 0.35, .character)
+    }
+    return try session.startScoring(
+      requestID: snapshot.requestID,
+      revision: snapshot.revision,
+      context: snapshot.context,
+      preedit: snapshot.preedit,
+      candidates: snapshot.candidates,
+      weight: 0.35,
+      normalization: .character
+    )
+  }
+
+  private func scoringSnapshotIsCurrent(
+    _ snapshot: ScoringSnapshot,
+    version: UUID,
+    client: IMKTextInput
+  ) -> Bool {
+    active && isScoringEnabled && !candidateOrderLocked && !secureInputEnabled()
+      && scoringVersion == version && activeClient === client
+      && currentResponse?.revision == snapshot.revision
+      && currentResponse?.preedit == snapshot.preedit
+      && currentResponse?.candidates == snapshot.candidates
+      && recentContext == snapshot.context
+      && NSEqualRanges(client.selectedRange(), snapshot.selection)
+  }
+
+  private func finishScoring(
+    _ request: (any FeatherScoringRequesting)?,
+    version: UUID
+  ) {
+    request?.close()
+    guard scoringVersion == version else { return }
+    scoringRequest = nil
+    scoringTask = nil
+  }
+
+  private func cancelScoring() {
+    scoringVersion = UUID()
+    scoringTask?.cancel()
+    scoringTask = nil
+    try? scoringRequest?.cancel()
+    scoringRequest?.close()
+    scoringRequest = nil
+  }
+
+  private var isScoringEnabled: Bool {
+    scoringEnabled()
   }
 
   private func handleCandidateWindowAction(_ action: CandidateWindowAction) {
@@ -482,6 +686,52 @@ final class InputController: IMKInputController {
     case .pageDown:
       _ = dispatch(.pageDown, to: client)
     }
+  }
+
+  private func lockCandidateOrderForInteraction() {
+    guard hasComposition, !candidateOrderLocked else { return }
+    candidateOrderLocked = true
+    cancelScoring()
+  }
+
+  private func moveInRerankedCandidates(by offset: Int, client: IMKTextInput) -> Bool {
+    guard var response = currentResponse, !response.candidates.isEmpty else { return false }
+    lockCandidateOrderForInteraction()
+    let current = min(max(0, response.highlighted ?? 0), response.candidates.count - 1)
+    let next = min(max(0, current + offset), response.candidates.count - 1)
+    response = FeatherResponseValue(
+      handled: response.handled,
+      active: response.active,
+      directMode: response.directMode,
+      commit: response.commit,
+      preedit: response.preedit,
+      cursorUTF8: response.cursorUTF8,
+      revision: response.revision,
+      candidates: response.candidates,
+      highlighted: next
+    )
+    currentResponse = response
+    candidatePresenter.update(
+      candidates: response.candidates,
+      highlighted: next,
+      anchor: candidateAnchor(for: client)
+    )
+    return true
+  }
+
+  private func selectRerankedCandidate(at index: Int, client: IMKTextInput) -> Bool {
+    guard let response = currentResponse, response.candidates.indices.contains(index) else {
+      return true
+    }
+    lockCandidateOrderForInteraction()
+    do {
+      let selected = try ensureActive().select(response.candidates[index])
+      guard selected.handled else { return true }
+      apply(selected, to: client)
+    } catch {
+      report(error, operation: "select reranked candidate")
+    }
+    return true
   }
 
   func presentGeneratedCandidates(
@@ -693,6 +943,7 @@ final class InputController: IMKInputController {
   }
 
   private func cancelGeneration(clearContext: Bool = false) {
+    cancelScoring()
     generationVersion = UUID()
     generationTask?.cancel()
     generationTask = nil
