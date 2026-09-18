@@ -1126,22 +1126,20 @@ struct InputMethodSmokeMain {
         throw SmokeFailure.expectation("MLX 请求测试无法输入拼音：\(character)")
       }
     }
-    let becameVisible = waitUntil({
-      generatedPresenter.isVisible && scoringRequests.last?.closeCount == 1
-    })
+    let becameVisible = waitUntil({ generatedPresenter.isVisible })
     guard becameVisible,
       generatedPresenter.candidates.map(\.text) == ["寰宙"],
       requests.count == 1,
-      scoringRequests.count == 1,
-      candidatePresenter.rerankingStates.contains(true),
+      scoringRequests.isEmpty,
+      !candidatePresenter.rerankingStates.contains(true),
       candidatePresenter.isRerankingActive == false,
       requests[0].pollIdentities.allSatisfy({ $0.0 > 0 }),
       requests[0].closeCount == 1
     else {
       throw SmokeFailure.expectation(
-        "AI 重排与生成没有同时完成：visible=\(becameVisible)，"
+        "无上下文时 AI 生成或重排状态不正确：visible=\(becameVisible)，"
           + "candidates=\(generatedPresenter.candidates.map(\.text))，requests=\(requests.count)，"
-          + "scoringRequests=\(scoringRequests.count)，"
+          + "noContextScoringRequests=\(scoringRequests.count)，"
           + "arguments=\(requestArguments)，"
           + "polls=\(requests.first?.pollIdentities.count ?? 0)，"
           + "closed=\(requests.first?.closeCount ?? 0)"

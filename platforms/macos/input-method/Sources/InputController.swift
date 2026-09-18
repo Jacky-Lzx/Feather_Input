@@ -144,6 +144,7 @@ final class InputController: IMKInputController {
   private var candidateOrderLocked = false
   private var candidateOrderIsReranked = false
   private var recentContext = ""
+  private var rerankingContextAvailable = false
   private var observesGenerationSettings = false
   private var observesContinuationSettings = false
   private var observesRerankingSettings = false
@@ -548,6 +549,7 @@ final class InputController: IMKInputController {
     if let commit = committed {
       client.insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))
       recentContext = String((recentContext + commit).suffix(80))
+      rerankingContextAvailable = hasMeaningfulText(recentContext)
     }
     let selection = NSRange(
       location: TextCoordinates.utf16Offset(in: response.preedit, utf8Offset: response.cursorUTF8),
@@ -592,7 +594,8 @@ final class InputController: IMKInputController {
     client: IMKTextInput,
     anchor: NSRect
   ) -> Bool {
-    guard active, !response.directMode, !recentContext.isEmpty, !response.preedit.isEmpty,
+    guard active, !response.directMode, rerankingContextAvailable,
+      hasMeaningfulText(recentContext), !response.preedit.isEmpty,
       !response.candidates.isEmpty, let session
     else { return false }
     let scoringCandidates =
@@ -737,6 +740,7 @@ final class InputController: IMKInputController {
       && currentResponse?.preedit == snapshot.preedit
       && currentResponse?.candidates == snapshot.displayedCandidates
       && recentContext == snapshot.context
+      && rerankingContextAvailable
       && NSEqualRanges(client.selectedRange(), snapshot.selection)
   }
 
@@ -1013,6 +1017,7 @@ final class InputController: IMKInputController {
                   replacementRange: NSRange(location: NSNotFound, length: 0)
                 )
                 self.recentContext = String((snapshot.context + candidate.text).suffix(80))
+                self.rerankingContextAvailable = self.hasMeaningfulText(self.recentContext)
                 return true
               } catch {
                 self.report(error, operation: "select generated candidate")
@@ -1092,6 +1097,7 @@ final class InputController: IMKInputController {
     clearGeneratedCandidates()
     if clearContext {
       recentContext = ""
+      rerankingContextAvailable = false
     }
   }
 
@@ -1179,6 +1185,7 @@ final class InputController: IMKInputController {
                 replacementRange: NSRange(location: NSNotFound, length: 0)
               )
               self.recentContext = String((snapshot.context + candidate.text).suffix(80))
+              self.rerankingContextAvailable = self.hasMeaningfulText(self.recentContext)
               return true
             }
             return
@@ -1304,13 +1311,20 @@ final class InputController: IMKInputController {
     if let generationContextProvider {
       if let context = generationContextProvider(client) {
         recentContext = String(context.suffix(80))
+        rerankingContextAvailable = hasMeaningfulText(recentContext)
+      } else {
+        rerankingContextAvailable = false
       }
       return
     }
     let selection = client.selectedRange()
-    guard selection.location != NSNotFound, selection.location >= 0 else { return }
+    guard selection.location != NSNotFound, selection.location >= 0 else {
+      rerankingContextAvailable = false
+      return
+    }
     let count = min(selection.location, 320)
     guard count > 0 else {
+      rerankingContextAvailable = false
       if activeApplication == "com.openai.codex", !recentContext.isEmpty {
         return
       }
@@ -1330,7 +1344,12 @@ final class InputController: IMKInputController {
     }
     if let text {
       recentContext = String(text.suffix(80))
+      rerankingContextAvailable = hasMeaningfulText(recentContext)
     }
+  }
+
+  private func hasMeaningfulText(_ text: String) -> Bool {
+    text.unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
   }
 
   private func openExpandedCandidates(for client: IMKTextInput) {
