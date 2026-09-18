@@ -10,6 +10,9 @@ final class RerankingSettings {
   static let shared = RerankingSettings()
 
   static let defaultEnabled = false
+  static let defaultCandidateCount = 7
+  static let minimumCandidateCount = 1
+  static let maximumCandidateCount = 64
   static let defaultWeight = 0.35
   static let defaultDebounceMilliseconds: UInt64 = 120
   static let defaultAdoptionDeadlineMilliseconds: UInt64 = 700
@@ -27,6 +30,14 @@ final class RerankingSettings {
   var weight: Double {
     let stored = defaults.object(forKey: "aiRimeRerankingWeight") as? Double
     return min(1, max(0, stored ?? Self.defaultWeight))
+  }
+
+  var candidateCount: Int {
+    let stored = defaults.object(forKey: "aiRimeRerankingCandidateCount") as? NSNumber
+    return min(
+      Self.maximumCandidateCount,
+      max(Self.minimumCandidateCount, stored?.intValue ?? Self.defaultCandidateCount)
+    )
   }
 
   var debounceMilliseconds: UInt64 {
@@ -52,6 +63,14 @@ final class RerankingSettings {
 
   func updateWeight(_ weight: Double) {
     defaults.set(min(1, max(0, weight)), forKey: "aiRimeRerankingWeight")
+    notify()
+  }
+
+  func updateCandidateCount(_ count: Int) {
+    defaults.set(
+      min(Self.maximumCandidateCount, max(Self.minimumCandidateCount, count)),
+      forKey: "aiRimeRerankingCandidateCount"
+    )
     notify()
   }
 

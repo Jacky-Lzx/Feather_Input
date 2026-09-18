@@ -30,7 +30,8 @@ private struct ScoringSnapshot {
   let revision: UInt64
   let context: String
   let preedit: String
-  let candidates: [FeatherCandidateValue]
+  let displayedCandidates: [FeatherCandidateValue]
+  let scoringCandidates: [FeatherCandidateValue]
   let selection: NSRange
   let weight: Double
   let adoptionDeadlineMilliseconds: UInt64
@@ -538,8 +539,15 @@ final class InputController: IMKInputController {
 
   private func scheduleScoring(for response: FeatherResponseValue, client: IMKTextInput) {
     guard active, !response.directMode, !recentContext.isEmpty, !response.preedit.isEmpty,
-      !response.candidates.isEmpty
+      !response.candidates.isEmpty, let session
     else { return }
+    let scoringCandidates =
+      (try? session.candidateSlice(
+        revision: response.revision,
+        offset: 0,
+        limit: rerankingSettings.candidateCount
+      ).candidates).flatMap { $0.isEmpty ? nil : $0 }
+      ?? Array(response.candidates.prefix(rerankingSettings.candidateCount))
     nextScoringRequestID &+= 1
     if nextScoringRequestID == 0 { nextScoringRequestID = 1 }
     let snapshot = ScoringSnapshot(
@@ -547,7 +555,8 @@ final class InputController: IMKInputController {
       revision: response.revision,
       context: recentContext,
       preedit: response.preedit,
-      candidates: response.candidates,
+      displayedCandidates: response.candidates,
+      scoringCandidates: scoringCandidates,
       selection: client.selectedRange(),
       weight: rerankingSettings.weight,
       adoptionDeadlineMilliseconds: scoringAdoptionDeadlineMilliseconds
@@ -587,7 +596,12 @@ final class InputController: IMKInputController {
                 result,
                 requestID: snapshot.requestID,
                 revision: snapshot.revision,
-                to: snapshot.candidates
+                to: snapshot.scoringCandidates
+              ),
+              let displayed = CandidateReranker.page(
+                from: reordered,
+                fillingFrom: snapshot.displayedCandidates,
+                count: snapshot.displayedCandidates.count
               )
             else {
               try? request.cancel()
@@ -595,7 +609,7 @@ final class InputController: IMKInputController {
               return
             }
             let highlighted = response.highlighted.flatMap { index in
-              reordered.indices.contains(index) ? index : nil
+              displayed.indices.contains(index) ? index : nil
             }
             let updated = FeatherResponseValue(
               handled: response.handled,
@@ -605,13 +619,13 @@ final class InputController: IMKInputController {
               preedit: response.preedit,
               cursorUTF8: response.cursorUTF8,
               revision: response.revision,
-              candidates: reordered,
+              candidates: displayed,
               highlighted: highlighted
             )
             self.currentResponse = updated
             self.candidateOrderIsReranked = true
             self.candidatePresenter.update(
-              candidates: reordered,
+              candidates: displayed,
               highlighted: highlighted,
               anchor: self.candidateAnchor(for: client)
             )
@@ -636,14 +650,14 @@ final class InputController: IMKInputController {
     if let scoringRequestFactory {
       return try scoringRequestFactory(
         session, snapshot.requestID, snapshot.revision, snapshot.context, snapshot.preedit,
-        snapshot.candidates, snapshot.weight, .character)
+        snapshot.scoringCandidates, snapshot.weight, .character)
     }
     return try session.startScoring(
       requestID: snapshot.requestID,
       revision: snapshot.revision,
       context: snapshot.context,
       preedit: snapshot.preedit,
-      candidates: snapshot.candidates,
+      candidates: snapshot.scoringCandidates,
       weight: snapshot.weight,
       normalization: .character
     )
@@ -658,7 +672,7 @@ final class InputController: IMKInputController {
       && scoringVersion == version && activeClient === client
       && currentResponse?.revision == snapshot.revision
       && currentResponse?.preedit == snapshot.preedit
-      && currentResponse?.candidates == snapshot.candidates
+      && currentResponse?.candidates == snapshot.displayedCandidates
       && recentContext == snapshot.context
       && NSEqualRanges(client.selectedRange(), snapshot.selection)
   }

@@ -43,6 +43,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var englishCandidateMinimumStepper: NSStepper?
   private weak var generationEnabledButton: NSButton?
   private weak var rerankingEnabledButton: NSButton?
+  private weak var rerankingCandidateCountValue: NSTextField?
+  private weak var rerankingCandidateCountStepper: NSStepper?
   private weak var rerankingWeightValue: NSTextField?
   private weak var rerankingWeightSlider: NSSlider?
   private weak var rerankingDebounceValue: NSTextField?
@@ -151,6 +153,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   func selectRerankingWeight(_ weight: Double) {
     rerankingSettings.updateWeight(weight)
+    refreshControls()
+  }
+
+  func selectRerankingCandidateCount(_ count: Int) {
+    rerankingSettings.updateCandidateCount(count)
     refreshControls()
   }
 
@@ -384,6 +391,24 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     )
     self.rerankingEnabledButton = rerankingEnabledButton
 
+    let rerankingCandidateCountValue = NSTextField(labelWithString: "")
+    rerankingCandidateCountValue.alignment = .right
+    rerankingCandidateCountValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    self.rerankingCandidateCountValue = rerankingCandidateCountValue
+    let rerankingCandidateCountStepper = NSStepper()
+    rerankingCandidateCountStepper.minValue = Double(RerankingSettings.minimumCandidateCount)
+    rerankingCandidateCountStepper.maxValue = Double(RerankingSettings.maximumCandidateCount)
+    rerankingCandidateCountStepper.increment = 1
+    rerankingCandidateCountStepper.target = self
+    rerankingCandidateCountStepper.action = #selector(rerankingCandidateCountChanged(_:))
+    self.rerankingCandidateCountStepper = rerankingCandidateCountStepper
+    let rerankingCandidateCountControls = NSStackView(views: [
+      rerankingCandidateCountValue, rerankingCandidateCountStepper,
+    ])
+    rerankingCandidateCountControls.orientation = .horizontal
+    rerankingCandidateCountControls.alignment = .centerY
+    rerankingCandidateCountControls.spacing = 8
+
     let rerankingWeightValue = NSTextField(labelWithString: "")
     rerankingWeightValue.alignment = .right
     rerankingWeightValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -442,7 +467,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     rerankingDeadlineControls.spacing = 8
 
     let rerankingHelp = NSTextField(
-      wrappingLabelWithString: "只重排当前 Rime 候选，不新增文字；继续输入或开始选词后不会采用迟到结果。"
+      wrappingLabelWithString: "排序数量可与每页候选不同；数量越多耗时越长。继续输入或开始选词后不会采用迟到结果。"
     )
     rerankingHelp.font = .systemFont(ofSize: 12)
     rerankingHelp.textColor = .secondaryLabelColor
@@ -504,6 +529,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [NSTextField(labelWithString: "英文候选最少输入"), englishCandidateMinimumControls],
       [emptyEnglishCandidateMinimumHelp, englishCandidateMinimumHelp],
       [emptyRerankingToggle, rerankingEnabledButton],
+      [NSTextField(labelWithString: "AI 排序候选数"), rerankingCandidateCountControls],
       [NSTextField(labelWithString: "AI 融合权重"), rerankingWeightControls],
       [NSTextField(labelWithString: "AI 请求前停顿"), rerankingDebounceControls],
       [NSTextField(labelWithString: "AI 响应采用时限"), rerankingDeadlineControls],
@@ -574,6 +600,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     generationEnabledButton?.state = generationSettings.isEnabled ? .on : .off
     let rerankingEnabled = rerankingSettings.isEnabled
     rerankingEnabledButton?.state = rerankingEnabled ? .on : .off
+    rerankingCandidateCountValue?.stringValue = "\(rerankingSettings.candidateCount)"
+    rerankingCandidateCountStepper?.integerValue = rerankingSettings.candidateCount
+    rerankingCandidateCountStepper?.isEnabled = rerankingEnabled
     rerankingWeightValue?.stringValue = "\(Int((rerankingSettings.weight * 100).rounded()))%"
     rerankingWeightSlider?.doubleValue = rerankingSettings.weight * 100
     rerankingWeightSlider?.isEnabled = rerankingEnabled
@@ -645,6 +674,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   @objc private func rerankingWeightChanged(_ sender: NSSlider) {
     selectRerankingWeight(sender.doubleValue / 100)
+  }
+
+  @objc private func rerankingCandidateCountChanged(_ sender: NSStepper) {
+    selectRerankingCandidateCount(sender.integerValue)
   }
 
   @objc private func rerankingDebounceChanged(_ sender: NSStepper) {

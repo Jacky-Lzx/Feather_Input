@@ -620,9 +620,14 @@ struct InputMethodSmokeMain {
     )
     guard
       CandidateReranker.apply(result, requestID: 9, revision: 7, to: original)?.map(\.value)
-        == [303, 101, 202]
+        == [303, 101, 202],
+      CandidateReranker.page(
+        from: [original[2], original[0]],
+        fillingFrom: original,
+        count: original.count
+      )?.map(\.value) == [303, 101, 202]
     else {
-      throw SmokeFailure.expectation("AI 融合分数没有稳定重排 Rime 候选")
+      throw SmokeFailure.expectation("AI 融合分数没有稳定重排或补齐 Rime 候选")
     }
 
     let mismatched = FeatherScoringResultValue(
@@ -649,7 +654,7 @@ struct InputMethodSmokeMain {
     }
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let settings = RerankingSettings(defaults: defaults)
-    guard !settings.isEnabled, settings.weight == 0.35,
+    guard !settings.isEnabled, settings.candidateCount == 7, settings.weight == 0.35,
       settings.debounceMilliseconds == 120,
       settings.adoptionDeadlineMilliseconds == 700
     else {
@@ -666,20 +671,24 @@ struct InputMethodSmokeMain {
     }
     defer { NotificationCenter.default.removeObserver(observer) }
     settings.updateEnabled(true)
+    settings.updateCandidateCount(100)
     settings.updateWeight(1.5)
     settings.updateDebounceMilliseconds(3_000)
     settings.updateAdoptionDeadlineMilliseconds(10)
-    guard settings.isEnabled, settings.weight == 1,
+    guard settings.isEnabled, settings.candidateCount == 64, settings.weight == 1,
       settings.debounceMilliseconds == 2_000,
       settings.adoptionDeadlineMilliseconds == 50,
-      notifications == 4
+      notifications == 5
     else {
       throw SmokeFailure.expectation("AI 重排设置没有保存、限幅或通知变更")
     }
 
     defaults.set(-1, forKey: "aiRimeRerankingDebounceMilliseconds")
     defaults.set(-1, forKey: "aiRimeRerankingAdoptionDeadlineMilliseconds")
-    guard settings.debounceMilliseconds == 0, settings.adoptionDeadlineMilliseconds == 50 else {
+    defaults.set(-1, forKey: "aiRimeRerankingCandidateCount")
+    guard settings.candidateCount == 1, settings.debounceMilliseconds == 0,
+      settings.adoptionDeadlineMilliseconds == 50
+    else {
       throw SmokeFailure.expectation("AI 重排设置没有安全处理负数持久值")
     }
   }
@@ -694,6 +703,14 @@ struct InputMethodSmokeMain {
     controller.scoringDebounceMilliseconds = 0
     controller.scoringPollMilliseconds = 1
     controller.generationEnabled = { false }
+    let rerankingDefaultsName = "FeatherScoringCount-\(UUID().uuidString)"
+    guard let rerankingDefaults = UserDefaults(suiteName: rerankingDefaultsName) else {
+      throw SmokeFailure.expectation("无法创建隔离的 AI 排序数量设置")
+    }
+    defer { rerankingDefaults.removePersistentDomain(forName: rerankingDefaultsName) }
+    let rerankingSettings = RerankingSettings(defaults: rerankingDefaults)
+    rerankingSettings.updateCandidateCount(12)
+    controller.rerankingSettings = rerankingSettings
     controller.generationContextProvider = { _ in "测试上下文" }
     controller.focusIndicatorRetryDelaysMilliseconds = []
     let presenter = SmokeCandidatePresenter()
@@ -706,14 +723,19 @@ struct InputMethodSmokeMain {
     var submitted: [FeatherCandidateValue] = []
     var submittedContext = ""
     var submittedPreedit = ""
+    var displayedCount = 0
     var highlightedBeforeRanking: Int?
+    var originallyDisplayed: [FeatherCandidateValue] = []
+    var ranked: [FeatherCandidateValue] = []
     var shouldRemainPending = false
     controller.scoringRequestFactory = {
       _, requestID, revision, context, preedit, candidates, weight, normalization in
       submitted = candidates
+      displayedCount = presenter.candidates.count
+      highlightedBeforeRanking = presenter.highlighted
+      originallyDisplayed = presenter.candidates
       submittedContext = context
       submittedPreedit = preedit
-      highlightedBeforeRanking = presenter.highlighted
       guard weight == 0.35, normalization == .character else {
         throw SmokeFailure.expectation("MLX 评分参数不正确")
       }
@@ -722,7 +744,8 @@ struct InputMethodSmokeMain {
         requests.append(request)
         return request
       }
-      let scored = candidates.reversed().enumerated().map { index, candidate in
+      ranked = candidates.last.map { [$0] + candidates.dropLast() } ?? []
+      let scored = ranked.enumerated().map { index, candidate in
         FeatherScoredCandidateValue(
           value: candidate.value,
           text: candidate.text,
@@ -754,7 +777,9 @@ struct InputMethodSmokeMain {
       !submitted.isEmpty,
       submittedContext == "测试上下文",
       !submittedPreedit.isEmpty,
-      presenter.candidates.map(\.value) == submitted.reversed().map(\.value),
+      submitted.count == 12, displayedCount == CandidatePageSettings.defaultCount,
+      presenter.candidates.map(\.value) == ranked.prefix(displayedCount).map(\.value),
+      presenter.candidates.first?.value == submitted.last?.value,
       presenter.highlighted == highlightedBeforeRanking,
       requests.count == 1
     else {
@@ -795,10 +820,19 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("横排向左键没有按 AI 重排顺序恢复高亮")
     }
     presenter.compactLayout = .vertical
-    let expected = submitted[0].text
+    guard let selectable = originallyDisplayed.first,
+      presenter.candidates.contains(where: { $0.value == selectable.value })
+    else { throw SmokeFailure.expectation("AI 重排后当前页没有保留原第一候选") }
+    let expected = selectable.text
+    let markedBeforeSelection = client.marked
     presenter.select(text: expected)
-    guard client.committed == expected else {
-      throw SmokeFailure.expectation("重排后点击没有使用原始 Rime 候选 ID")
+    guard client.committed == expected || client.marked != markedBeforeSelection else {
+      throw SmokeFailure.expectation("重排后点击没有按原始 Rime 候选 ID 更新组合")
+    }
+    if client.committed.isEmpty {
+      guard controller.handle(key("\u{1b}", code: 53), client: client) else {
+        throw SmokeFailure.expectation("无法取消分段候选选择后的剩余组合")
+      }
     }
 
     shouldRemainPending = true
@@ -1134,6 +1168,7 @@ struct InputMethodSmokeMain {
       englishCandidateSettings.minimumInputLength == EnglishCandidateSettings.defaultMinimum,
       generationSettings.isEnabled
         && !rerankingSettings.isEnabled
+        && rerankingSettings.candidateCount == RerankingSettings.defaultCandidateCount
     else {
       throw SmokeFailure.expectation("设置窗口的焦点提示或每页候选默认值错误")
     }
@@ -1148,6 +1183,7 @@ struct InputMethodSmokeMain {
     settings.selectEnglishCandidateMinimum(6)
     settings.selectGenerationEnabled(false)
     settings.selectRerankingEnabled(true)
+    settings.selectRerankingCandidateCount(18)
     settings.selectRerankingWeight(0.6)
     settings.selectRerankingDebounceMilliseconds(180)
     settings.selectRerankingAdoptionDeadlineMilliseconds(850)
@@ -1158,7 +1194,8 @@ struct InputMethodSmokeMain {
       candidateFontSettings.size == 21,
       englishCandidateSettings.minimumInputLength == 6,
       !generationSettings.isEnabled,
-      rerankingSettings.isEnabled, rerankingSettings.weight == 0.6,
+      rerankingSettings.isEnabled, rerankingSettings.candidateCount == 18,
+      rerankingSettings.weight == 0.6,
       rerankingSettings.debounceMilliseconds == 180,
       rerankingSettings.adoptionDeadlineMilliseconds == 850
     else {

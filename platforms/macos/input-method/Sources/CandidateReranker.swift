@@ -1,6 +1,18 @@
 import Foundation
 
 enum CandidateReranker {
+  static func page(
+    from ranked: [FeatherCandidateValue],
+    fillingFrom displayed: [FeatherCandidateValue],
+    count: Int
+  ) -> [FeatherCandidateValue]? {
+    guard count > 0 else { return nil }
+    var seen = Set<UInt64>()
+    let combined = (ranked + displayed).filter { seen.insert($0.value).inserted }
+    guard combined.count >= min(count, displayed.count) else { return nil }
+    return Array(combined.prefix(count))
+  }
+
   static func apply(
     _ result: FeatherScoringResultValue,
     requestID: UInt64,
