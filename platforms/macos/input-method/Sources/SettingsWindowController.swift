@@ -12,6 +12,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateFontSettings: .shared,
     englishCandidateSettings: .shared,
     generationSettings: .shared,
+    rerankingSettings: .shared,
     generationBackendStatusCheck: { FeatherMLXBackendStatusProbe.check() }
   )
 
@@ -24,6 +25,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private let candidateFontSettings: CandidateFontSettings
   private let englishCandidateSettings: EnglishCandidateSettings
   private let generationSettings: GenerationSettings
+  private let rerankingSettings: RerankingSettings
   private let generationBackendStatusCheck: @Sendable () -> MLXBackendStatus
   private var window: NSWindow?
   private weak var schemePopup: NSPopUpButton?
@@ -40,6 +42,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var englishCandidateMinimumValue: NSTextField?
   private weak var englishCandidateMinimumStepper: NSStepper?
   private weak var generationEnabledButton: NSButton?
+  private weak var rerankingEnabledButton: NSButton?
+  private weak var rerankingWeightValue: NSTextField?
+  private weak var rerankingWeightSlider: NSSlider?
+  private weak var rerankingDebounceValue: NSTextField?
+  private weak var rerankingDebounceStepper: NSStepper?
+  private weak var rerankingDeadlineValue: NSTextField?
+  private weak var rerankingDeadlineStepper: NSStepper?
   private weak var generationBackendStatusLabel: NSTextField?
   private weak var generationBackendStatusButton: NSButton?
   private var generationBackendStatusVersion = UUID()
@@ -54,6 +63,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateFontSettings: CandidateFontSettings,
     englishCandidateSettings: EnglishCandidateSettings,
     generationSettings: GenerationSettings,
+    rerankingSettings: RerankingSettings,
     generationBackendStatusCheck: @escaping @Sendable () -> MLXBackendStatus = {
       FeatherMLXBackendStatusProbe.check()
     }
@@ -67,6 +77,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     self.candidateFontSettings = candidateFontSettings
     self.englishCandidateSettings = englishCandidateSettings
     self.generationSettings = generationSettings
+    self.rerankingSettings = rerankingSettings
     self.generationBackendStatusCheck = generationBackendStatusCheck
   }
 
@@ -133,6 +144,26 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     refreshControls()
   }
 
+  func selectRerankingEnabled(_ enabled: Bool) {
+    rerankingSettings.updateEnabled(enabled)
+    refreshControls()
+  }
+
+  func selectRerankingWeight(_ weight: Double) {
+    rerankingSettings.updateWeight(weight)
+    refreshControls()
+  }
+
+  func selectRerankingDebounceMilliseconds(_ milliseconds: UInt64) {
+    rerankingSettings.updateDebounceMilliseconds(milliseconds)
+    refreshControls()
+  }
+
+  func selectRerankingAdoptionDeadlineMilliseconds(_ milliseconds: UInt64) {
+    rerankingSettings.updateAdoptionDeadlineMilliseconds(milliseconds)
+    refreshControls()
+  }
+
   func refreshGenerationBackendStatus() {
     let version = UUID()
     generationBackendStatusVersion = version
@@ -168,6 +199,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     let content = NSView()
     window.contentView = content
+    let scrollView = NSScrollView()
+    scrollView.drawsBackground = false
+    scrollView.hasVerticalScroller = true
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
+    content.addSubview(scrollView)
+    let document = NSView()
+    document.translatesAutoresizingMaskIntoConstraints = false
+    scrollView.documentView = document
 
     let title = NSTextField(labelWithString: "输入设置")
     title.font = .systemFont(ofSize: 20, weight: .semibold)
@@ -338,6 +377,76 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     )
     self.generationEnabledButton = generationEnabledButton
 
+    let rerankingEnabledButton = NSButton(
+      checkboxWithTitle: "用 AI 重排 Rime 候选（实验）",
+      target: self,
+      action: #selector(rerankingEnabledChanged(_:))
+    )
+    self.rerankingEnabledButton = rerankingEnabledButton
+
+    let rerankingWeightValue = NSTextField(labelWithString: "")
+    rerankingWeightValue.alignment = .right
+    rerankingWeightValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    self.rerankingWeightValue = rerankingWeightValue
+    let rerankingWeightSlider = NSSlider(
+      value: RerankingSettings.defaultWeight * 100,
+      minValue: 0,
+      maxValue: 100,
+      target: self,
+      action: #selector(rerankingWeightChanged(_:))
+    )
+    rerankingWeightSlider.numberOfTickMarks = 21
+    rerankingWeightSlider.allowsTickMarkValuesOnly = true
+    self.rerankingWeightSlider = rerankingWeightSlider
+    let rerankingWeightControls = NSStackView(views: [
+      rerankingWeightValue, rerankingWeightSlider,
+    ])
+    rerankingWeightControls.orientation = .horizontal
+    rerankingWeightControls.alignment = .centerY
+    rerankingWeightControls.spacing = 8
+
+    let rerankingDebounceValue = NSTextField(labelWithString: "")
+    rerankingDebounceValue.alignment = .right
+    rerankingDebounceValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    self.rerankingDebounceValue = rerankingDebounceValue
+    let rerankingDebounceStepper = NSStepper()
+    rerankingDebounceStepper.minValue = 0
+    rerankingDebounceStepper.maxValue = 2_000
+    rerankingDebounceStepper.increment = 10
+    rerankingDebounceStepper.target = self
+    rerankingDebounceStepper.action = #selector(rerankingDebounceChanged(_:))
+    self.rerankingDebounceStepper = rerankingDebounceStepper
+    let rerankingDebounceControls = NSStackView(views: [
+      rerankingDebounceValue, rerankingDebounceStepper,
+    ])
+    rerankingDebounceControls.orientation = .horizontal
+    rerankingDebounceControls.alignment = .centerY
+    rerankingDebounceControls.spacing = 8
+
+    let rerankingDeadlineValue = NSTextField(labelWithString: "")
+    rerankingDeadlineValue.alignment = .right
+    rerankingDeadlineValue.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    self.rerankingDeadlineValue = rerankingDeadlineValue
+    let rerankingDeadlineStepper = NSStepper()
+    rerankingDeadlineStepper.minValue = 50
+    rerankingDeadlineStepper.maxValue = 2_000
+    rerankingDeadlineStepper.increment = 50
+    rerankingDeadlineStepper.target = self
+    rerankingDeadlineStepper.action = #selector(rerankingDeadlineChanged(_:))
+    self.rerankingDeadlineStepper = rerankingDeadlineStepper
+    let rerankingDeadlineControls = NSStackView(views: [
+      rerankingDeadlineValue, rerankingDeadlineStepper,
+    ])
+    rerankingDeadlineControls.orientation = .horizontal
+    rerankingDeadlineControls.alignment = .centerY
+    rerankingDeadlineControls.spacing = 8
+
+    let rerankingHelp = NSTextField(
+      wrappingLabelWithString: "只重排当前 Rime 候选，不新增文字；继续输入或开始选词后不会采用迟到结果。"
+    )
+    rerankingHelp.font = .systemFont(ofSize: 12)
+    rerankingHelp.textColor = .secondaryLabelColor
+
     let generationHelp = NSTextField(
       wrappingLabelWithString:
         "完整输入拼音后，侧边最多显示 3 个本地 MLX 建议；按 Option + 数字、Option + 空格或点击上屏。后端不可用时不影响普通候选。"
@@ -375,6 +484,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     let emptyGenerationToggle = NSTextField(labelWithString: "")
     let emptyGenerationHelp = NSTextField(labelWithString: "")
     let emptyGenerationBackendStatus = NSTextField(labelWithString: "")
+    let emptyRerankingToggle = NSTextField(labelWithString: "")
+    let emptyRerankingHelp = NSTextField(labelWithString: "")
 
     let grid = NSGridView(views: [
       [schemeLabel, schemePopup],
@@ -392,6 +503,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [emptyCandidateCountHelp, candidateCountHelp],
       [NSTextField(labelWithString: "英文候选最少输入"), englishCandidateMinimumControls],
       [emptyEnglishCandidateMinimumHelp, englishCandidateMinimumHelp],
+      [emptyRerankingToggle, rerankingEnabledButton],
+      [NSTextField(labelWithString: "AI 融合权重"), rerankingWeightControls],
+      [NSTextField(labelWithString: "AI 请求前停顿"), rerankingDebounceControls],
+      [NSTextField(labelWithString: "AI 响应采用时限"), rerankingDeadlineControls],
+      [emptyRerankingHelp, rerankingHelp],
       [emptyGenerationToggle, generationEnabledButton],
       [emptyGenerationHelp, generationHelp],
       [emptyGenerationBackendStatus, generationBackendStatusControls],
@@ -406,7 +522,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     stack.alignment = .leading
     stack.spacing = 18
     stack.translatesAutoresizingMaskIntoConstraints = false
-    content.addSubview(stack)
+    document.addSubview(stack)
 
     grid.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     policyHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
@@ -416,11 +532,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateFontHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     englishCandidateMinimumHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     generationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    rerankingHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
-      stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
-      stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
-      stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -24),
+      scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+      scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+      scrollView.topAnchor.constraint(equalTo: content.topAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+      document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+      stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
+      stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -24),
+      stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+      stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -24),
     ])
 
     self.window = window
@@ -450,6 +572,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       "\(englishCandidateSettings.minimumInputLength) 个字符"
     englishCandidateMinimumStepper?.integerValue = englishCandidateSettings.minimumInputLength
     generationEnabledButton?.state = generationSettings.isEnabled ? .on : .off
+    let rerankingEnabled = rerankingSettings.isEnabled
+    rerankingEnabledButton?.state = rerankingEnabled ? .on : .off
+    rerankingWeightValue?.stringValue = "\(Int((rerankingSettings.weight * 100).rounded()))%"
+    rerankingWeightSlider?.doubleValue = rerankingSettings.weight * 100
+    rerankingWeightSlider?.isEnabled = rerankingEnabled
+    rerankingDebounceValue?.stringValue = "\(rerankingSettings.debounceMilliseconds) ms"
+    rerankingDebounceStepper?.integerValue = Int(rerankingSettings.debounceMilliseconds)
+    rerankingDebounceStepper?.isEnabled = rerankingEnabled
+    rerankingDeadlineValue?.stringValue =
+      "\(rerankingSettings.adoptionDeadlineMilliseconds) ms"
+    rerankingDeadlineStepper?.integerValue = Int(
+      rerankingSettings.adoptionDeadlineMilliseconds)
+    rerankingDeadlineStepper?.isEnabled = rerankingEnabled
     if let index = CandidateLayout.allCases.firstIndex(of: candidateLayoutSettings.layout) {
       candidateLayoutPopup?.selectItem(at: index)
     }
@@ -502,6 +637,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   @objc private func generationEnabledChanged(_ sender: NSButton) {
     selectGenerationEnabled(sender.state == .on)
+  }
+
+  @objc private func rerankingEnabledChanged(_ sender: NSButton) {
+    selectRerankingEnabled(sender.state == .on)
+  }
+
+  @objc private func rerankingWeightChanged(_ sender: NSSlider) {
+    selectRerankingWeight(sender.doubleValue / 100)
+  }
+
+  @objc private func rerankingDebounceChanged(_ sender: NSStepper) {
+    selectRerankingDebounceMilliseconds(UInt64(sender.integerValue))
+  }
+
+  @objc private func rerankingDeadlineChanged(_ sender: NSStepper) {
+    selectRerankingAdoptionDeadlineMilliseconds(UInt64(sender.integerValue))
   }
 
   @objc private func refreshGenerationBackendStatusClicked(_ sender: NSButton) {

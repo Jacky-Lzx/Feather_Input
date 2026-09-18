@@ -1096,6 +1096,7 @@ struct InputMethodSmokeMain {
       candidateFontSettings: CandidateFontSettings(defaults: defaults),
       englishCandidateSettings: EnglishCandidateSettings(defaults: defaults),
       generationSettings: GenerationSettings(defaults: defaults),
+      rerankingSettings: RerankingSettings(defaults: defaults),
       generationBackendStatusCheck: { .ready }
     )
     let focusSettings = FocusIndicatorSettings(defaults: defaults)
@@ -1105,6 +1106,7 @@ struct InputMethodSmokeMain {
     let candidateFontSettings = CandidateFontSettings(defaults: defaults)
     let englishCandidateSettings = EnglishCandidateSettings(defaults: defaults)
     let generationSettings = GenerationSettings(defaults: defaults)
+    let rerankingSettings = RerankingSettings(defaults: defaults)
     guard persistentModeSettings.isEnabled,
       !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
       candidatePageSettings.count == CandidatePageSettings.defaultCount,
@@ -1112,6 +1114,7 @@ struct InputMethodSmokeMain {
       candidateFontSettings.size == CandidateFontSettings.defaultSize,
       englishCandidateSettings.minimumInputLength == EnglishCandidateSettings.defaultMinimum,
       generationSettings.isEnabled
+        && !rerankingSettings.isEnabled
     else {
       throw SmokeFailure.expectation("设置窗口的焦点提示或每页候选默认值错误")
     }
@@ -1125,13 +1128,20 @@ struct InputMethodSmokeMain {
     settings.selectCandidateFontSize(21)
     settings.selectEnglishCandidateMinimum(6)
     settings.selectGenerationEnabled(false)
+    settings.selectRerankingEnabled(true)
+    settings.selectRerankingWeight(0.6)
+    settings.selectRerankingDebounceMilliseconds(180)
+    settings.selectRerankingAdoptionDeadlineMilliseconds(850)
     guard schemeMemory.load() == .flypy, modeMemory.policy == .perApplication,
       !persistentModeSettings.isEnabled,
       focusSettings.waitsUntilInput, focusSettings.duration == 2.4,
       candidatePageSettings.count == 8, candidateLayoutSettings.layout == .horizontal,
       candidateFontSettings.size == 21,
       englishCandidateSettings.minimumInputLength == 6,
-      !generationSettings.isEnabled
+      !generationSettings.isEnabled,
+      rerankingSettings.isEnabled, rerankingSettings.weight == 0.6,
+      rerankingSettings.debounceMilliseconds == 180,
+      rerankingSettings.adoptionDeadlineMilliseconds == 850
     else {
       throw SmokeFailure.expectation("设置窗口没有持久化输入方案、模式记忆或焦点提示设置")
     }
