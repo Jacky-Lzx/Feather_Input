@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class SmokeCandidatePresenter: CandidatePresenting {
   var actionHandler: ((CandidateWindowAction) -> Void)?
+  var interactionHandler: (() -> Void)?
   var compactLayout = CandidateLayout.vertical
   var frame: NSRect { NSRect(origin: anchor.origin, size: NSSize(width: 120, height: 180)) }
   private(set) var candidates: [FeatherCandidateValue] = []
@@ -63,5 +64,9 @@ final class SmokeCandidatePresenter: CandidatePresenting {
 
   func pageDown() {
     actionHandler?(.pageDown)
+  }
+
+  func beginInteraction() {
+    interactionHandler?()
   }
 }

@@ -14,6 +14,7 @@ final class CandidateOverlayStore {
   func activate(_ id: UUID) {
     guard ownerID != id else { return }
     presenter.actionHandler = nil
+    presenter.interactionHandler = nil
     presenter.hide()
     ownerID = id
   }
@@ -21,6 +22,7 @@ final class CandidateOverlayStore {
   func deactivate(_ id: UUID) {
     guard ownerID == id else { return }
     presenter.actionHandler = nil
+    presenter.interactionHandler = nil
     presenter.hide()
     ownerID = nil
   }
@@ -54,6 +56,11 @@ final class OwnedCandidatePresenter: CandidatePresenting {
   var actionHandler: ((CandidateWindowAction) -> Void)? {
     get { store.presenter(for: ownershipID)?.actionHandler }
     set { store.presenter(for: ownershipID)?.actionHandler = newValue }
+  }
+
+  var interactionHandler: (() -> Void)? {
+    get { store.presenter(for: ownershipID)?.interactionHandler }
+    set { store.presenter(for: ownershipID)?.interactionHandler = newValue }
   }
 
   var compactLayout: CandidateLayout {

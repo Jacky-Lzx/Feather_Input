@@ -159,6 +159,9 @@ final class InputController: IMKInputController {
     candidatePresenter.actionHandler = { [weak self] action in
       self?.handleCandidateWindowAction(action)
     }
+    candidatePresenter.interactionHandler = { [weak self] in
+      self?.lockCandidateOrderForInteraction()
+    }
     generatedCandidatePresenter.generatedActionHandler = { [weak self] index in
       self?.selectGeneratedCandidate(at: index)
     }
@@ -205,6 +208,7 @@ final class InputController: IMKInputController {
       lastCaret = nil
       rightControlTap.reset()
       candidatePresenter.actionHandler = nil
+      candidatePresenter.interactionHandler = nil
       candidatePresenter.hide()
       generatedCandidatePresenter.generatedActionHandler = nil
       clearGeneratedCandidates()
@@ -239,6 +243,7 @@ final class InputController: IMKInputController {
     lastCaret = nil
     rightControlTap.reset()
     candidatePresenter.actionHandler = nil
+    candidatePresenter.interactionHandler = nil
     candidatePresenter.hide()
     generatedCandidatePresenter.generatedActionHandler = nil
     clearGeneratedCandidates()

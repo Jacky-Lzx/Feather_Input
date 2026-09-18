@@ -6,6 +6,7 @@ private final class CandidateRowButton: NSButton {
   private let indexLabel = NSTextField(labelWithString: "")
   private let candidateLabel = NSTextField(labelWithString: "")
   private var trackingArea: NSTrackingArea?
+  private let interactionHandler: (() -> Void)?
   private var hovering = false {
     didSet { needsDisplay = true }
   }
@@ -16,18 +17,21 @@ private final class CandidateRowButton: NSButton {
 
   override init(frame frameRect: NSRect) {
     metrics = CandidateWindowStyle.metrics(fontSize: CandidateFontSettings.defaultSize)
+    interactionHandler = nil
     super.init(frame: frameRect)
     configureView()
   }
 
   required init?(coder: NSCoder) {
     metrics = CandidateWindowStyle.metrics(fontSize: CandidateFontSettings.defaultSize)
+    interactionHandler = nil
     super.init(coder: coder)
     configureView()
   }
 
-  private init(metrics: CandidateWindowMetrics) {
+  private init(metrics: CandidateWindowMetrics, interactionHandler: (() -> Void)?) {
     self.metrics = metrics
+    self.interactionHandler = interactionHandler
     super.init(frame: .zero)
     configureView()
   }
@@ -37,9 +41,10 @@ private final class CandidateRowButton: NSButton {
     text: String,
     metrics: CandidateWindowMetrics,
     target: AnyObject?,
-    action: Selector?
+    action: Selector?,
+    interactionHandler: (() -> Void)? = nil
   ) {
-    self.init(metrics: metrics)
+    self.init(metrics: metrics, interactionHandler: interactionHandler)
     self.target = target
     self.action = action
     indexLabel.stringValue = index
@@ -100,6 +105,7 @@ private final class CandidateRowButton: NSButton {
 
   override func mouseEntered(with event: NSEvent) {
     hovering = true
+    interactionHandler?()
   }
 
   override func mouseExited(with event: NSEvent) {
@@ -176,6 +182,7 @@ enum CandidateWindowAction {
 @MainActor
 protocol CandidatePresenting: AnyObject {
   var actionHandler: ((CandidateWindowAction) -> Void)? { get set }
+  var interactionHandler: (() -> Void)? { get set }
   var compactLayout: CandidateLayout { get }
   var frame: NSRect { get }
 
@@ -207,6 +214,7 @@ protocol GeneratedCandidatePresenting: AnyObject {
 @MainActor
 final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedCandidatePresenting {
   var actionHandler: ((CandidateWindowAction) -> Void)?
+  var interactionHandler: (() -> Void)?
   var generatedActionHandler: ((Int) -> Void)?
   private let layoutSettings: CandidateLayoutSettings
   private let fontSettings: CandidateFontSettings
@@ -440,7 +448,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
         text: text,
         metrics: metrics,
         target: self,
-        action: #selector(selectCandidate(_:))
+        action: #selector(selectCandidate(_:)),
+        interactionHandler: interactionHandler
       )
       button.tag = index
       button.candidateHighlighted = highlighted == index
@@ -561,7 +570,8 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
           text: candidates[index].text,
           metrics: metrics,
           target: self,
-          action: #selector(selectCandidate(_:))
+          action: #selector(selectCandidate(_:)),
+          interactionHandler: interactionHandler
         )
         button.tag = index
         button.candidateHighlighted = highlighted == index

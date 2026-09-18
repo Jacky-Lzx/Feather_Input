@@ -815,6 +815,17 @@ struct InputMethodSmokeMain {
     else {
       throw SmokeFailure.expectation("继续输入没有取消并释放旧 MLX 评分请求")
     }
+    guard waitUntil({ requests.count == 3 }) else {
+      throw SmokeFailure.expectation("继续输入后没有创建新的 MLX 评分请求")
+    }
+    presenter.beginInteraction()
+    guard requests[2].cancelCount == 1, requests[2].closeCount == 1 else {
+      throw SmokeFailure.expectation("鼠标进入候选窗没有取消并锁定 MLX 重排")
+    }
+    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    guard requests.count == 3 else {
+      throw SmokeFailure.expectation("鼠标离开前的同一轮输入重新触发了 MLX 重排")
+    }
   }
 
   @MainActor
@@ -827,23 +838,31 @@ struct InputMethodSmokeMain {
     let secondCandidate = FeatherCandidateValue(revision: 2, value: 2, text: "世界")
     var firstSelectionCount = 0
     var secondSelectionCount = 0
+    var firstInteractionCount = 0
+    var secondInteractionCount = 0
 
     first.activate()
     first.actionHandler = { _ in firstSelectionCount += 1 }
+    first.interactionHandler = { firstInteractionCount += 1 }
     first.update(candidates: [firstCandidate], highlighted: 0, anchor: .zero)
 
     second.activate()
     second.actionHandler = { _ in secondSelectionCount += 1 }
+    second.interactionHandler = { secondInteractionCount += 1 }
     second.update(candidates: [secondCandidate], highlighted: 0, anchor: .zero)
 
     first.actionHandler = nil
+    first.interactionHandler = nil
     first.hide()
     first.deactivate()
     presenter.select(text: "世界")
+    presenter.beginInteraction()
     guard
       presenter.candidates == [secondCandidate],
       firstSelectionCount == 0,
-      secondSelectionCount == 1
+      secondSelectionCount == 1,
+      firstInteractionCount == 0,
+      secondInteractionCount == 1
     else {
       throw SmokeFailure.expectation("旧控制器修改了新控制器持有的共享候选窗")
     }
