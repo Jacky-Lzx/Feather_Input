@@ -47,10 +47,46 @@ enum FeatherGenerationState: Equatable {
   case stale
 }
 
+enum FeatherScoreNormalization: UInt32 {
+  case character = 1
+  case token
+  case none
+}
+
+struct FeatherScoredCandidateValue: Equatable {
+  let value: UInt64
+  let text: String
+  let modelScore: Double
+  let score: Double
+}
+
+struct FeatherScoringResultValue: Equatable {
+  let requestID: UInt64
+  let revision: UInt64
+  let candidates: [FeatherScoredCandidateValue]
+  let elapsedMilliseconds: UInt64
+}
+
+enum FeatherScoringState: Equatable {
+  case pending
+  case ready(FeatherScoringResultValue)
+  case failed
+  case cancelled
+  case stale
+}
+
 @MainActor
 protocol FeatherGenerationRequesting: AnyObject {
   func poll(currentRequestID: UInt64, currentRevision: UInt64) throws
     -> FeatherGenerationState
+  func cancel() throws
+  func close()
+}
+
+@MainActor
+protocol FeatherScoringRequesting: AnyObject {
+  func poll(currentRequestID: UInt64, currentRevision: UInt64) throws
+    -> FeatherScoringState
   func cancel() throws
   func close()
 }
@@ -107,6 +143,7 @@ final class FeatherSession {
   private static let pageSizeCapability: UInt64 = 1 << 7
   private static let englishCandidateMinimumCapability: UInt64 = 1 << 8
   private static let asyncMLXGenerationCapability: UInt64 = 1 << 9
+  private static let asyncMLXScoringCapability: UInt64 = 1 << 11
 
   private var handle: OpaquePointer?
   private let capabilities: UInt64
@@ -353,6 +390,64 @@ final class FeatherSession {
     return FeatherGenerationRequest(handle: request)
   }
 
+  func startScoring(
+    requestID: UInt64,
+    revision: UInt64,
+    context: String,
+    preedit: String,
+    candidates: [FeatherCandidateValue],
+    weight: Double,
+    normalization: FeatherScoreNormalization
+  ) throws -> FeatherScoringRequest {
+    let missing = Self.asyncMLXScoringCapability & ~capabilities
+    guard missing == 0 else {
+      throw FeatherBridgeError.missingCapabilities(missing)
+    }
+
+    let textPointers = candidates.map { strdup($0.text) }
+    defer {
+      for pointer in textPointers {
+        free(pointer)
+      }
+    }
+    guard textPointers.allSatisfy({ $0 != nil }) else {
+      throw FeatherBridgeError.invalidSuccess(operation: "copy MLX scoring candidates")
+    }
+    let inputs = zip(candidates, textPointers).map { candidate, text in
+      FeatherAiScoringInput(value: candidate.value, text: UnsafePointer(text))
+    }
+    var request: OpaquePointer?
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = context.withCString { contextValue in
+      preedit.withCString { preeditValue in
+        inputs.withUnsafeBufferPointer { buffer in
+          feather_ai_score_start(
+            requestID,
+            revision,
+            contextValue,
+            preeditValue,
+            buffer.baseAddress,
+            buffer.count,
+            weight,
+            normalization.rawValue,
+            &request,
+            &ffiError
+          )
+        }
+      }
+    }
+    do {
+      try Self.check(status: status, error: ffiError, operation: "start MLX scoring")
+    } catch {
+      feather_ai_scoring_request_free(request)
+      throw error
+    }
+    guard let request else {
+      throw FeatherBridgeError.invalidSuccess(operation: "start MLX scoring")
+    }
+    return FeatherScoringRequest(handle: request)
+  }
+
   private func requireHandle() throws -> OpaquePointer {
     guard let handle else {
       throw FeatherBridgeError.sessionClosed
@@ -540,6 +635,107 @@ final class FeatherGenerationRequest: FeatherGenerationRequesting {
       candidates: candidates,
       elapsedMilliseconds: result.elapsed_ms,
       truncated: result.truncated != 0
+    )
+  }
+}
+
+@MainActor
+final class FeatherScoringRequest: FeatherScoringRequesting {
+  private var handle: OpaquePointer?
+
+  fileprivate init(handle: OpaquePointer) {
+    self.handle = handle
+  }
+
+  deinit {
+    feather_ai_scoring_request_free(handle)
+  }
+
+  func poll(currentRequestID: UInt64, currentRevision: UInt64) throws
+    -> FeatherScoringState
+  {
+    guard let handle else { return .cancelled }
+    var rawState = FEATHER_AI_REQUEST_PENDING.rawValue
+    var result: UnsafeMutablePointer<FeatherAiScoringResult>?
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = feather_ai_scoring_request_poll(
+      handle,
+      currentRequestID,
+      currentRevision,
+      &rawState,
+      &result,
+      &ffiError
+    )
+    do {
+      try FeatherSession.check(status: status, error: ffiError, operation: "poll MLX scoring")
+    } catch {
+      feather_ai_scoring_result_free(result)
+      throw error
+    }
+
+    switch rawState {
+    case FEATHER_AI_REQUEST_PENDING.rawValue:
+      guard result == nil else {
+        feather_ai_scoring_result_free(result)
+        throw FeatherBridgeError.invalidSuccess(operation: "pending MLX scoring")
+      }
+      return .pending
+    case FEATHER_AI_REQUEST_READY.rawValue:
+      guard let result else {
+        throw FeatherBridgeError.invalidSuccess(operation: "ready MLX scoring")
+      }
+      return .ready(consume(result))
+    case FEATHER_AI_REQUEST_FAILED.rawValue:
+      feather_ai_scoring_result_free(result)
+      return .failed
+    case FEATHER_AI_REQUEST_CANCELLED.rawValue:
+      feather_ai_scoring_result_free(result)
+      return .cancelled
+    case FEATHER_AI_REQUEST_STALE.rawValue:
+      feather_ai_scoring_result_free(result)
+      return .stale
+    default:
+      feather_ai_scoring_result_free(result)
+      throw FeatherBridgeError.invalidSuccess(operation: "unknown MLX scoring state \(rawState)")
+    }
+  }
+
+  func cancel() throws {
+    guard let handle else { return }
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = feather_ai_scoring_request_cancel(handle, &ffiError)
+    try FeatherSession.check(status: status, error: ffiError, operation: "cancel MLX scoring")
+  }
+
+  func close() {
+    guard let handle else { return }
+    feather_ai_scoring_request_free(handle)
+    self.handle = nil
+  }
+
+  private func consume(_ pointer: UnsafeMutablePointer<FeatherAiScoringResult>)
+    -> FeatherScoringResultValue
+  {
+    defer { feather_ai_scoring_result_free(pointer) }
+    let result = pointer.pointee
+    let candidates: [FeatherScoredCandidateValue]
+    if let base = result.candidates, result.candidate_count > 0 {
+      candidates = UnsafeBufferPointer(start: base, count: result.candidate_count).map {
+        FeatherScoredCandidateValue(
+          value: $0.value,
+          text: $0.text.map(String.init(cString:)) ?? "",
+          modelScore: $0.lm_score,
+          score: $0.score
+        )
+      }
+    } else {
+      candidates = []
+    }
+    return FeatherScoringResultValue(
+      requestID: result.request_id,
+      revision: result.revision,
+      candidates: candidates,
+      elapsedMilliseconds: result.elapsed_ms
     )
   }
 }
