@@ -233,7 +233,6 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   var displayedPreedit: String { preeditLabel.stringValue }
   var isPreeditRowVisible: Bool { !preeditRow.isHidden }
   var preeditRowHeight: CGFloat { preeditRowHeightConstraint?.constant ?? 0 }
-  private(set) var isPreeditRowAtBottom = false
 
   private var candidates: [FeatherCandidateValue] = []
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
@@ -711,28 +710,14 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     }
   }
 
-  private func placePreeditRow(atBottom: Bool) {
-    guard isPreeditRowAtBottom != atBottom else { return }
-    contentStack.removeArrangedSubview(preeditRow)
-    contentStack.insertArrangedSubview(
-      preeditRow,
-      at: atBottom ? contentStack.arrangedSubviews.count : 0
-    )
-    isPreeditRowAtBottom = atBottom
-    contentStack.needsLayout = true
-  }
-
   private func positionPanel(at anchor: NSRect) {
     let visibleFrame =
       screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
     let gap = CandidateWindowStyle.panelGap
     var origin = NSPoint(x: anchor.minX, y: anchor.minY - panel.frame.height - gap)
-    var displaysAboveAnchor = false
     if origin.y < visibleFrame.minY {
       origin.y = anchor.maxY + gap
-      displaysAboveAnchor = true
     }
-    placePreeditRow(atBottom: displaysAboveAnchor)
     let inset = CandidateWindowStyle.screenInset
     origin.x = min(
       max(origin.x, visibleFrame.minX + inset),

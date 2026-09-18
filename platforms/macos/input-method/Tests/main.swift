@@ -1276,44 +1276,6 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("AI 重排指示器停止后改变了候选窗尺寸")
     }
 
-    if let visibleFrame = NSScreen.main?.visibleFrame {
-      let bottomAnchor = NSRect(
-        x: visibleFrame.midX,
-        y: visibleFrame.minY + 1,
-        width: 1,
-        height: 20
-      )
-      presenter.update(
-        candidates: compact,
-        highlighted: 0,
-        preedit: "shijie",
-        anchor: bottomAnchor
-      )
-      guard presenter.frame.minY > bottomAnchor.maxY,
-        presenter.isPreeditRowAtBottom
-      else {
-        throw SmokeFailure.expectation("候选窗显示在输入位置上方时，当前输入行没有移到底部")
-      }
-
-      let topAnchor = NSRect(
-        x: visibleFrame.midX,
-        y: visibleFrame.maxY - 21,
-        width: 1,
-        height: 20
-      )
-      presenter.update(
-        candidates: compact,
-        highlighted: 0,
-        preedit: "shijie",
-        anchor: topAnchor
-      )
-      guard presenter.frame.maxY < topAnchor.minY,
-        !presenter.isPreeditRowAtBottom
-      else {
-        throw SmokeFailure.expectation("候选窗显示在输入位置下方时，当前输入行没有移到顶部")
-      }
-    }
-
     fontSettings.updateSize(CandidateFontSettings.maximumSize)
     presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
     guard presenter.appliedFontSize == CandidateFontSettings.maximumSize,
