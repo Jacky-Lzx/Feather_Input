@@ -1,4 +1,110 @@
 import AppKit
+import Carbon
+
+@MainActor
+protocol ContinuationShortcutRegistering: AnyObject {
+  @discardableResult
+  func activate(action: @escaping () -> Void) -> Bool
+  func deactivate()
+}
+
+private let continuationHotKeySignature: OSType = 0x4641_4943  // "FAIC"
+private let continuationHotKeyIdentifier: UInt32 = 1
+
+private func handleContinuationHotKey(
+  _ nextHandler: EventHandlerCallRef?,
+  _ event: EventRef?,
+  _ userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+  guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+  var hotKeyID = EventHotKeyID()
+  let status = GetEventParameter(
+    event,
+    EventParamName(kEventParamDirectObject),
+    EventParamType(typeEventHotKeyID),
+    nil,
+    MemoryLayout<EventHotKeyID>.size,
+    nil,
+    &hotKeyID
+  )
+  guard status == noErr,
+    hotKeyID.signature == continuationHotKeySignature,
+    hotKeyID.id == continuationHotKeyIdentifier
+  else {
+    return OSStatus(eventNotHandledErr)
+  }
+  let shortcut = Unmanaged<CarbonContinuationShortcut>.fromOpaque(userData)
+    .takeUnretainedValue()
+  MainActor.assumeIsolated {
+    shortcut.performAction()
+  }
+  return noErr
+}
+
+@MainActor
+final class CarbonContinuationShortcut: ContinuationShortcutRegistering {
+  private var eventHandler: EventHandlerRef?
+  private var hotKey: EventHotKeyRef?
+  private var action: (() -> Void)?
+
+  @discardableResult
+  func activate(action: @escaping () -> Void) -> Bool {
+    deactivate()
+    self.action = action
+
+    if eventHandler == nil {
+      var eventType = EventTypeSpec(
+        eventClass: OSType(kEventClassKeyboard),
+        eventKind: UInt32(kEventHotKeyPressed)
+      )
+      let status = InstallEventHandler(
+        GetApplicationEventTarget(),
+        handleContinuationHotKey,
+        1,
+        &eventType,
+        Unmanaged.passUnretained(self).toOpaque(),
+        &eventHandler
+      )
+      guard status == noErr else {
+        NSLog("FeatherInput AI continuation event handler failed: %d", status)
+        self.action = nil
+        return false
+      }
+    }
+
+    let hotKeyID = EventHotKeyID(
+      signature: continuationHotKeySignature,
+      id: continuationHotKeyIdentifier
+    )
+    let status = RegisterEventHotKey(
+      UInt32(kVK_Space),
+      UInt32(optionKey),
+      hotKeyID,
+      GetApplicationEventTarget(),
+      0,
+      &hotKey
+    )
+    guard status == noErr else {
+      NSLog("FeatherInput AI continuation shortcut registration failed: %d", status)
+      self.action = nil
+      hotKey = nil
+      return false
+    }
+    return true
+  }
+
+  func deactivate() {
+    if let hotKey {
+      UnregisterEventHotKey(hotKey)
+      self.hotKey = nil
+    }
+    action = nil
+  }
+
+  fileprivate func performAction() {
+    action?()
+  }
+}
 
 @MainActor
 final class CandidateOverlayStore {
@@ -124,17 +230,31 @@ final class OwnedCandidatePresenter: CandidatePresenting {
 
 @MainActor
 final class GeneratedCandidateOverlayStore {
-  static let shared = GeneratedCandidateOverlayStore(presenter: CandidateWindowController())
+  static let shared = GeneratedCandidateOverlayStore(
+    presenter: CandidateWindowController(),
+    continuationShortcut: CarbonContinuationShortcut()
+  )
 
   private let presenter: GeneratedCandidatePresenting
+  private let continuationShortcut: ContinuationShortcutRegistering
   private var ownerID: UUID?
 
   init(presenter: GeneratedCandidatePresenting) {
     self.presenter = presenter
+    continuationShortcut = CarbonContinuationShortcut()
+  }
+
+  init(
+    presenter: GeneratedCandidatePresenting,
+    continuationShortcut: ContinuationShortcutRegistering
+  ) {
+    self.presenter = presenter
+    self.continuationShortcut = continuationShortcut
   }
 
   func activate(_ id: UUID) {
     guard ownerID != id else { return }
+    continuationShortcut.deactivate()
     presenter.generatedActionHandler = nil
     presenter.hide()
     ownerID = id
@@ -142,6 +262,7 @@ final class GeneratedCandidateOverlayStore {
 
   func deactivate(_ id: UUID) {
     guard ownerID == id else { return }
+    continuationShortcut.deactivate()
     presenter.generatedActionHandler = nil
     presenter.hide()
     ownerID = nil
@@ -149,6 +270,30 @@ final class GeneratedCandidateOverlayStore {
 
   func presenter(for id: UUID) -> GeneratedCandidatePresenting? {
     ownerID == id ? presenter : nil
+  }
+
+  func update(
+    _ id: UUID,
+    candidates: [FeatherGeneratedCandidateValue],
+    beside anchor: NSRect,
+    title: String?
+  ) {
+    guard ownerID == id else { return }
+    presenter.update(candidates: candidates, beside: anchor, title: title)
+    if title != nil, !candidates.isEmpty {
+      _ = continuationShortcut.activate { [weak self] in
+        guard let self, self.ownerID == id, self.presenter.isVisible else { return }
+        self.presenter.generatedActionHandler?(0)
+      }
+    } else {
+      continuationShortcut.deactivate()
+    }
+  }
+
+  func hide(_ id: UUID) {
+    guard ownerID == id else { return }
+    continuationShortcut.deactivate()
+    presenter.hide()
   }
 }
 
@@ -195,7 +340,8 @@ final class OwnedGeneratedCandidatePresenter: GeneratedCandidatePresenting {
     beside anchor: NSRect,
     title: String?
   ) {
-    store.presenter(for: ownershipID)?.update(
+    store.update(
+      ownershipID,
       candidates: candidates,
       beside: anchor,
       title: title
@@ -207,6 +353,6 @@ final class OwnedGeneratedCandidatePresenter: GeneratedCandidatePresenting {
   }
 
   func hide() {
-    store.presenter(for: ownershipID)?.hide()
+    store.hide(ownershipID)
   }
 }

@@ -981,7 +981,11 @@ struct InputMethodSmokeMain {
   @MainActor
   private static func verifyGeneratedCandidateOverlayOwnership() throws {
     let presenter = SmokeGeneratedCandidatePresenter()
-    let store = GeneratedCandidateOverlayStore(presenter: presenter)
+    let shortcut = SmokeContinuationShortcut()
+    let store = GeneratedCandidateOverlayStore(
+      presenter: presenter,
+      continuationShortcut: shortcut
+    )
     let first = OwnedGeneratedCandidatePresenter(store: store)
     let second = OwnedGeneratedCandidatePresenter(store: store)
     let firstCandidate = FeatherGeneratedCandidateValue(text: "世界", score: -0.4)
@@ -991,26 +995,27 @@ struct InputMethodSmokeMain {
 
     first.activate()
     first.generatedActionHandler = { _ in firstSelectionCount += 1 }
-    first.update(candidates: [firstCandidate], beside: .zero, title: nil)
+    first.update(candidates: [firstCandidate], beside: .zero, title: "AI 续写")
 
     second.activate()
     second.generatedActionHandler = { _ in secondSelectionCount += 1 }
-    second.update(candidates: [secondCandidate], beside: .zero, title: nil)
+    second.update(candidates: [secondCandidate], beside: .zero, title: "AI 续写")
 
     first.generatedActionHandler = nil
     first.hide()
     first.deactivate()
-    presenter.select(at: 0)
+    shortcut.trigger()
     guard
       presenter.candidates == [secondCandidate],
       firstSelectionCount == 0,
-      secondSelectionCount == 1
+      secondSelectionCount == 1,
+      shortcut.isActive
     else {
       throw SmokeFailure.expectation("旧控制器修改了新控制器持有的共享 AI 推荐窗")
     }
 
     second.deactivate()
-    guard presenter.candidates.isEmpty else {
+    guard presenter.candidates.isEmpty, !shortcut.isActive else {
       throw SmokeFailure.expectation("当前控制器释放后共享 AI 推荐窗没有隐藏")
     }
   }
