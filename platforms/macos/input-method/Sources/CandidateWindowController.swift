@@ -210,7 +210,11 @@ protocol GeneratedCandidatePresenting: AnyObject {
   var generatedActionHandler: ((Int) -> Void)? { get set }
   var isVisible: Bool { get }
 
-  func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect)
+  func update(
+    candidates: [FeatherGeneratedCandidateValue],
+    beside anchor: NSRect,
+    title: String?
+  )
   func reposition(beside anchor: NSRect)
   func hide()
 }
@@ -242,6 +246,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
 
   private var candidates: [FeatherCandidateValue] = []
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
+  private var generatedTitle: String?
   private var stableCompactContentWidth: CGFloat?
   private lazy var panel = makePanel()
   private lazy var candidateStack = makeCandidateStack()
@@ -277,6 +282,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
 
     self.candidates = candidates
     generatedCandidates = []
+    generatedTitle = nil
     displayedGeneratedCandidateCount = 0
     appliedFontSize = fontSettings.size
     updatePreedit(preedit)
@@ -297,7 +303,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     )
   }
 
-  func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect) {
+  func update(
+    candidates: [FeatherGeneratedCandidateValue],
+    beside anchor: NSRect,
+    title: String?
+  ) {
     guard !candidates.isEmpty else {
       hide()
       return
@@ -305,10 +315,12 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
 
     self.candidates = []
     generatedCandidates = Array(candidates.prefix(3))
+    generatedTitle = title
     displayedGeneratedCandidateCount = generatedCandidates.count
     appliedFontSize = fontSettings.size
     setRerankingActive(false)
-    preeditRow.isHidden = true
+    updatePreedit(title ?? "")
+    preeditRow.isHidden = title == nil
     candidateStack.isHidden = false
     expandedHeader.isHidden = true
     expandedGrid.isHidden = true
@@ -345,6 +357,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
 
     self.candidates = candidates
     generatedCandidates = []
+    generatedTitle = nil
     displayedGeneratedCandidateCount = 0
     appliedFontSize = fontSettings.size
     updatePreedit(preedit)
@@ -467,6 +480,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     setRerankingActive(false)
     candidates = []
     generatedCandidates = []
+    generatedTitle = nil
     stableCompactContentWidth = nil
     displayedGeneratedCandidateCount = 0
     if panel.isVisible {
@@ -630,7 +644,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     var widths: [CGFloat] = []
     for (index, text) in visibleCandidateTexts.enumerated() {
       let button = CandidateRowButton(
-        index: String(index + 1),
+        index: generatedTitle == nil ? String(index + 1) : "",
         text: text,
         metrics: metrics,
         target: self,

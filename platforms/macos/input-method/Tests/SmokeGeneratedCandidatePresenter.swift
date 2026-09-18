@@ -9,9 +9,16 @@ final class SmokeGeneratedCandidatePresenter: GeneratedCandidatePresenting {
   private(set) var repositionCount = 0
   var isVisible: Bool { !candidates.isEmpty }
 
-  func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect) {
+  private(set) var title: String?
+
+  func update(
+    candidates: [FeatherGeneratedCandidateValue],
+    beside anchor: NSRect,
+    title: String?
+  ) {
     self.candidates = candidates
     self.anchor = anchor
+    self.title = title
   }
 
   func reposition(beside anchor: NSRect) {
@@ -22,6 +29,7 @@ final class SmokeGeneratedCandidatePresenter: GeneratedCandidatePresenting {
 
   func hide() {
     candidates = []
+    title = nil
     hideCount += 1
   }
 

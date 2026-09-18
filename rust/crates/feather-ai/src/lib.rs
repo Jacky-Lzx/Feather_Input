@@ -58,6 +58,23 @@ pub struct GenerationBatch {
     pub truncated: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContinuationRequest {
+    pub request_id: u64,
+    pub revision: u64,
+    pub context: String,
+    pub count: u8,
+}
+
+impl ContinuationRequest {
+    /// # Errors
+    ///
+    /// 上下文为空或候选数量超出范围时返回错误。
+    pub fn validate(&self) -> Result<(), AiError> {
+        validate_continuation_request(self)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScoreNormalization {
@@ -146,6 +163,13 @@ pub trait AiProvider: Send + Sync {
     ///
     /// 请求无效、提供者不可用、服务繁忙或响应未通过校验时返回错误。
     fn generate(&self, request: &GenerationRequest) -> Result<GenerationBatch, AiError>;
+}
+
+pub trait AiContinuationProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// 请求无效、提供者不可用、服务繁忙或响应未通过校验时返回错误。
+    fn continue_text(&self, request: &ContinuationRequest) -> Result<GenerationBatch, AiError>;
 }
 
 pub trait AiScoringProvider: Send + Sync {
@@ -272,6 +296,34 @@ impl GenerationTask {
                 return;
             }
             let result = provider.generate(&request);
+            if !worker_cancelled.load(Ordering::Acquire) {
+                let _ = sender.send(result);
+            }
+        });
+        Self {
+            request_id,
+            revision,
+            receiver,
+            cancelled,
+            terminal: None,
+        }
+    }
+
+    #[must_use]
+    pub fn start_continuation(
+        provider: Arc<dyn AiContinuationProvider>,
+        request: ContinuationRequest,
+    ) -> Self {
+        let request_id = request.request_id;
+        let revision = request.revision;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            if worker_cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            let result = provider.continue_text(&request);
             if !worker_cancelled.load(Ordering::Acquire) {
                 let _ = sender.send(result);
             }
@@ -500,6 +552,12 @@ struct MlxScoringRequest<'a> {
     normalization: ScoreNormalization,
 }
 
+#[derive(Serialize)]
+struct MlxContinuationRequest {
+    context: String,
+    count: u8,
+}
+
 #[derive(Deserialize)]
 struct MlxGenerationResponse {
     candidates: Vec<MlxGeneratedCandidate>,
@@ -512,6 +570,12 @@ struct MlxGenerationResponse {
 struct MlxGeneratedCandidate {
     text: String,
     score: f64,
+}
+
+#[derive(Deserialize)]
+struct MlxContinuationResponse {
+    candidates: Vec<MlxGeneratedCandidate>,
+    elapsed_ms: u64,
 }
 
 #[derive(Deserialize)]
@@ -649,6 +713,43 @@ impl<T: MlxTransport> AiScoringProvider for MlxProvider<T> {
     }
 }
 
+impl<T: MlxTransport> AiContinuationProvider for MlxProvider<T> {
+    fn continue_text(&self, request: &ContinuationRequest) -> Result<GenerationBatch, AiError> {
+        validate_continuation_request(request)?;
+        let payload = MlxContinuationRequest {
+            context: suffix_chars(&request.context, 80),
+            count: request.count,
+        };
+        let body = serde_json::to_vec(&payload).map_err(|_| AiError::InvalidRequest)?;
+        let response = post_with_busy_retry(
+            &self.transport,
+            "/continuations",
+            &body,
+            self.busy_retry_limit,
+        )?;
+        if !(200..300).contains(&response.status) {
+            return Err(AiError::HttpStatus(response.status));
+        }
+        let parsed: MlxContinuationResponse =
+            serde_json::from_slice(&response.body).map_err(|_| AiError::InvalidResponse)?;
+        validate_continuation_response(&parsed, usize::from(request.count))?;
+        Ok(GenerationBatch {
+            request_id: request.request_id,
+            revision: request.revision,
+            candidates: parsed
+                .candidates
+                .into_iter()
+                .map(|candidate| GeneratedCandidate {
+                    text: candidate.text,
+                    score: candidate.score,
+                })
+                .collect(),
+            elapsed_ms: parsed.elapsed_ms,
+            truncated: false,
+        })
+    }
+}
+
 fn post_with_busy_retry<T: MlxTransport>(
     transport: &T,
     path: &str,
@@ -681,6 +782,35 @@ fn validate_request(request: &GenerationRequest) -> Result<(), AiError> {
             .all(|byte| byte.is_ascii_lowercase() || byte == b'\'' || byte == b' ')
     {
         return Err(AiError::InvalidRequest);
+    }
+    Ok(())
+}
+
+fn validate_continuation_request(request: &ContinuationRequest) -> Result<(), AiError> {
+    if request.context.trim().is_empty() || !(1..=3).contains(&request.count) {
+        return Err(AiError::InvalidRequest);
+    }
+    Ok(())
+}
+
+fn validate_continuation_response(
+    response: &MlxContinuationResponse,
+    count: usize,
+) -> Result<(), AiError> {
+    if response.candidates.len() > count || response.elapsed_ms > 10_000 {
+        return Err(AiError::InvalidResponse);
+    }
+    let mut texts = HashSet::new();
+    for candidate in &response.candidates {
+        let length = candidate.text.chars().count();
+        if !candidate.score.is_finite()
+            || candidate.score > 0.0
+            || !(1..=24).contains(&length)
+            || candidate.text.chars().any(char::is_control)
+            || !texts.insert(candidate.text.as_str())
+        {
+            return Err(AiError::InvalidResponse);
+        }
     }
     Ok(())
 }
@@ -803,6 +933,7 @@ mod tests {
             match path {
                 "/generate" => assert_eq!(payload["scheme"], "luna_pinyin_simp"),
                 "/score" => assert!(payload["candidates"].is_array()),
+                "/continuations" => assert_eq!(payload["count"], 3),
                 _ => panic!("unexpected path: {path}"),
             }
             self.responses
@@ -851,6 +982,15 @@ mod tests {
             ],
             weight: 0.35,
             normalization: ScoreNormalization::Character,
+        }
+    }
+
+    fn continuation_request() -> ContinuationRequest {
+        ContinuationRequest {
+            request_id: 11,
+            revision: 44,
+            context: "我们明天下午".into(),
+            count: 3,
         }
     }
 
@@ -939,6 +1079,41 @@ mod tests {
         assert_eq!(result.candidates[0].id, 900);
         assert_eq!(result.candidates[1].id, 700);
         assert_eq!(result.elapsed_ms, 41);
+    }
+
+    #[test]
+    fn continuation_preserves_identity_and_probability_order() {
+        let provider = MlxProvider::new(FakeTransport::new([response(
+            200,
+            r#"{"candidates":[{"text":"去","score":-0.2},{"text":"见","score":-0.5}],"elapsed_ms":17}"#,
+        )]));
+        let result = provider.continue_text(&continuation_request()).unwrap();
+        assert_eq!(result.request_id, 11);
+        assert_eq!(result.revision, 44);
+        assert_eq!(result.candidates[0].text, "去");
+        assert_eq!(result.candidates[1].text, "见");
+        assert_eq!(result.elapsed_ms, 17);
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn continuation_rejects_invalid_request_and_response() {
+        let provider = MlxProvider::new(FakeTransport::new([]));
+        let mut invalid = continuation_request();
+        invalid.context.clear();
+        assert_eq!(
+            provider.continue_text(&invalid),
+            Err(AiError::InvalidRequest)
+        );
+
+        let provider = MlxProvider::new(FakeTransport::new([response(
+            200,
+            r#"{"candidates":[{"text":"\n","score":-0.2}],"elapsed_ms":17}"#,
+        )]));
+        assert_eq!(
+            provider.continue_text(&continuation_request()),
+            Err(AiError::InvalidResponse)
+        );
     }
 
     #[test]

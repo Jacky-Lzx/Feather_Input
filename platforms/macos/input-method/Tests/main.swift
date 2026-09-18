@@ -53,6 +53,7 @@ struct InputMethodSmokeMain {
     try verifyRerankingSettings()
     try verifyMLXScoringFlow()
     try verifyMLXGenerationFlow()
+    try verifyMLXContinuationFlow()
     try verifyModeIndicatorOwnership()
     try verifyPersistentModeIndicatorOwnership()
     try verifyPersistentModeIndicatorPresentation()
@@ -943,11 +944,11 @@ struct InputMethodSmokeMain {
 
     first.activate()
     first.generatedActionHandler = { _ in firstSelectionCount += 1 }
-    first.update(candidates: [firstCandidate], beside: .zero)
+    first.update(candidates: [firstCandidate], beside: .zero, title: nil)
 
     second.activate()
     second.generatedActionHandler = { _ in secondSelectionCount += 1 }
-    second.update(candidates: [secondCandidate], beside: .zero)
+    second.update(candidates: [secondCandidate], beside: .zero, title: nil)
 
     first.generatedActionHandler = nil
     first.hide()
@@ -1128,6 +1129,105 @@ struct InputMethodSmokeMain {
     }
   }
 
+  @MainActor
+  private static func verifyMLXContinuationFlow() throws {
+    guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
+      throw SmokeFailure.controllerCreation
+    }
+    controller.secureInputEnabled = { false }
+    controller.continuationDebounceMilliseconds = 0
+    controller.generationPollMilliseconds = 1
+    controller.candidatePresenter = SmokeCandidatePresenter()
+    let generatedPresenter = SmokeGeneratedCandidatePresenter()
+    controller.generatedCandidatePresenter = generatedPresenter
+    controller.modePresenter = SmokeModePresenter()
+    controller.persistentModePresenter = SmokePersistentModePresenter()
+    controller.focusIndicatorRetryDelaysMilliseconds = []
+
+    let defaultsName = "FeatherMLXContinuation-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: defaultsName) else {
+      throw SmokeFailure.expectation("无法创建隔离的 MLX 续写设置")
+    }
+    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    controller.modeMemory = InputModeMemory(defaults: defaults)
+    controller.schemeMemory = InputSchemeMemory(defaults: defaults)
+    let settings = ContinuationSettings(defaults: defaults)
+    controller.continuationSettings = settings
+    settings.updateEnabled(true)
+
+    var requests: [SmokeGenerationRequest] = []
+    var contexts: [String] = []
+    controller.continuationRequestFactory = {
+      _, requestID, revision, context, count in
+      contexts.append(context)
+      let request = SmokeGenerationRequest(
+        result: FeatherGenerationResultValue(
+          requestID: requestID,
+          revision: revision,
+          candidates: [
+            FeatherGeneratedCandidateValue(text: "明天", score: -0.2),
+            FeatherGeneratedCandidateValue(text: "今天", score: -0.4),
+          ],
+          elapsedMilliseconds: 6,
+          truncated: false
+        ),
+        pendingPolls: requests.isEmpty ? 0 : 10_000
+      )
+      requests.append(request)
+      guard count == 3 else {
+        throw SmokeFailure.expectation("MLX 续写候选数量不是 3")
+      }
+      return request
+    }
+
+    let client = SmokeTextClient()
+    client.bundleIdentifierValue = "com.openai.codex"
+    controller.activateServer(client)
+    defer {
+      settings.updateEnabled(false)
+      controller.deactivateServer(client)
+      RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    }
+    for (character, keyCode) in zip("nihao", [45, 34, 4, 0, 31]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("MLX 续写测试无法输入拼音：\(character)")
+      }
+    }
+    guard controller.handle(key(" ", code: 49), client: client),
+      waitUntil({ generatedPresenter.isVisible })
+    else {
+      throw SmokeFailure.expectation("文字上屏后没有显示 MLX 续写候选")
+    }
+    guard contexts == ["你好"], generatedPresenter.title == "AI 续写",
+      generatedPresenter.candidates.map(\.text) == ["明天", "今天"]
+    else {
+      throw SmokeFailure.expectation("MLX 续写上下文、标题或候选不正确")
+    }
+    generatedPresenter.select(at: 0)
+    guard client.committed == "你好明天", !generatedPresenter.isVisible, requests.count == 1
+    else {
+      throw SmokeFailure.expectation("点击 MLX 续写没有插入，或发生自动连锁请求")
+    }
+
+    for (character, keyCode) in zip("ni", [45, 34]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("MLX 续写取消测试无法输入拼音")
+      }
+    }
+    guard controller.handle(key(" ", code: 49), client: client),
+      waitUntil({ requests.count == 2 })
+    else {
+      throw SmokeFailure.expectation("没有启动用于取消验证的 MLX 续写请求")
+    }
+    let pending = requests[1]
+    guard controller.handle(key("a", code: 0), client: client),
+      waitUntil({ pending.cancelCount == 1 && pending.closeCount == 1 }),
+      !generatedPresenter.isVisible
+    else {
+      throw SmokeFailure.expectation("新输入没有取消并释放旧 MLX 续写请求")
+    }
+  }
+
   private static func waitUntil(
     _ condition: () -> Bool,
     timeout: TimeInterval = 1
@@ -1205,6 +1305,7 @@ struct InputMethodSmokeMain {
       candidateFontSettings: CandidateFontSettings(defaults: defaults),
       englishCandidateSettings: EnglishCandidateSettings(defaults: defaults),
       generationSettings: GenerationSettings(defaults: defaults),
+      continuationSettings: ContinuationSettings(defaults: defaults),
       rerankingSettings: RerankingSettings(defaults: defaults),
       generationBackendStatusCheck: { .ready }
     )
@@ -1215,6 +1316,7 @@ struct InputMethodSmokeMain {
     let candidateFontSettings = CandidateFontSettings(defaults: defaults)
     let englishCandidateSettings = EnglishCandidateSettings(defaults: defaults)
     let generationSettings = GenerationSettings(defaults: defaults)
+    let continuationSettings = ContinuationSettings(defaults: defaults)
     let rerankingSettings = RerankingSettings(defaults: defaults)
     guard persistentModeSettings.isEnabled,
       !focusSettings.waitsUntilInput, focusSettings.duration == 3.0,
@@ -1223,6 +1325,7 @@ struct InputMethodSmokeMain {
       candidateFontSettings.size == CandidateFontSettings.defaultSize,
       englishCandidateSettings.minimumInputLength == EnglishCandidateSettings.defaultMinimum,
       generationSettings.isEnabled
+        && !continuationSettings.isEnabled
         && !rerankingSettings.isEnabled
         && rerankingSettings.candidateCount == RerankingSettings.defaultCandidateCount
     else {
@@ -1238,6 +1341,7 @@ struct InputMethodSmokeMain {
     settings.selectCandidateFontSize(21)
     settings.selectEnglishCandidateMinimum(6)
     settings.selectGenerationEnabled(false)
+    settings.selectContinuationEnabled(true)
     settings.selectRerankingEnabled(true)
     settings.selectRerankingCandidateCount(18)
     settings.selectRerankingWeight(0.6)
@@ -1250,6 +1354,7 @@ struct InputMethodSmokeMain {
       candidateFontSettings.size == 21,
       englishCandidateSettings.minimumInputLength == 6,
       !generationSettings.isEnabled,
+      continuationSettings.isEnabled,
       rerankingSettings.isEnabled, rerankingSettings.candidateCount == 18,
       rerankingSettings.weight == 0.6,
       rerankingSettings.debounceMilliseconds == 180,
@@ -1417,13 +1522,22 @@ struct InputMethodSmokeMain {
         FeatherGeneratedCandidateValue(text: "世杰", score: -0.8),
         FeatherGeneratedCandidateValue(text: "事件", score: -1.0),
       ],
-      beside: presenter.frame
+      beside: presenter.frame,
+      title: nil
     )
     guard presenter.displayedGeneratedCandidateCount == 3,
       presenter.resolvedCompactLayout == .vertical,
       !presenter.isPreeditRowVisible
     else {
       throw SmokeFailure.expectation("AI 推荐窗没有限制为三个竖排候选")
+    }
+    presenter.update(
+      candidates: [FeatherGeneratedCandidateValue(text: "明天", score: -0.2)],
+      beside: presenter.frame,
+      title: "AI 续写"
+    )
+    guard presenter.isPreeditRowVisible, presenter.displayedPreedit == "AI 续写" else {
+      throw SmokeFailure.expectation("AI 续写候选窗没有显示无编号标题行")
     }
     presenter.generatedActionHandler?(1)
     guard generatedSelection == 1 else {

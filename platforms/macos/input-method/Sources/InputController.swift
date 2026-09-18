@@ -25,6 +25,14 @@ private struct GenerationSnapshot {
   let selection: NSRange
 }
 
+private struct ContinuationSnapshot {
+  let requestID: UInt64
+  let revision: UInt64
+  let context: String
+  let selection: NSRange
+  let foregroundProcessIdentifier: pid_t?
+}
+
 private struct ScoringSnapshot {
   let requestID: UInt64
   let revision: UInt64
@@ -72,6 +80,7 @@ final class InputController: IMKInputController {
   var candidatePageSettings = CandidatePageSettings.shared
   var englishCandidateSettings = EnglishCandidateSettings.shared
   var generationSettings = GenerationSettings.shared
+  var continuationSettings = ContinuationSettings.shared
   var rerankingSettings = RerankingSettings.shared
   var capsLockState: () -> Bool = {
     CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
@@ -86,6 +95,9 @@ final class InputController: IMKInputController {
       (FeatherSession, UInt64, UInt64, String, String, String, Int) throws ->
         any FeatherGenerationRequesting
     )?
+  var continuationDebounceMilliseconds: UInt64 = 400
+  var continuationRequestFactory:
+    ((FeatherSession, UInt64, UInt64, String, Int) throws -> any FeatherGenerationRequesting)?
   var scoringDebounceMilliseconds: UInt64?
   var scoringAdoptionDeadlineMilliseconds: UInt64?
   var scoringPollMilliseconds: UInt64 = 20
@@ -114,11 +126,16 @@ final class InputController: IMKInputController {
   private var focusIndicatorVersion = UUID()
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
   private var generatedSelectionHandler: ((FeatherGeneratedCandidateValue, IMKTextInput) -> Bool)?
+  private var generatedCandidatesAcceptShortcuts = true
   private var consumedGeneratedShortcutKey: UInt16?
   private var generationTask: Task<Void, Never>?
   private var generationRequest: (any FeatherGenerationRequesting)?
   private var generationVersion = UUID()
   private var nextGenerationRequestID: UInt64 = 0
+  private var continuationTask: Task<Void, Never>?
+  private var continuationRequest: (any FeatherGenerationRequesting)?
+  private var continuationVersion = UUID()
+  private var nextContinuationRequestID: UInt64 = 0
   private var scoringTask: Task<Void, Never>?
   private var scoringRequest: (any FeatherScoringRequesting)?
   private var scoringVersion = UUID()
@@ -127,10 +144,12 @@ final class InputController: IMKInputController {
   private var candidateOrderIsReranked = false
   private var recentContext = ""
   private var observesGenerationSettings = false
+  private var observesContinuationSettings = false
   private var observesRerankingSettings = false
 
   override func activateServer(_ sender: Any!) {
     startObservingGenerationSettings()
+    startObservingContinuationSettings()
     startObservingRerankingSettings()
     cancelFocusIndicator()
     cancelAIWork(clearContext: true)
@@ -201,6 +220,7 @@ final class InputController: IMKInputController {
 
   override func deactivateServer(_ sender: Any!) {
     stopObservingGenerationSettings()
+    stopObservingContinuationSettings()
     stopObservingRerankingSettings()
     cancelFocusIndicator()
     cancelAIWork(clearContext: true)
@@ -286,6 +306,10 @@ final class InputController: IMKInputController {
       cancelAIWork(clearContext: true)
       cancelEngineComposition()
       return false
+    }
+
+    if event.type == .keyDown, continuationTask != nil || !generatedCandidatesAcceptShortcuts {
+      cancelContinuation()
     }
 
     if event.type == .flagsChanged {
@@ -511,10 +535,12 @@ final class InputController: IMKInputController {
   private func apply(_ response: FeatherResponseValue, to client: IMKTextInput) {
     cancelScoring(hideIndicator: false)
     cancelGeneration()
+    cancelContinuation()
     expandedCandidates = nil
     candidateOrderIsReranked = false
     currentResponse = response
-    if let commit = response.commit, !commit.isEmpty {
+    let committed = response.commit.flatMap { $0.isEmpty ? nil : $0 }
+    if let commit = committed {
       client.insertText(commit, replacementRange: NSRange(location: NSNotFound, length: 0))
       recentContext = String((recentContext + commit).suffix(80))
     }
@@ -531,6 +557,9 @@ final class InputController: IMKInputController {
       currentCandidateAnchor = nil
       candidatePresenter.setRerankingActive(false)
       candidatePresenter.hide()
+      if response.preedit.isEmpty, committed != nil {
+        scheduleContinuation(for: response, client: client)
+      }
     } else {
       let anchor = candidateAnchor(for: client)
       currentCandidateAnchor = anchor
@@ -831,6 +860,7 @@ final class InputController: IMKInputController {
   func presentGeneratedCandidates(
     _ candidates: [FeatherGeneratedCandidateValue],
     for client: IMKTextInput,
+    acceptsShortcuts: Bool = true,
     onSelect: @escaping (FeatherGeneratedCandidateValue, IMKTextInput) -> Bool
   ) {
     guard activeClient === client, !candidates.isEmpty else {
@@ -838,16 +868,18 @@ final class InputController: IMKInputController {
       return
     }
     generatedCandidates = Array(candidates.prefix(3))
+    generatedCandidatesAcceptShortcuts = acceptsShortcuts
     generatedSelectionHandler = onSelect
     generatedCandidatePresenter.update(
       candidates: generatedCandidates,
-      beside: candidatePresenter.frame
+      beside: candidatePresenter.frame,
+      title: acceptsShortcuts ? nil : "AI 续写"
     )
   }
 
   private func handleGeneratedCandidateShortcut(_ event: NSEvent, client: IMKTextInput) -> Bool {
     let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-    guard modifiers == .option else {
+    guard generatedCandidatesAcceptShortcuts, modifiers == .option else {
       consumedGeneratedShortcutKey = nil
       return false
     }
@@ -890,6 +922,7 @@ final class InputController: IMKInputController {
     generatedCandidatePresenter.hide()
     generatedCandidates = []
     generatedSelectionHandler = nil
+    generatedCandidatesAcceptShortcuts = true
     consumedGeneratedShortcutKey = nil
   }
 
@@ -1054,13 +1087,180 @@ final class InputController: IMKInputController {
     }
   }
 
+  private func scheduleContinuation(for response: FeatherResponseValue, client: IMKTextInput) {
+    guard isContinuationEnabled, active, !response.directMode, response.preedit.isEmpty,
+      !recentContext.isEmpty, client.selectedRange().length == 0
+    else { return }
+
+    nextContinuationRequestID &+= 1
+    if nextContinuationRequestID == 0 { nextContinuationRequestID = 1 }
+    let snapshot = ContinuationSnapshot(
+      requestID: nextContinuationRequestID,
+      revision: response.revision,
+      context: recentContext,
+      selection: client.selectedRange(),
+      foregroundProcessIdentifier: NSWorkspace.shared.frontmostApplication?.processIdentifier
+    )
+    let version = continuationVersion
+    let debounce = continuationDebounceMilliseconds
+    continuationTask = Task { @MainActor [weak self, weak client] in
+      do {
+        if debounce > 0 {
+          try await Task.sleep(nanoseconds: debounce * 1_000_000)
+        }
+        guard let self, let client,
+          self.continuationSnapshotIsCurrent(snapshot, version: version, client: client),
+          let session = self.session
+        else { return }
+        let request: any FeatherGenerationRequesting
+        if let factory = self.continuationRequestFactory {
+          request = try factory(session, snapshot.requestID, snapshot.revision, snapshot.context, 3)
+        } else {
+          request = try session.startContinuation(
+            requestID: snapshot.requestID,
+            revision: snapshot.revision,
+            context: snapshot.context,
+            count: 3
+          )
+        }
+        self.continuationRequest = request
+        while !Task.isCancelled {
+          guard
+            self.continuationSnapshotIsCurrent(
+              snapshot, version: version, client: client
+            )
+          else {
+            try? request.cancel()
+            self.finishContinuation(request, version: version)
+            return
+          }
+          switch try request.poll(
+            currentRequestID: snapshot.requestID,
+            currentRevision: snapshot.revision
+          ) {
+          case .pending:
+            try await Task.sleep(nanoseconds: self.generationPollMilliseconds * 1_000_000)
+          case .ready(let result):
+            guard result.requestID == snapshot.requestID,
+              result.revision == snapshot.revision,
+              self.continuationSnapshotIsCurrent(snapshot, version: version, client: client)
+            else {
+              try? request.cancel()
+              self.finishContinuation(request, version: version)
+              return
+            }
+            let suggestions = result.candidates.filter {
+              !$0.text.trimmingCharacters(
+                in: .whitespacesAndNewlines
+              ).isEmpty
+            }
+            self.finishContinuation(request, version: version)
+            guard !suggestions.isEmpty else { return }
+            self.presentGeneratedCandidates(
+              suggestions,
+              for: client,
+              acceptsShortcuts: false
+            ) { [weak self, weak client] candidate, target in
+              guard let self, let client, target === client,
+                self.continuationSnapshotIsCurrent(snapshot, version: version, client: client)
+              else { return false }
+              self.cancelContinuation()
+              target.insertText(
+                candidate.text,
+                replacementRange: NSRange(location: NSNotFound, length: 0)
+              )
+              self.recentContext = String((snapshot.context + candidate.text).suffix(80))
+              return true
+            }
+            return
+          case .failed, .cancelled, .stale:
+            self.finishContinuation(request, version: version)
+            return
+          }
+        }
+      } catch {
+        guard let self, self.continuationVersion == version else { return }
+        self.finishContinuation(self.continuationRequest, version: version)
+      }
+    }
+  }
+
+  private func continuationSnapshotIsCurrent(
+    _ snapshot: ContinuationSnapshot,
+    version: UUID,
+    client: IMKTextInput
+  ) -> Bool {
+    active && isContinuationEnabled && !secureInputEnabled()
+      && continuationVersion == version
+      && activeClient === client
+      && currentResponse?.revision == snapshot.revision
+      && currentResponse?.preedit.isEmpty == true
+      && recentContext == snapshot.context
+      && NSEqualRanges(client.selectedRange(), snapshot.selection)
+      && NSWorkspace.shared.frontmostApplication?.processIdentifier
+        == snapshot.foregroundProcessIdentifier
+  }
+
+  private func finishContinuation(
+    _ request: (any FeatherGenerationRequesting)?,
+    version: UUID
+  ) {
+    request?.close()
+    guard continuationVersion == version else { return }
+    continuationRequest = nil
+    continuationTask = nil
+  }
+
+  private func cancelContinuation() {
+    continuationVersion = UUID()
+    continuationTask?.cancel()
+    continuationTask = nil
+    try? continuationRequest?.cancel()
+    continuationRequest?.close()
+    continuationRequest = nil
+    if !generatedCandidatesAcceptShortcuts {
+      clearGeneratedCandidates()
+    }
+  }
+
   private func cancelAIWork(clearContext: Bool = false) {
     cancelScoring()
     cancelGeneration(clearContext: clearContext)
+    cancelContinuation()
   }
 
   private var isGenerationEnabled: Bool {
     generationEnabled?() ?? generationSettings.isEnabled
+  }
+
+  private var isContinuationEnabled: Bool {
+    continuationSettings.isEnabled
+  }
+
+  private func startObservingContinuationSettings() {
+    guard !observesContinuationSettings else { return }
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(continuationSettingsChanged(_:)),
+      name: .continuationSettingsDidChange,
+      object: nil
+    )
+    observesContinuationSettings = true
+  }
+
+  private func stopObservingContinuationSettings() {
+    guard observesContinuationSettings else { return }
+    NotificationCenter.default.removeObserver(
+      self,
+      name: .continuationSettingsDidChange,
+      object: nil
+    )
+    observesContinuationSettings = false
+  }
+
+  @objc private func continuationSettingsChanged(_ notification: Notification) {
+    guard notification.object as? ContinuationSettings === continuationSettings else { return }
+    if !isContinuationEnabled { cancelContinuation() }
   }
 
   private func startObservingGenerationSettings() {

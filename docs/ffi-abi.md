@@ -111,6 +111,10 @@ request_free
 `value`、纯模型 `lm_score` 和最终融合 `score`。评分请求使用独立的 poll、cancel、free
 函数，并遵循相同的 request ID、revision、线程所有权和终态规则。
 
+上屏续写使用 `feather_ai_continuation_start()` 创建普通 `FeatherAiRequest`，并复用生成
+请求的 poll、cancel、free 与 `FeatherAiResult`。独立入口固定调用 `/continuations`，平台
+无需构造虚假的拼音输入或方案值。
+
 ## 能力位
 
 ABI v2 当前公开以下能力：
@@ -128,6 +132,7 @@ ABI v2 当前公开以下能力：
   生成请求。
 - `FEATHER_CAP_MLX_BACKEND_STATUS`：支持有界的本机 MLX 健康检查。
 - `FEATHER_CAP_ASYNC_MLX_SCORING`：支持保留 Rime 不透明候选 ID 的异步 MLX 评分请求。
+- `FEATHER_CAP_ASYNC_MLX_CONTINUATION`：支持上屏后异步 MLX 续写请求。
 
 平台层只应要求自身实际依赖的能力。新增可选能力时增加新的位，不改变已有位的含义。
 

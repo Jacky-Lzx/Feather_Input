@@ -1,8 +1,8 @@
 use feather_ai::{
-    AiProvider, AiScoringProvider, GenerationBatch, GenerationRequest, GenerationTask,
-    GenerationTaskState, InputScheme as AiInputScheme, MlxBackendStatus, MlxProvider,
-    ScoreNormalization, ScoringBatch, ScoringCandidate, ScoringRequest, ScoringTask,
-    ScoringTaskState,
+    AiContinuationProvider, AiProvider, AiScoringProvider, ContinuationRequest, GenerationBatch,
+    GenerationRequest, GenerationTask, GenerationTaskState, InputScheme as AiInputScheme,
+    MlxBackendStatus, MlxProvider, ScoreNormalization, ScoringBatch, ScoringCandidate,
+    ScoringRequest, ScoringTask, ScoringTaskState,
 };
 use feather_core::{
     CandidateId, DispatchResult, InputCoordinator, InputEffect, InputEvent, InputMode, Key,
@@ -29,6 +29,7 @@ const CAP_ENGLISH_CANDIDATE_MINIMUM: u64 = 1 << 8;
 const CAP_ASYNC_MLX_GENERATION: u64 = 1 << 9;
 const CAP_MLX_BACKEND_STATUS: u64 = 1 << 10;
 const CAP_ASYNC_MLX_SCORING: u64 = 1 << 11;
+const CAP_ASYNC_MLX_CONTINUATION: u64 = 1 << 12;
 const MAX_CANDIDATE_SLICE_LIMIT: usize = 256;
 
 const AI_REQUEST_PENDING: u32 = 0;
@@ -216,6 +217,16 @@ fn new_ai_request(
 ) -> *mut FeatherAiRequest {
     Box::into_raw(Box::new(FeatherAiRequest {
         task: GenerationTask::start(provider, request),
+        owner_thread: thread::current().id(),
+    }))
+}
+
+fn new_ai_continuation_request(
+    provider: Arc<dyn AiContinuationProvider>,
+    request: ContinuationRequest,
+) -> *mut FeatherAiRequest {
+    Box::into_raw(Box::new(FeatherAiRequest {
+        task: GenerationTask::start_continuation(provider, request),
         owner_thread: thread::current().id(),
     }))
 }
@@ -643,6 +654,7 @@ pub extern "C" fn feather_ime_capabilities() -> u64 {
         | CAP_ASYNC_MLX_GENERATION
         | CAP_MLX_BACKEND_STATUS
         | CAP_ASYNC_MLX_SCORING
+        | CAP_ASYNC_MLX_CONTINUATION
 }
 
 #[no_mangle]
@@ -1029,6 +1041,46 @@ pub unsafe extern "C" fn feather_ai_generate_start(
                 )
             })?;
             Ok(new_ai_request(Arc::new(MlxProvider::default()), request))
+        })
+    }
+}
+
+#[no_mangle]
+/// Starts one asynchronous MLX post-commit continuation request.
+///
+/// # Safety
+///
+/// `context` must point to valid NUL-terminated UTF-8 for the duration of the
+/// call. Output pointers follow `feather_ime_new`.
+pub unsafe extern "C" fn feather_ai_continuation_start(
+    request_id: u64,
+    revision: u64,
+    context: *const c_char,
+    count: usize,
+    out_request: *mut *mut FeatherAiRequest,
+    out_error: *mut *mut FeatherError,
+) -> u32 {
+    unsafe {
+        output_call(out_request, out_error, || {
+            let count = u8::try_from(count).map_err(|_| {
+                FfiFailure::new(StatusCode::InvalidArgument, "AI 续写候选数量超出范围")
+            })?;
+            let request = ContinuationRequest {
+                request_id,
+                revision,
+                context: utf8_argument(context, "context")?.to_owned(),
+                count,
+            };
+            request.validate().map_err(|error| {
+                FfiFailure::new(
+                    StatusCode::InvalidArgument,
+                    format!("AI 续写请求无效：{error}"),
+                )
+            })?;
+            Ok(new_ai_continuation_request(
+                Arc::new(MlxProvider::default()),
+                request,
+            ))
         })
     }
 }
@@ -1602,6 +1654,7 @@ mod tests {
                 | CAP_ASYNC_MLX_GENERATION
                 | CAP_MLX_BACKEND_STATUS
                 | CAP_ASYNC_MLX_SCORING
+                | CAP_ASYNC_MLX_CONTINUATION
         );
     }
 

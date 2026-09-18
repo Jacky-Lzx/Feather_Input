@@ -12,6 +12,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateFontSettings: .shared,
     englishCandidateSettings: .shared,
     generationSettings: .shared,
+    continuationSettings: .shared,
     rerankingSettings: .shared,
     generationBackendStatusCheck: { FeatherMLXBackendStatusProbe.check() }
   )
@@ -25,6 +26,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private let candidateFontSettings: CandidateFontSettings
   private let englishCandidateSettings: EnglishCandidateSettings
   private let generationSettings: GenerationSettings
+  private let continuationSettings: ContinuationSettings
   private let rerankingSettings: RerankingSettings
   private let generationBackendStatusCheck: @Sendable () -> MLXBackendStatus
   private var window: NSWindow?
@@ -42,6 +44,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   private weak var englishCandidateMinimumValue: NSTextField?
   private weak var englishCandidateMinimumStepper: NSStepper?
   private weak var generationEnabledButton: NSButton?
+  private weak var continuationEnabledButton: NSButton?
   private weak var rerankingEnabledButton: NSButton?
   private weak var rerankingCandidateCountValue: NSTextField?
   private weak var rerankingCandidateCountStepper: NSStepper?
@@ -65,6 +68,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateFontSettings: CandidateFontSettings,
     englishCandidateSettings: EnglishCandidateSettings,
     generationSettings: GenerationSettings,
+    continuationSettings: ContinuationSettings,
     rerankingSettings: RerankingSettings,
     generationBackendStatusCheck: @escaping @Sendable () -> MLXBackendStatus = {
       FeatherMLXBackendStatusProbe.check()
@@ -79,6 +83,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     self.candidateFontSettings = candidateFontSettings
     self.englishCandidateSettings = englishCandidateSettings
     self.generationSettings = generationSettings
+    self.continuationSettings = continuationSettings
     self.rerankingSettings = rerankingSettings
     self.generationBackendStatusCheck = generationBackendStatusCheck
   }
@@ -143,6 +148,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   func selectGenerationEnabled(_ isEnabled: Bool) {
     generationSettings.updateEnabled(isEnabled)
+    refreshControls()
+  }
+
+  func selectContinuationEnabled(_ isEnabled: Bool) {
+    continuationSettings.updateEnabled(isEnabled)
     refreshControls()
   }
 
@@ -384,6 +394,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     )
     self.generationEnabledButton = generationEnabledButton
 
+    let continuationEnabledButton = NSButton(
+      checkboxWithTitle: "上屏后显示 AI 续写候选（实验）",
+      target: self,
+      action: #selector(continuationEnabledChanged(_:))
+    )
+    self.continuationEnabledButton = continuationEnabledButton
+
     let rerankingEnabledButton = NSButton(
       checkboxWithTitle: "用 AI 重排 Rime 候选（实验）",
       target: self,
@@ -479,6 +496,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     generationHelp.font = .systemFont(ofSize: 12)
     generationHelp.textColor = .secondaryLabelColor
 
+    let continuationHelp = NSTextField(
+      wrappingLabelWithString:
+        "文字上屏后停顿 400 ms，侧边显示最多 3 个本地 MLX 续写候选；只可点击插入，新输入会立即取消。"
+    )
+    continuationHelp.font = .systemFont(ofSize: 12)
+    continuationHelp.textColor = .secondaryLabelColor
+
     let generationBackendStatusLabel = NSTextField(
       labelWithString: MLXBackendStatus.checking.displayText
     )
@@ -509,6 +533,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     let emptyGenerationToggle = NSTextField(labelWithString: "")
     let emptyGenerationHelp = NSTextField(labelWithString: "")
     let emptyGenerationBackendStatus = NSTextField(labelWithString: "")
+    let emptyContinuationToggle = NSTextField(labelWithString: "")
+    let emptyContinuationHelp = NSTextField(labelWithString: "")
     let emptyRerankingToggle = NSTextField(labelWithString: "")
     let emptyRerankingHelp = NSTextField(labelWithString: "")
 
@@ -536,6 +562,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       [emptyRerankingHelp, rerankingHelp],
       [emptyGenerationToggle, generationEnabledButton],
       [emptyGenerationHelp, generationHelp],
+      [emptyContinuationToggle, continuationEnabledButton],
+      [emptyContinuationHelp, continuationHelp],
       [emptyGenerationBackendStatus, generationBackendStatusControls],
     ])
     grid.column(at: 0).xPlacement = .trailing
@@ -558,6 +586,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     candidateFontHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     englishCandidateMinimumHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     generationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+    continuationHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     rerankingHelp.widthAnchor.constraint(equalToConstant: 300).isActive = true
     NSLayoutConstraint.activate([
       scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -598,6 +627,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       "\(englishCandidateSettings.minimumInputLength) 个字符"
     englishCandidateMinimumStepper?.integerValue = englishCandidateSettings.minimumInputLength
     generationEnabledButton?.state = generationSettings.isEnabled ? .on : .off
+    continuationEnabledButton?.state = continuationSettings.isEnabled ? .on : .off
     let rerankingEnabled = rerankingSettings.isEnabled
     rerankingEnabledButton?.state = rerankingEnabled ? .on : .off
     rerankingCandidateCountValue?.stringValue = "\(rerankingSettings.candidateCount)"
@@ -666,6 +696,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
   @objc private func generationEnabledChanged(_ sender: NSButton) {
     selectGenerationEnabled(sender.state == .on)
+  }
+
+  @objc private func continuationEnabledChanged(_ sender: NSButton) {
+    selectContinuationEnabled(sender.state == .on)
   }
 
   @objc private func rerankingEnabledChanged(_ sender: NSButton) {

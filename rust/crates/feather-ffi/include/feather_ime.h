@@ -47,7 +47,8 @@ enum FeatherCapability {
     FEATHER_CAP_ENGLISH_CANDIDATE_MINIMUM = UINT64_C(1) << 8,
     FEATHER_CAP_ASYNC_MLX_GENERATION = UINT64_C(1) << 9,
     FEATHER_CAP_MLX_BACKEND_STATUS = UINT64_C(1) << 10,
-    FEATHER_CAP_ASYNC_MLX_SCORING = UINT64_C(1) << 11
+    FEATHER_CAP_ASYNC_MLX_SCORING = UINT64_C(1) << 11,
+    FEATHER_CAP_ASYNC_MLX_CONTINUATION = UINT64_C(1) << 12
 };
 
 enum FeatherAiRequestState {
@@ -224,6 +225,12 @@ FeatherStatus feather_ai_generate_start(uint64_t request_id,
                                         size_t count,
                                         FeatherAiRequest **out_request,
                                         FeatherError **out_error);
+FeatherStatus feather_ai_continuation_start(uint64_t request_id,
+                                            uint64_t revision,
+                                            const char *context,
+                                            size_t count,
+                                            FeatherAiRequest **out_request,
+                                            FeatherError **out_error);
 FeatherStatus feather_ai_score_start(uint64_t request_id,
                                      uint64_t revision,
                                      const char *context,

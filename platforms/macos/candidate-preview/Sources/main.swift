@@ -515,7 +515,8 @@ private final class PreviewWindowController: NSWindowController, NSWindowDelegat
     }
     generatedPresenter.update(
       candidates: generatedCandidates,
-      beside: candidatePresenter.frame
+      beside: candidatePresenter.frame,
+      title: nil
     )
   }
 

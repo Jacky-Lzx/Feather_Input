@@ -190,8 +190,16 @@ final class OwnedGeneratedCandidatePresenter: GeneratedCandidatePresenting {
     store.deactivate(ownershipID)
   }
 
-  func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect) {
-    store.presenter(for: ownershipID)?.update(candidates: candidates, beside: anchor)
+  func update(
+    candidates: [FeatherGeneratedCandidateValue],
+    beside anchor: NSRect,
+    title: String?
+  ) {
+    store.presenter(for: ownershipID)?.update(
+      candidates: candidates,
+      beside: anchor,
+      title: title
+    )
   }
 
   func reposition(beside anchor: NSRect) {

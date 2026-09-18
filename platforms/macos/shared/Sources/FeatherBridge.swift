@@ -144,6 +144,7 @@ final class FeatherSession {
   private static let englishCandidateMinimumCapability: UInt64 = 1 << 8
   private static let asyncMLXGenerationCapability: UInt64 = 1 << 9
   private static let asyncMLXScoringCapability: UInt64 = 1 << 11
+  private static let asyncMLXContinuationCapability: UInt64 = 1 << 12
 
   private var handle: OpaquePointer?
   private let capabilities: UInt64
@@ -386,6 +387,41 @@ final class FeatherSession {
     }
     guard let request else {
       throw FeatherBridgeError.invalidSuccess(operation: "start MLX generation")
+    }
+    return FeatherGenerationRequest(handle: request)
+  }
+
+  func startContinuation(
+    requestID: UInt64,
+    revision: UInt64,
+    context: String,
+    count: Int
+  ) throws -> FeatherGenerationRequest {
+    let missing = Self.asyncMLXContinuationCapability & ~capabilities
+    guard missing == 0 else {
+      throw FeatherBridgeError.missingCapabilities(missing)
+    }
+
+    var request: OpaquePointer?
+    var ffiError: UnsafeMutablePointer<FeatherError>?
+    let status = context.withCString { contextValue in
+      feather_ai_continuation_start(
+        requestID,
+        revision,
+        contextValue,
+        count,
+        &request,
+        &ffiError
+      )
+    }
+    do {
+      try Self.check(status: status, error: ffiError, operation: "start MLX continuation")
+    } catch {
+      feather_ai_request_free(request)
+      throw error
+    }
+    guard let request else {
+      throw FeatherBridgeError.invalidSuccess(operation: "start MLX continuation")
     }
     return FeatherGenerationRequest(handle: request)
   }
