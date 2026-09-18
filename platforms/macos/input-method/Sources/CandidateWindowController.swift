@@ -233,6 +233,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   var compactLayout: CandidateLayout { resolvedCompactLayout }
   var frame: NSRect { panel.frame }
   var currentPanelSize: NSSize { panel.frame.size }
+  var currentPanelAlphaValue: CGFloat { panel.alphaValue }
   var isVisible: Bool { panel.isVisible }
   var isRerankingIndicatorVisible: Bool { !rerankingIndicator.isHidden }
   var displayedPreedit: String { preeditLabel.stringValue }
@@ -428,12 +429,17 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       anchor: anchor,
       placeBesideAnchor: placeBesideAnchor
     )
-    panel.setFrame(frame, display: false)
+    if needsOrdering {
+      panel.alphaValue = 0
+    }
+    panel.setFrame(frame, display: needsOrdering)
     backgroundView.layoutSubtreeIfNeeded()
     backgroundView.displayIfNeeded()
+    panel.displayIfNeeded()
     panel.invalidateShadow()
     if needsOrdering {
       panel.orderFrontRegardless()
+      panel.alphaValue = 1
     }
   }
 

@@ -1510,7 +1510,12 @@ struct InputMethodSmokeMain {
     }
     presenter.hide()
     presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
-    guard presenter.currentPanelSize == defaultPanelSize else {
+    let restartedPanelSize = presenter.currentPanelSize
+    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    guard restartedPanelSize == defaultPanelSize,
+      presenter.currentPanelSize == restartedPanelSize,
+      presenter.currentPanelAlphaValue == 1
+    else {
       throw SmokeFailure.expectation("输入组合结束后候选窗没有重置稳定宽度")
     }
 
