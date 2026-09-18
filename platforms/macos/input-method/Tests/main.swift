@@ -716,6 +716,7 @@ struct InputMethodSmokeMain {
     let rerankingSettings = RerankingSettings(defaults: rerankingDefaults)
     rerankingSettings.updateCandidateCount(12)
     controller.rerankingSettings = rerankingSettings
+    controller.continuationSettings = ContinuationSettings(defaults: rerankingDefaults)
     controller.generationContextProvider = { _ in "测试上下文" }
     controller.focusIndicatorRetryDelaysMilliseconds = []
     let presenter = SmokeCandidatePresenter()
@@ -883,6 +884,52 @@ struct InputMethodSmokeMain {
     RunLoop.current.run(until: Date().addingTimeInterval(0.02))
     guard requests.count == 3 else {
       throw SmokeFailure.expectation("鼠标离开前的同一轮输入重新触发了 MLX 重排")
+    }
+
+    guard controller.handle(key("\u{1b}", code: 53), client: client) else {
+      throw SmokeFailure.expectation("无法取消 AI 重排交互测试留下的组合")
+    }
+    shouldRemainPending = false
+    let requestCountBeforeReturnTests = requests.count
+    for (character, keyCode) in zip("ni", [45, 34]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("回车默认候选测试无法输入拼音")
+      }
+    }
+    guard
+      waitUntil({
+        requests.count == requestCountBeforeReturnTests + 1 && requests.last?.closeCount == 1
+      }), presenter.highlighted == 0
+    else {
+      throw SmokeFailure.expectation("回车默认候选测试没有完成 AI 重排")
+    }
+    let committedBeforeRawReturn = client.committed
+    guard controller.handle(key("\r", code: 36), client: client),
+      client.committed == committedBeforeRawReturn + "ni"
+    else {
+      throw SmokeFailure.expectation("高亮第一项时回车没有提交原始输入")
+    }
+
+    for (character, keyCode) in zip("ni", [45, 34]) {
+      guard controller.handle(key(String(character), code: UInt16(keyCode)), client: client) else {
+        throw SmokeFailure.expectation("回车非默认候选测试无法输入拼音")
+      }
+    }
+    guard
+      waitUntil({
+        requests.count == requestCountBeforeReturnTests + 2 && requests.last?.closeCount == 1
+      }), controller.handle(key("", code: 125, modifiers: .function), client: client),
+      presenter.highlighted == 1,
+      presenter.candidates.indices.contains(1)
+    else {
+      throw SmokeFailure.expectation("回车非默认候选测试无法移动高亮")
+    }
+    let selectedByReturn = presenter.candidates[1].text
+    let committedBeforeSelectedReturn = client.committed
+    guard controller.handle(key("\r", code: 36), client: client),
+      client.committed == committedBeforeSelectedReturn + selectedByReturn
+    else {
+      throw SmokeFailure.expectation("高亮非第一项时回车没有提交所选候选")
     }
   }
 

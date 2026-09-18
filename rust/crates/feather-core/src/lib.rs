@@ -81,6 +81,71 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct EnterEngine {
+        text: String,
+        highlighted: usize,
+        revision: u64,
+    }
+
+    impl InputEngine for EnterEngine {
+        fn reset(&mut self) {
+            self.text.clear();
+            self.highlighted = 0;
+            self.revision += 1;
+        }
+
+        fn handle(&mut self, command: EngineCommand) -> Result<EngineResponse, EngineError> {
+            match command {
+                EngineCommand::Insert(text) => self.text.push_str(&text),
+                EngineCommand::MoveNext => self.highlighted = 1,
+                command @ (EngineCommand::CommitRaw | EngineCommand::CommitHighlighted) => {
+                    let raw = std::mem::take(&mut self.text);
+                    let commit = if command == EngineCommand::CommitRaw {
+                        raw
+                    } else {
+                        format!("selected:{raw}")
+                    };
+                    self.highlighted = 0;
+                    self.revision += 1;
+                    return Ok(EngineResponse {
+                        handled: true,
+                        commit: Some(commit),
+                    });
+                }
+                _ => {}
+            }
+            self.revision += 1;
+            Ok(EngineResponse {
+                handled: true,
+                commit: None,
+            })
+        }
+
+        fn snapshot(&self) -> Result<EngineSnapshot, EngineError> {
+            let candidates = if self.text.is_empty() {
+                Vec::new()
+            } else {
+                ["first", "second"]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, text)| EngineCandidate {
+                        id: EngineCandidateId(u64::try_from(index).unwrap()),
+                        text: text.into(),
+                        annotation: None,
+                    })
+                    .collect()
+            };
+            Ok(EngineSnapshot {
+                revision: self.revision,
+                preedit: self.text.clone(),
+                cursor_utf8: self.text.len(),
+                highlighted: (!candidates.is_empty()).then_some(self.highlighted),
+                candidates,
+            })
+        }
+    }
+
     #[test]
     fn inactive_and_direct_modes_pass_text_through() {
         let mut core = InputCoordinator::new(FakeEngine::default());
@@ -166,6 +231,26 @@ mod tests {
                 InputEffect::HideCandidates,
             ]
         );
+    }
+
+    #[test]
+    fn enter_commits_raw_at_first_candidate_and_selected_text_after_moving() {
+        let mut core = InputCoordinator::new(EnterEngine::default());
+        core.dispatch(InputEvent::Activate).unwrap();
+        core.dispatch(InputEvent::Key(Key::Text("ni".into())))
+            .unwrap();
+        let first = core.dispatch(InputEvent::Key(Key::Enter)).unwrap();
+        assert!(first
+            .effects
+            .contains(&InputEffect::CommitText("ni".into())));
+
+        core.dispatch(InputEvent::Key(Key::Text("ni".into())))
+            .unwrap();
+        core.dispatch(InputEvent::Key(Key::Down)).unwrap();
+        let second = core.dispatch(InputEvent::Key(Key::Enter)).unwrap();
+        assert!(second
+            .effects
+            .contains(&InputEffect::CommitText("selected:ni".into())));
     }
 
     #[test]

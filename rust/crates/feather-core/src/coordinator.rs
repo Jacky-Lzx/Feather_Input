@@ -221,7 +221,10 @@ impl InputCoordinator {
             Key::Backspace => EngineCommand::Backspace,
             Key::Delete => EngineCommand::Delete,
             Key::Space => EngineCommand::CommitHighlighted,
-            Key::Enter => EngineCommand::CommitRaw,
+            Key::Enter => match self.engine.snapshot()?.highlighted {
+                Some(index) if index > 0 => EngineCommand::CommitHighlighted,
+                _ => EngineCommand::CommitRaw,
+            },
             Key::Escape => EngineCommand::Cancel,
             Key::Left | Key::Up => EngineCommand::MovePrevious,
             Key::Right | Key::Down => EngineCommand::MoveNext,

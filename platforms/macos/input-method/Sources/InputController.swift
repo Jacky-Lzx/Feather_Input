@@ -397,8 +397,14 @@ final class InputController: IMKInputController {
         if let movement {
           return moveInRerankedCandidates(by: movement, client: client)
         }
-        if event.keyCode == 49 || event.keyCode == 36 || event.keyCode == 76 {
+        if event.keyCode == 49 {
           return selectRerankedCandidate(at: currentResponse?.highlighted ?? 0, client: client)
+        }
+        if event.keyCode == 36 || event.keyCode == 76 {
+          let highlighted = currentResponse?.highlighted ?? 0
+          return highlighted == 0
+            ? dispatch(.enter, to: client)
+            : selectRerankedCandidate(at: highlighted, client: client)
         }
         if let characters = event.charactersIgnoringModifiers ?? event.characters,
           let number = Int(characters), (1...9).contains(number)
