@@ -50,6 +50,7 @@ swiftc \
     "$shared_root"/Sources/*.swift \
     "$source_root"/Sources/CandidateWindowStyle.swift \
     "$source_root"/Sources/CandidateWindowController.swift \
+    "$source_root"/Sources/CandidateReranker.swift \
     "$source_root"/Sources/CandidateFontSettings.swift \
     "$source_root"/Sources/CapsLockSwitch.swift \
     "$source_root"/Sources/CandidatePageSettings.swift \

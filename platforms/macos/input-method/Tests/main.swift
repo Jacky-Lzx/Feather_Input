@@ -49,6 +49,7 @@ struct InputMethodSmokeMain {
     try verifyCandidateLayouts()
     try verifyCandidateOverlayOwnership()
     try verifyGeneratedCandidateOverlayOwnership()
+    try verifyCandidateReranking()
     try verifyMLXGenerationFlow()
     try verifyModeIndicatorOwnership()
     try verifyPersistentModeIndicatorOwnership()
@@ -597,6 +598,46 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("输入法停用后常驻中英提示仍然显示")
     }
     try verifySharedCandidatePanelCount()
+  }
+
+  private static func verifyCandidateReranking() throws {
+    let original = [
+      FeatherCandidateValue(revision: 7, value: 101, text: "市区"),
+      FeatherCandidateValue(revision: 7, value: 202, text: "失去"),
+      FeatherCandidateValue(revision: 7, value: 303, text: "诗句"),
+    ]
+    let result = FeatherScoringResultValue(
+      requestID: 9,
+      revision: 7,
+      candidates: [
+        FeatherScoredCandidateValue(value: 303, text: "诗句", modelScore: -0.2, score: -0.1),
+        FeatherScoredCandidateValue(value: 101, text: "市区", modelScore: -0.5, score: -0.4),
+        FeatherScoredCandidateValue(value: 202, text: "失去", modelScore: -0.6, score: -0.4),
+      ],
+      elapsedMilliseconds: 41
+    )
+    guard
+      CandidateReranker.apply(result, requestID: 9, revision: 7, to: original)?.map(\.value)
+        == [303, 101, 202]
+    else {
+      throw SmokeFailure.expectation("AI 融合分数没有稳定重排 Rime 候选")
+    }
+
+    let mismatched = FeatherScoringResultValue(
+      requestID: 9,
+      revision: 7,
+      candidates: [
+        FeatherScoredCandidateValue(value: 303, text: "不同文字", modelScore: -0.2, score: -0.1),
+        FeatherScoredCandidateValue(value: 101, text: "市区", modelScore: -0.5, score: -0.4),
+        FeatherScoredCandidateValue(value: 202, text: "失去", modelScore: -0.6, score: -0.4),
+      ],
+      elapsedMilliseconds: 41
+    )
+    guard CandidateReranker.apply(mismatched, requestID: 9, revision: 7, to: original) == nil,
+      CandidateReranker.apply(result, requestID: 10, revision: 7, to: original) == nil
+    else {
+      throw SmokeFailure.expectation("AI 重排采用了身份或文字不匹配的结果")
+    }
   }
 
   @MainActor
