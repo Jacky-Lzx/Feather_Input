@@ -194,6 +194,10 @@ final class OwnedGeneratedCandidatePresenter: GeneratedCandidatePresenting {
     store.presenter(for: ownershipID)?.update(candidates: candidates, beside: anchor)
   }
 
+  func reposition(beside anchor: NSRect) {
+    store.presenter(for: ownershipID)?.reposition(beside: anchor)
+  }
+
   func hide() {
     store.presenter(for: ownershipID)?.hide()
   }

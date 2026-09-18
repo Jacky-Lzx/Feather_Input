@@ -33,6 +33,7 @@ private struct ScoringSnapshot {
   let displayedCandidates: [FeatherCandidateValue]
   let scoringCandidates: [FeatherCandidateValue]
   let selection: NSRange
+  let anchor: NSRect
   let weight: Double
   let adoptionDeadlineMilliseconds: UInt64
 }
@@ -102,6 +103,7 @@ final class InputController: IMKInputController {
   private weak var activeClient: AnyObject?
   private var active = false
   private var lastCaret: NSRect?
+  private var currentCandidateAnchor: NSRect?
   private var activeApplication = "unknown"
   private var activeScheme = InputScheme.fullPinyin
   private var activePageSize: Int?
@@ -136,6 +138,7 @@ final class InputController: IMKInputController {
     candidateOrderIsReranked = false
     activeClient = sender as AnyObject?
     lastCaret = nil
+    currentCandidateAnchor = nil
     rightControlTap.reset()
     capsLockSwitch.reset(isLocked: capsLockState())
     if let client = sender as? IMKTextInput {
@@ -207,6 +210,7 @@ final class InputController: IMKInputController {
       expandedCandidates = nil
       activeClient = nil
       lastCaret = nil
+      currentCandidateAnchor = nil
       rightControlTap.reset()
       candidatePresenter.actionHandler = nil
       candidatePresenter.interactionHandler = nil
@@ -242,6 +246,7 @@ final class InputController: IMKInputController {
     expandedCandidates = nil
     activeClient = nil
     lastCaret = nil
+    currentCandidateAnchor = nil
     rightControlTap.reset()
     candidatePresenter.actionHandler = nil
     candidatePresenter.interactionHandler = nil
@@ -504,7 +509,8 @@ final class InputController: IMKInputController {
   }
 
   private func apply(_ response: FeatherResponseValue, to client: IMKTextInput) {
-    cancelAIWork()
+    cancelScoring(hideIndicator: false)
+    cancelGeneration()
     expandedCandidates = nil
     candidateOrderIsReranked = false
     currentResponse = response
@@ -522,25 +528,39 @@ final class InputController: IMKInputController {
       replacementRange: NSRange(location: NSNotFound, length: 0)
     )
     if response.preedit.isEmpty || response.candidates.isEmpty {
+      currentCandidateAnchor = nil
+      candidatePresenter.setRerankingActive(false)
       candidatePresenter.hide()
     } else {
+      let anchor = candidateAnchor(for: client)
+      currentCandidateAnchor = anchor
       candidatePresenter.update(
         candidates: response.candidates,
         highlighted: response.highlighted,
         preedit: response.preedit,
-        anchor: candidateAnchor(for: client)
+        anchor: anchor
       )
+      let scoringScheduled: Bool
       if isScoringEnabled, !candidateOrderLocked {
-        scheduleScoring(for: response, client: client)
+        scoringScheduled = scheduleScoring(for: response, client: client, anchor: anchor)
+      } else {
+        scoringScheduled = false
+      }
+      if !scoringScheduled {
+        candidatePresenter.setRerankingActive(false)
       }
       scheduleGeneration(for: response, client: client)
     }
   }
 
-  private func scheduleScoring(for response: FeatherResponseValue, client: IMKTextInput) {
+  private func scheduleScoring(
+    for response: FeatherResponseValue,
+    client: IMKTextInput,
+    anchor: NSRect
+  ) -> Bool {
     guard active, !response.directMode, !recentContext.isEmpty, !response.preedit.isEmpty,
       !response.candidates.isEmpty, let session
-    else { return }
+    else { return false }
     let scoringCandidates =
       (try? session.candidateSlice(
         revision: response.revision,
@@ -558,6 +578,7 @@ final class InputController: IMKInputController {
       displayedCandidates: response.candidates,
       scoringCandidates: scoringCandidates,
       selection: client.selectedRange(),
+      anchor: anchor,
       weight: rerankingSettings.weight,
       adoptionDeadlineMilliseconds: scoringAdoptionDeadlineMilliseconds
         ?? rerankingSettings.adoptionDeadlineMilliseconds
@@ -633,8 +654,9 @@ final class InputController: IMKInputController {
               candidates: displayed,
               highlighted: highlighted,
               preedit: response.preedit,
-              anchor: self.candidateAnchor(for: client)
+              anchor: snapshot.anchor
             )
+            self.synchronizeGeneratedCandidatePosition()
             self.finishScoring(request, version: version)
             return
           case .failed, .cancelled, .stale:
@@ -647,6 +669,7 @@ final class InputController: IMKInputController {
         self.finishScoring(self.scoringRequest, version: version)
       }
     }
+    return true
   }
 
   private func makeScoringRequest(
@@ -694,14 +717,16 @@ final class InputController: IMKInputController {
     candidatePresenter.setRerankingActive(false)
   }
 
-  private func cancelScoring() {
+  private func cancelScoring(hideIndicator: Bool = true) {
     scoringVersion = UUID()
     scoringTask?.cancel()
     scoringTask = nil
     try? scoringRequest?.cancel()
     scoringRequest?.close()
     scoringRequest = nil
-    candidatePresenter.setRerankingActive(false)
+    if hideIndicator {
+      candidatePresenter.setRerankingActive(false)
+    }
   }
 
   private var isScoringEnabled: Bool {
@@ -782,8 +807,9 @@ final class InputController: IMKInputController {
       candidates: response.candidates,
       highlighted: next,
       preedit: response.preedit,
-      anchor: candidateAnchor(for: client)
+      anchor: currentCandidateAnchor ?? candidateAnchor(for: client)
     )
+    synchronizeGeneratedCandidatePosition()
     return true
   }
 
@@ -865,6 +891,11 @@ final class InputController: IMKInputController {
     generatedCandidates = []
     generatedSelectionHandler = nil
     consumedGeneratedShortcutKey = nil
+  }
+
+  private func synchronizeGeneratedCandidatePosition() {
+    guard generatedCandidatePresenter.isVisible else { return }
+    generatedCandidatePresenter.reposition(beside: candidatePresenter.frame)
   }
 
   private func scheduleGeneration(for response: FeatherResponseValue, client: IMKTextInput) {
@@ -1157,7 +1188,7 @@ final class InputController: IMKInputController {
       layout: expandedCandidates.layout,
       hasMore: expandedCandidates.hasMore,
       preedit: currentResponse?.preedit ?? "",
-      anchor: candidateAnchor(for: client)
+      anchor: currentCandidateAnchor ?? candidateAnchor(for: client)
     )
   }
 
@@ -1172,7 +1203,7 @@ final class InputController: IMKInputController {
       candidates: response.candidates,
       highlighted: response.highlighted,
       preedit: response.preedit,
-      anchor: candidateAnchor(for: client)
+      anchor: currentCandidateAnchor ?? candidateAnchor(for: client)
     )
   }
 

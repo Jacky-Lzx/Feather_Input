@@ -211,6 +211,7 @@ protocol GeneratedCandidatePresenting: AnyObject {
   var isVisible: Bool { get }
 
   func update(candidates: [FeatherGeneratedCandidateValue], beside anchor: NSRect)
+  func reposition(beside anchor: NSRect)
   func hide()
 }
 
@@ -241,6 +242,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
 
   private var candidates: [FeatherCandidateValue] = []
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
+  private var stableCompactContentWidth: CGFloat?
   private lazy var panel = makePanel()
   private lazy var candidateStack = makeCandidateStack()
   private lazy var preeditLabel = makePreeditLabel()
@@ -283,10 +285,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     expandedHeader.isHidden = true
     expandedGrid.isHidden = true
     removeArrangedSubviews(from: expandedGrid)
-    let contentWidth = max(
+    let naturalContentWidth = max(
       rebuildCandidateRows(highlighted: highlighted, anchor: anchor),
       requiredPreeditContentWidth
     )
+    let contentWidth = stabilizedCompactContentWidth(for: naturalContentWidth)
     resizeAndShow(
       at: anchor,
       contentWidth: contentWidth,
@@ -312,6 +315,18 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     removeArrangedSubviews(from: expandedGrid)
     let contentWidth = rebuildCandidateRows(highlighted: nil, anchor: anchor)
     resizeAndShow(beside: anchor, contentWidth: contentWidth, minimumWidth: 0)
+  }
+
+  func reposition(beside anchor: NSRect) {
+    guard panel.isVisible, !generatedCandidates.isEmpty else { return }
+    let frame = positionedFrame(
+      size: panel.frame.size,
+      anchor: anchor,
+      placeBesideAnchor: true
+    )
+    guard frame != panel.frame else { return }
+    panel.setFrame(frame, display: false)
+    panel.invalidateShadow()
   }
 
   func updateExpanded(
@@ -386,6 +401,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     minimumWidth: CGFloat,
     placeBesideAnchor: Bool
   ) {
+    let needsOrdering = !panel.isVisible
     let contentSize = measuredContentSize(
       contentWidth: contentWidth,
       minimumWidth: minimumWidth,
@@ -401,8 +417,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     )
     panel.setFrame(frame, display: false)
     backgroundView.layoutSubtreeIfNeeded()
+    backgroundView.displayIfNeeded()
     panel.invalidateShadow()
-    panel.orderFrontRegardless()
+    if needsOrdering {
+      panel.orderFrontRegardless()
+    }
   }
 
   private func measuredContentSize(
@@ -434,9 +453,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
 
   func setRerankingActive(_ active: Bool) {
     if active {
+      guard rerankingIndicator.isHidden else { return }
       rerankingIndicator.isHidden = false
       rerankingIndicator.startAnimation(nil)
     } else {
+      guard !rerankingIndicator.isHidden else { return }
       rerankingIndicator.stopAnimation(nil)
       rerankingIndicator.isHidden = true
     }
@@ -446,6 +467,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     setRerankingActive(false)
     candidates = []
     generatedCandidates = []
+    stableCompactContentWidth = nil
     displayedGeneratedCandidateCount = 0
     if panel.isVisible {
       panel.orderOut(nil)
@@ -558,6 +580,14 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       + preeditLabel.intrinsicContentSize.width
       + 6
       + 12
+  }
+
+  private func stabilizedCompactContentWidth(for naturalWidth: CGFloat) -> CGFloat {
+    let widthStep: CGFloat = 48
+    let roundedWidth = ceil(naturalWidth / widthStep) * widthStep
+    let stableWidth = max(stableCompactContentWidth ?? 0, roundedWidth)
+    stableCompactContentWidth = stableWidth
+    return stableWidth
   }
 
   private func makeBackgroundView() -> NSVisualEffectView {

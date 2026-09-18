@@ -714,8 +714,9 @@ struct InputMethodSmokeMain {
     controller.generationContextProvider = { _ in "测试上下文" }
     controller.focusIndicatorRetryDelaysMilliseconds = []
     let presenter = SmokeCandidatePresenter()
+    let generatedPresenter = SmokeGeneratedCandidatePresenter()
     controller.candidatePresenter = presenter
-    controller.generatedCandidatePresenter = SmokeGeneratedCandidatePresenter()
+    controller.generatedCandidatePresenter = generatedPresenter
     controller.modePresenter = SmokeModePresenter()
     controller.persistentModePresenter = SmokePersistentModePresenter()
 
@@ -773,6 +774,8 @@ struct InputMethodSmokeMain {
         throw SmokeFailure.expectation("MLX 评分测试无法输入拼音：\(character)")
       }
     }
+    let submittedAnchor = presenter.anchor
+    client.caretRectangle = NSRect(x: 640, y: 420, width: 1, height: 24)
     guard waitUntil({ !requests.isEmpty && requests.last?.closeCount == 1 }),
       !submitted.isEmpty,
       submittedContext == "测试上下文",
@@ -782,6 +785,7 @@ struct InputMethodSmokeMain {
       presenter.candidates.first?.value == submitted.last?.value,
       presenter.highlighted == highlightedBeforeRanking,
       presenter.preedit == submittedPreedit,
+      presenter.anchor == submittedAnchor,
       presenter.rerankingStates.contains(true),
       presenter.isRerankingActive == false,
       requests.count == 1
@@ -795,9 +799,19 @@ struct InputMethodSmokeMain {
     }
     let rerankedOrder = presenter.candidates.map(\.value)
     let rerankedHighlight = presenter.highlighted ?? 0
+    controller.presentGeneratedCandidates(
+      [FeatherGeneratedCandidateValue(text: "你好呀", score: -0.2)],
+      for: client,
+      onSelect: { _, _ in true }
+    )
+    let generatedAnchorBeforeMainFrameChange = generatedPresenter.anchor
+    presenter.frameSize = NSSize(width: 240, height: 180)
     guard controller.handle(key("", code: 125, modifiers: .function), client: client),
       presenter.candidates.map(\.value) == rerankedOrder,
       presenter.highlighted == min(rerankedHighlight + 1, rerankedOrder.count - 1),
+      generatedPresenter.repositionCount == 1,
+      generatedPresenter.anchor == presenter.frame,
+      generatedPresenter.anchor != generatedAnchorBeforeMainFrameChange,
       requests.count == 1
     else {
       throw SmokeFailure.expectation("向下键没有按 AI 重排顺序移动高亮")
@@ -1307,6 +1321,27 @@ struct InputMethodSmokeMain {
       presenter.currentPanelSize == defaultPanelSize
     else {
       throw SmokeFailure.expectation("AI 重排指示器停止后改变了候选窗尺寸")
+    }
+
+    let wideCompact = compact.map {
+      FeatherCandidateValue(
+        revision: $0.revision,
+        value: $0.value,
+        text: String(repeating: $0.text, count: 10)
+      )
+    }
+    presenter.update(candidates: wideCompact, highlighted: 0, preedit: "shijie", anchor: anchor)
+    let widenedPanelSize = presenter.currentPanelSize
+    presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
+    guard widenedPanelSize.width > defaultPanelSize.width,
+      presenter.currentPanelSize.width == widenedPanelSize.width
+    else {
+      throw SmokeFailure.expectation("同一次输入组合中的候选窗宽度发生了回缩")
+    }
+    presenter.hide()
+    presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
+    guard presenter.currentPanelSize == defaultPanelSize else {
+      throw SmokeFailure.expectation("输入组合结束后候选窗没有重置稳定宽度")
     }
 
     let longPreedit = String(repeating: "shijie", count: 18)
