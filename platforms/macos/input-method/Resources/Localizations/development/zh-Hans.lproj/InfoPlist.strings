@@ -1,3 +1,4 @@
 "CFBundleName" = "Feather Input Rust Dev";
 "CFBundleDisplayName" = "Feather Input Rust Dev";
 "im.feather.inputmethod.rustdev.FeatherInput.Hans" = "Feather Input Rust Dev";
+"im.feather.inputmethod.rustdev.FeatherInput" = "Feather Input Rust Dev";

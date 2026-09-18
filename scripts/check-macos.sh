@@ -141,9 +141,13 @@ plutil -lint \
     platforms/macos/input-method/Info.plist \
     platforms/macos/input-method/Info.release.plist \
     platforms/macos/input-method/Resources/Localizations/development/en.lproj/InfoPlist.strings \
+    platforms/macos/input-method/Resources/Localizations/development/en.lproj/Localizable.strings \
     platforms/macos/input-method/Resources/Localizations/development/zh-Hans.lproj/InfoPlist.strings \
+    platforms/macos/input-method/Resources/Localizations/development/zh-Hans.lproj/Localizable.strings \
     platforms/macos/input-method/Resources/Localizations/release/en.lproj/InfoPlist.strings \
-    platforms/macos/input-method/Resources/Localizations/release/zh-Hans.lproj/InfoPlist.strings
+    platforms/macos/input-method/Resources/Localizations/release/en.lproj/Localizable.strings \
+    platforms/macos/input-method/Resources/Localizations/release/zh-Hans.lproj/InfoPlist.strings \
+    platforms/macos/input-method/Resources/Localizations/release/zh-Hans.lproj/Localizable.strings
 
 development_identifier=$(
     /usr/libexec/PlistBuddy \

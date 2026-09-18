@@ -82,6 +82,11 @@ fi
 for localization in "$localizations"/*.lproj; do
     cp -R "$localization" "$resources/"
 done
+# TextInputMenuAgent reads both localization tables and is more reliable with
+# their compiled property-list representation.
+for strings in "$resources"/*.lproj/*.strings; do
+    plutil -convert binary1 "$strings"
+done
 cp "$rust_library" "$frameworks/libfeather_ffi.dylib"
 install_name_tool -id @rpath/libfeather_ffi.dylib "$frameworks/libfeather_ffi.dylib"
 
