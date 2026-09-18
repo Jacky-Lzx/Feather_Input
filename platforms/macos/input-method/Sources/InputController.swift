@@ -14,6 +14,7 @@ private struct ExpandedCandidateState {
   let pageSize: Int
   let layout: CandidateLayout
   var hasMore: Bool
+  var nextRawOffset: Int
 }
 
 private struct GenerationSnapshot {
@@ -143,6 +144,7 @@ final class InputController: IMKInputController {
   private var nextScoringRequestID: UInt64 = 0
   private var candidateOrderLocked = false
   private var candidateOrderIsReranked = false
+  private var rerankedCandidateOrder: [FeatherCandidateValue]?
   private var recentContext = ""
   private var rerankingContextAvailable = false
   private var observesGenerationSettings = false
@@ -157,6 +159,7 @@ final class InputController: IMKInputController {
     cancelAIWork(clearContext: true)
     candidateOrderLocked = false
     candidateOrderIsReranked = false
+    rerankedCandidateOrder = nil
     activeClient = sender as AnyObject?
     lastCaret = nil
     currentCandidateAnchor = nil
@@ -544,6 +547,7 @@ final class InputController: IMKInputController {
     cancelContinuation()
     expandedCandidates = nil
     candidateOrderIsReranked = false
+    rerankedCandidateOrder = nil
     currentResponse = response
     let committed = response.commit.flatMap { $0.isEmpty ? nil : $0 }
     if let commit = committed {
@@ -687,6 +691,7 @@ final class InputController: IMKInputController {
             )
             self.currentResponse = updated
             self.candidateOrderIsReranked = true
+            self.rerankedCandidateOrder = reordered
             self.candidatePresenter.update(
               candidates: displayed,
               highlighted: highlighted,
@@ -1362,20 +1367,27 @@ final class InputController: IMKInputController {
       let slice = try ensureActive().candidateSlice(
         revision: response.revision, offset: 0, limit: expandedPageSize)
       guard currentResponse?.revision == slice.revision, !slice.candidates.isEmpty else { return }
+      var candidates =
+        candidateOrderIsReranked
+        ? (rerankedCandidateOrder ?? response.candidates) : []
+      var candidateIDs = Set(candidates.map(\.value))
+      candidates.append(
+        contentsOf: slice.candidates.filter { candidateIDs.insert($0.value).inserted })
       let highlightedID = response.highlighted.flatMap { index in
         response.candidates.indices.contains(index) ? response.candidates[index] : nil
       }
       let highlighted =
         highlightedID.flatMap { candidate in
-          slice.candidates.firstIndex { $0.value == candidate.value }
+          candidates.firstIndex { $0.value == candidate.value }
         } ?? 0
       expandedCandidates = ExpandedCandidateState(
         revision: slice.revision,
-        candidates: slice.candidates,
+        candidates: candidates,
         highlighted: highlighted,
         pageSize: compactPageSize,
         layout: layout,
-        hasMore: slice.hasMore
+        hasMore: slice.hasMore,
+        nextRawOffset: slice.candidates.count
       )
       renderExpandedCandidates(for: client)
     } catch {
@@ -1389,14 +1401,18 @@ final class InputController: IMKInputController {
     do {
       let slice = try session.candidateSlice(
         revision: expandedCandidates.revision,
-        offset: expandedCandidates.candidates.count,
+        offset: expandedCandidates.nextRawOffset,
         limit: expandedCandidates.pageSize * CandidateWindowStyle.expandedColumnCount
       )
       guard currentResponse?.revision == slice.revision else {
         self.expandedCandidates = nil
         return false
       }
-      expandedCandidates.candidates.append(contentsOf: slice.candidates)
+      var candidateIDs = Set(expandedCandidates.candidates.map(\.value))
+      expandedCandidates.candidates.append(
+        contentsOf: slice.candidates.filter { candidateIDs.insert($0.value).inserted }
+      )
+      expandedCandidates.nextRawOffset += slice.candidates.count
       expandedCandidates.hasMore = slice.hasMore
       self.expandedCandidates = expandedCandidates
       return true

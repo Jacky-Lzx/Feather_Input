@@ -805,6 +805,17 @@ struct InputMethodSmokeMain {
     }
     let rerankedOrder = presenter.candidates.map(\.value)
     let rerankedHighlight = presenter.highlighted ?? 0
+    guard controller.handle(key("", code: 124, modifiers: .function), client: client),
+      presenter.expanded,
+      Array(presenter.candidates.prefix(ranked.count)).map(\.value) == ranked.map(\.value),
+      Set(presenter.candidates.map(\.value)).count == presenter.candidates.count
+    else {
+      throw SmokeFailure.expectation("展开全部候选没有保持完整 AI 重排顺序")
+    }
+    _ = controller.handle(key("x", code: 7, modifiers: .command), client: client)
+    guard !presenter.expanded, presenter.candidates.map(\.value) == rerankedOrder else {
+      throw SmokeFailure.expectation("关闭全部候选后没有恢复 AI 重排后的当前页")
+    }
     controller.presentGeneratedCandidates(
       [FeatherGeneratedCandidateValue(text: "你好呀", score: -0.2)],
       for: client,
