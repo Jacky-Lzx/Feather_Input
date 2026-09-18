@@ -233,6 +233,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
   var displayedPreedit: String { preeditLabel.stringValue }
   var isPreeditRowVisible: Bool { !preeditRow.isHidden }
   var preeditRowHeight: CGFloat { preeditRowHeightConstraint?.constant ?? 0 }
+  var requiredPanelWidthForPreedit: CGFloat {
+    requiredPreeditContentWidth
+      + CandidateWindowStyle.contentInsets.left
+      + CandidateWindowStyle.contentInsets.right
+  }
 
   private var candidates: [FeatherCandidateValue] = []
   private var generatedCandidates: [FeatherGeneratedCandidateValue] = []
@@ -278,7 +283,10 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     expandedHeader.isHidden = true
     expandedGrid.isHidden = true
     removeArrangedSubviews(from: expandedGrid)
-    let contentWidth = rebuildCandidateRows(highlighted: highlighted, anchor: anchor)
+    let contentWidth = max(
+      rebuildCandidateRows(highlighted: highlighted, anchor: anchor),
+      requiredPreeditContentWidth
+    )
     resizeAndShow(
       at: anchor,
       contentWidth: contentWidth,
@@ -338,7 +346,11 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
       pageSize: pageSize,
       layout: layout
     )
-    let contentWidth = max(gridWidth, expandedHeader.intrinsicContentSize.width)
+    let contentWidth = max(
+      gridWidth,
+      expandedHeader.intrinsicContentSize.width,
+      requiredPreeditContentWidth
+    )
     resizeAndShow(at: anchor, contentWidth: contentWidth, minimumWidth: 0)
   }
 
@@ -347,7 +359,7 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     contentWidth: CGFloat,
     minimumWidth: CGFloat
   ) {
-    resize(contentWidth: contentWidth, minimumWidth: minimumWidth)
+    resize(contentWidth: contentWidth, minimumWidth: minimumWidth, anchor: anchor)
     positionPanel(at: anchor)
     panel.orderFrontRegardless()
   }
@@ -357,22 +369,31 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     contentWidth: CGFloat,
     minimumWidth: CGFloat
   ) {
-    resize(contentWidth: contentWidth, minimumWidth: minimumWidth)
+    resize(contentWidth: contentWidth, minimumWidth: minimumWidth, anchor: anchor)
     positionPanel(beside: anchor)
     panel.orderFrontRegardless()
   }
 
-  private func resize(contentWidth: CGFloat, minimumWidth: CGFloat) {
+  private func resize(contentWidth: CGFloat, minimumWidth: CGFloat, anchor: NSRect) {
     panel.contentView = backgroundView
     backgroundView.layoutSubtreeIfNeeded()
     let fittingSize = backgroundView.fittingSize
     let horizontalInsets =
       CandidateWindowStyle.contentInsets.left + CandidateWindowStyle.contentInsets.right
+    let availableScreenWidth =
+      (screen(containing: anchor)?.visibleFrame.width ?? NSScreen.main?.visibleFrame.width
+        ?? CandidateWindowStyle.maximumWidth)
+      - CandidateWindowStyle.screenInset * 2
+    let preferredMaximumWidth =
+      preeditRow.isHidden
+      ? CandidateWindowStyle.maximumWidth
+      : max(CandidateWindowStyle.maximumWidth, requiredPanelWidthForPreedit)
+    let maximumWidth = max(minimumWidth, min(preferredMaximumWidth, availableScreenWidth))
     panel.setContentSize(
       NSSize(
         width: max(
           minimumWidth,
-          min(contentWidth + horizontalInsets, CandidateWindowStyle.maximumWidth)
+          min(contentWidth + horizontalInsets, maximumWidth)
         ),
         height: fittingSize.height
       ))
@@ -454,9 +475,9 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     let label = NSTextField(labelWithString: "")
     label.font = currentMetrics.preeditFont
     label.textColor = .secondaryLabelColor
-    label.lineBreakMode = .byTruncatingTail
+    label.lineBreakMode = .byClipping
     label.maximumNumberOfLines = 1
-    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
     return label
   }
 
@@ -496,6 +517,13 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     preeditLabel.font = currentMetrics.preeditFont
     preeditLabel.setAccessibilityLabel("当前输入：\(preedit)")
     preeditRowHeightConstraint?.constant = currentMetrics.preeditHeight
+  }
+
+  private var requiredPreeditContentWidth: CGFloat {
+    CandidateWindowStyle.candidateHorizontalPadding * 2
+      + preeditLabel.intrinsicContentSize.width
+      + 6
+      + 12
   }
 
   private func makeBackgroundView() -> NSVisualEffectView {

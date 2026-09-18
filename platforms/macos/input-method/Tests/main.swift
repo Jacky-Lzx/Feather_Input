@@ -1276,6 +1276,21 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("AI 重排指示器停止后改变了候选窗尺寸")
     }
 
+    let longPreedit = String(repeating: "shijie", count: 18)
+    presenter.update(
+      candidates: compact,
+      highlighted: 0,
+      preedit: longPreedit,
+      anchor: anchor
+    )
+    guard presenter.displayedPreedit == longPreedit,
+      presenter.currentPanelSize.width > defaultPanelSize.width,
+      presenter.currentPanelSize.width > CandidateWindowStyle.maximumWidth,
+      presenter.currentPanelSize.width >= presenter.requiredPanelWidthForPreedit
+    else {
+      throw SmokeFailure.expectation("较长的当前输入没有撑宽候选窗以完整显示")
+    }
+
     fontSettings.updateSize(CandidateFontSettings.maximumSize)
     presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
     guard presenter.appliedFontSize == CandidateFontSettings.maximumSize,
