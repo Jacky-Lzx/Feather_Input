@@ -489,6 +489,10 @@ final class CandidateWindowController: NSObject, CandidatePresenting, GeneratedC
     generatedTitle = nil
     stableCompactContentWidth = nil
     displayedGeneratedCandidateCount = 0
+    // Keep an ordered-out panel transparent until its next fully laid-out
+    // presentation. Otherwise WindowServer can briefly composite the old,
+    // wider backing surface during a rapid AI/main-candidate handoff.
+    panel.alphaValue = 0
     if panel.isVisible {
       panel.orderOut(nil)
     }

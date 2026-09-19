@@ -1509,6 +1509,9 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("同一次输入组合中的候选窗宽度发生了回缩")
     }
     presenter.hide()
+    guard presenter.currentPanelAlphaValue == 0 else {
+      throw SmokeFailure.expectation("隐藏的候选窗仍可能显示旧的宽窗口表面")
+    }
     presenter.update(candidates: compact, highlighted: 0, preedit: "shijie", anchor: anchor)
     let restartedPanelSize = presenter.currentPanelSize
     RunLoop.current.run(until: Date().addingTimeInterval(0.02))

@@ -506,6 +506,7 @@ final class InputController: IMKInputController {
       candidateOrderLocked = true
       cancelScoring()
     }
+    cancelGeneration()
     do {
       let response = try ensureActive().send(key)
       guard response.handled else {
@@ -530,6 +531,7 @@ final class InputController: IMKInputController {
 
   private func dispatch(text: String, to client: IMKTextInput) -> Bool {
     candidateOrderLocked = false
+    cancelGeneration()
     do {
       let response = try ensureActive().send(text: text)
       guard response.handled else { return false }
