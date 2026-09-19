@@ -317,9 +317,24 @@ final class InputController: IMKInputController {
       return false
     }
 
+    let clientAcceptsText = textInputAvailable(client)
     if event.type == .flagsChanged {
       if !event.modifierFlags.contains(.option) {
         consumedGeneratedShortcutKey = nil
+      }
+      if capsLockSwitch.flagsChanged(
+        keyCode: event.keyCode,
+        flags: event.modifierFlags.rawValue
+      ) {
+        rightControlTap.cancel()
+        return toggleInputMode(for: client, clientAcceptsText: clientAcceptsText)
+      }
+      if rightControlTap.flagsChanged(
+        keyCode: event.keyCode,
+        flags: event.modifierFlags.rawValue,
+        timestamp: event.timestamp > 0 ? event.timestamp : nil
+      ) {
+        return toggleInputMode(for: client, clientAcceptsText: clientAcceptsText)
       }
     } else if handleGeneratedCandidateShortcut(event, client: client) {
       return true
@@ -327,10 +342,19 @@ final class InputController: IMKInputController {
       cancelContinuation()
     }
 
-    guard textInputAvailable(client) else {
+    let modeShortcut =
+      event.type == .keyDown
+      && event.keyCode == 49
+      && event.modifierFlags.contains([.control, .shift])
+      && !event.modifierFlags.contains([.command, .option])
+    if modeShortcut {
+      return toggleInputMode(for: client, clientAcceptsText: clientAcceptsText)
+    }
+
+    guard clientAcceptsText else {
       cancelFocusIndicator()
       modePresenter.hide()
-      persistentModePresenter.hide()
+      persistentModePresenter.show(directMode: currentResponse?.directMode ?? false)
       cancelAIWork(clearContext: true)
       cancelEngineComposition()
       return false
@@ -346,30 +370,9 @@ final class InputController: IMKInputController {
       synchronizeEnglishCandidateMinimumIfIdle()
     }
     if event.type == .flagsChanged {
-      if capsLockSwitch.flagsChanged(
-        keyCode: event.keyCode,
-        flags: event.modifierFlags.rawValue
-      ) {
-        rightControlTap.cancel()
-        return toggleInputMode(for: client)
-      }
-      if rightControlTap.flagsChanged(
-        keyCode: event.keyCode,
-        flags: event.modifierFlags.rawValue,
-        timestamp: event.timestamp > 0 ? event.timestamp : nil
-      ) {
-        return toggleInputMode(for: client)
-      }
       return false
     }
     rightControlTap.cancel()
-    let modeShortcut =
-      event.keyCode == 49
-      && event.modifierFlags.contains([.control, .shift])
-      && !event.modifierFlags.contains([.command, .option])
-    if modeShortcut {
-      return toggleInputMode(for: client)
-    }
     if let handled = handleExpandedEvent(event, client: client) {
       return handled
     }
@@ -1630,20 +1633,39 @@ final class InputController: IMKInputController {
     }
   }
 
-  private func toggleInputMode(for client: IMKTextInput) -> Bool {
+  private func toggleInputMode(
+    for client: IMKTextInput,
+    clientAcceptsText: Bool? = nil
+  ) -> Bool {
     do {
       let response = try ensureActive().send(.toggleMode)
       guard response.handled else { return false }
-      apply(response, to: client)
+      let canEditClient = clientAcceptsText ?? textInputAvailable(client)
+      if canEditClient {
+        apply(response, to: client)
+      } else {
+        cancelAIWork(clearContext: true)
+        currentResponse = response
+        expandedCandidates = nil
+        candidateOrderLocked = false
+        candidateOrderIsReranked = false
+        rerankedCandidateOrder = nil
+        candidatePresenter.hide()
+        clearGeneratedCandidates()
+      }
       modeMemory.update(directMode: response.directMode, application: activeApplication)
       persistentModePresenter.show(directMode: response.directMode)
-      modePresenter.show(
-        directMode: response.directMode,
-        anchor: candidateAnchor(for: client),
-        clientLevel: Int(client.windowLevel()),
-        waitsUntilInput: false,
-        duration: 0.8
-      )
+      if canEditClient {
+        modePresenter.show(
+          directMode: response.directMode,
+          anchor: candidateAnchor(for: client),
+          clientLevel: Int(client.windowLevel()),
+          waitsUntilInput: false,
+          duration: 0.8
+        )
+      } else {
+        modePresenter.hide()
+      }
       return true
     } catch {
       report(error, operation: "toggle mode")

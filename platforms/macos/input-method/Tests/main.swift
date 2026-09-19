@@ -595,10 +595,20 @@ struct InputMethodSmokeMain {
     }
     controller.secureInputEnabled = { false }
     client.selectionAvailable = false
-    guard !controller.handle(key("n", code: 45), client: client),
-      !persistentModePresenter.isVisible
+    let directModeBeforeUnavailableToggle = persistentModePresenter.directMode
+    guard
+      controller.handle(
+        key(" ", code: 49, modifiers: [.control, .shift]),
+        client: client
+      ), persistentModePresenter.isVisible,
+      persistentModePresenter.directMode != directModeBeforeUnavailableToggle
     else {
-      throw SmokeFailure.expectation("非文本客户端事件不应被输入法消费")
+      throw SmokeFailure.expectation("没有文本框时无法切换 FeatherInput 中英文模式")
+    }
+    guard !controller.handle(key("n", code: 45), client: client),
+      persistentModePresenter.isVisible
+    else {
+      throw SmokeFailure.expectation("非文本客户端事件隐藏了常驻中英提示")
     }
     controller.deactivateServer(client)
     guard !persistentModePresenter.isVisible else {
