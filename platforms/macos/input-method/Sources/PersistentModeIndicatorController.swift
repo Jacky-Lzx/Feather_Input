@@ -158,13 +158,11 @@ final class PersistentModeIndicatorOverlayStore {
 
   func activate(_ id: UUID) {
     guard ownerID != id else { return }
-    presenter.hide()
     ownerID = id
   }
 
   func deactivate(_ id: UUID) {
     guard ownerID == id else { return }
-    presenter.hide()
     ownerID = nil
   }
 

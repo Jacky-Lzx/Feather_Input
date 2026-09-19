@@ -1669,9 +1669,10 @@ struct InputMethodSmokeMain {
       throw SmokeFailure.expectation("旧控制器修改了新控制器持有的常驻模式提示")
     }
     second.deactivate()
-    guard !presenter.isVisible else {
-      throw SmokeFailure.expectation("当前控制器释放后常驻模式提示没有隐藏")
+    guard presenter.isVisible, presenter.directMode == false else {
+      throw SmokeFailure.expectation("文本焦点释放后常驻模式提示发生闪烁")
     }
+    presenter.hide()
   }
 
   @MainActor

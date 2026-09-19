@@ -243,7 +243,9 @@ final class InputController: IMKInputController {
       generatedCandidatePresenter.generatedActionHandler = nil
       clearGeneratedCandidates()
       modePresenter.hide()
-      persistentModePresenter.hide()
+      if injectedPersistentModePresenter != nil {
+        persistentModePresenter.hide()
+      }
       if injectedCandidatePresenter == nil {
         ownedCandidatePresenter.deactivate()
       }
@@ -279,7 +281,9 @@ final class InputController: IMKInputController {
     generatedCandidatePresenter.generatedActionHandler = nil
     clearGeneratedCandidates()
     modePresenter.hide()
-    persistentModePresenter.hide()
+    if injectedPersistentModePresenter != nil {
+      persistentModePresenter.hide()
+    }
     if injectedCandidatePresenter == nil {
       ownedCandidatePresenter.deactivate()
     }
