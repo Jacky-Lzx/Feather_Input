@@ -870,7 +870,9 @@ struct InputMethodSmokeMain {
     let expected = selectable.text
     let markedBeforeSelection = client.marked
     presenter.select(text: expected)
-    guard client.committed == expected || client.marked != markedBeforeSelection else {
+    guard !controller.candidateOrderIsLocked,
+      client.committed == expected || client.marked != markedBeforeSelection
+    else {
       throw SmokeFailure.expectation("重排后点击没有按原始 Rime 候选 ID 更新组合")
     }
     if client.committed.isEmpty {

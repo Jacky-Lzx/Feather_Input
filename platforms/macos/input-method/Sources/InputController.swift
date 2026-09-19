@@ -151,6 +151,8 @@ final class InputController: IMKInputController {
   private var observesContinuationSettings = false
   private var observesRerankingSettings = false
 
+  var candidateOrderIsLocked: Bool { candidateOrderLocked }
+
   override func activateServer(_ sender: Any!) {
     startObservingGenerationSettings()
     startObservingContinuationSettings()
@@ -602,6 +604,14 @@ final class InputController: IMKInputController {
     }
   }
 
+  private func applyCandidateSelection(
+    _ response: FeatherResponseValue,
+    to client: IMKTextInput
+  ) {
+    candidateOrderLocked = false
+    apply(response, to: client)
+  }
+
   private func scheduleScoring(
     for response: FeatherResponseValue,
     client: IMKTextInput,
@@ -821,7 +831,7 @@ final class InputController: IMKInputController {
       do {
         let response = try ensureActive().select(candidate)
         guard response.handled else { return }
-        apply(response, to: client)
+        applyCandidateSelection(response, to: client)
       } catch {
         report(error, operation: "select candidate")
       }
@@ -873,7 +883,7 @@ final class InputController: IMKInputController {
     do {
       let selected = try ensureActive().select(response.candidates[index])
       guard selected.handled else { return true }
-      apply(selected, to: client)
+      applyCandidateSelection(selected, to: client)
     } catch {
       report(error, operation: "select reranked candidate")
     }
@@ -1566,7 +1576,7 @@ final class InputController: IMKInputController {
     do {
       let response = try ensureActive().select(candidate)
       guard response.handled else { return }
-      apply(response, to: client)
+      applyCandidateSelection(response, to: client)
     } catch {
       expandedCandidates = nil
       report(error, operation: "select expanded candidate")
