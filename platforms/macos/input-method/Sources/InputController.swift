@@ -146,6 +146,7 @@ final class InputController: IMKInputController {
   private var candidateOrderIsReranked = false
   private var rerankedCandidateOrder: [FeatherCandidateValue]?
   private var recentContext = ""
+  private var selectedCompositionContext = ""
   private var rerankingContextAvailable = false
   private var observesGenerationSettings = false
   private var observesContinuationSettings = false
@@ -362,6 +363,7 @@ final class InputController: IMKInputController {
       return false
     }
     if !hasComposition {
+      selectedCompositionContext = ""
       refreshContext(from: client)
     }
     persistentModePresenter.show(directMode: currentResponse?.directMode ?? false)
@@ -566,6 +568,9 @@ final class InputController: IMKInputController {
       recentContext = String((recentContext + commit).suffix(80))
       rerankingContextAvailable = hasMeaningfulText(recentContext)
     }
+    if response.preedit.isEmpty {
+      selectedCompositionContext = ""
+    }
     let selection = NSRange(
       location: TextCoordinates.utf16Offset(in: response.preedit, utf8Offset: response.cursorUTF8),
       length: 0
@@ -604,11 +609,19 @@ final class InputController: IMKInputController {
     }
   }
 
-  private func applyCandidateSelection(
+  func applyCandidateSelection(
     _ response: FeatherResponseValue,
+    selectedText: String,
     to client: IMKTextInput
   ) {
     candidateOrderLocked = false
+    if response.preedit.isEmpty || response.commit?.isEmpty == false {
+      selectedCompositionContext = ""
+    } else {
+      selectedCompositionContext = String(
+        (selectedCompositionContext + selectedText).suffix(80)
+      )
+    }
     apply(response, to: client)
   }
 
@@ -617,8 +630,8 @@ final class InputController: IMKInputController {
     client: IMKTextInput,
     anchor: NSRect
   ) -> Bool {
-    guard active, !response.directMode, rerankingContextAvailable,
-      hasMeaningfulText(recentContext), !response.preedit.isEmpty,
+    let context = currentRerankingContext
+    guard active, !response.directMode, hasMeaningfulText(context), !response.preedit.isEmpty,
       !response.candidates.isEmpty, let session
     else { return false }
     let scoringCandidates =
@@ -633,7 +646,7 @@ final class InputController: IMKInputController {
     let snapshot = ScoringSnapshot(
       requestID: nextScoringRequestID,
       revision: response.revision,
-      context: recentContext,
+      context: context,
       preedit: response.preedit,
       displayedCandidates: response.candidates,
       scoringCandidates: scoringCandidates,
@@ -763,8 +776,8 @@ final class InputController: IMKInputController {
       && currentResponse?.revision == snapshot.revision
       && currentResponse?.preedit == snapshot.preedit
       && currentResponse?.candidates == snapshot.displayedCandidates
-      && recentContext == snapshot.context
-      && rerankingContextAvailable
+      && currentRerankingContext == snapshot.context
+      && hasMeaningfulText(currentRerankingContext)
       && NSEqualRanges(client.selectedRange(), snapshot.selection)
   }
 
@@ -831,7 +844,7 @@ final class InputController: IMKInputController {
       do {
         let response = try ensureActive().select(candidate)
         guard response.handled else { return }
-        applyCandidateSelection(response, to: client)
+        applyCandidateSelection(response, selectedText: candidate.text, to: client)
       } catch {
         report(error, operation: "select candidate")
       }
@@ -883,7 +896,11 @@ final class InputController: IMKInputController {
     do {
       let selected = try ensureActive().select(response.candidates[index])
       guard selected.handled else { return true }
-      applyCandidateSelection(selected, to: client)
+      applyCandidateSelection(
+        selected,
+        selectedText: response.candidates[index].text,
+        to: client
+      )
     } catch {
       report(error, operation: "select reranked candidate")
     }
@@ -1121,6 +1138,7 @@ final class InputController: IMKInputController {
     clearGeneratedCandidates()
     if clearContext {
       recentContext = ""
+      selectedCompositionContext = ""
       rerankingContextAvailable = false
     }
   }
@@ -1376,6 +1394,11 @@ final class InputController: IMKInputController {
     text.unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
   }
 
+  private var currentRerankingContext: String {
+    let committedContext = rerankingContextAvailable ? recentContext : ""
+    return String((committedContext + selectedCompositionContext).suffix(80))
+  }
+
   private func openExpandedCandidates(for client: IMKTextInput) {
     cancelAIWork()
     guard let response = currentResponse, !response.candidates.isEmpty else { return }
@@ -1576,7 +1599,7 @@ final class InputController: IMKInputController {
     do {
       let response = try ensureActive().select(candidate)
       guard response.handled else { return }
-      applyCandidateSelection(response, to: client)
+      applyCandidateSelection(response, selectedText: candidate.text, to: client)
     } catch {
       expandedCandidates = nil
       report(error, operation: "select expanded candidate")
@@ -1806,6 +1829,7 @@ final class InputController: IMKInputController {
 
   private func cancelEngineComposition() {
     cancelAIWork()
+    selectedCompositionContext = ""
     guard hasComposition, let session else { return }
     currentResponse = try? session.send(.escape)
     expandedCandidates = nil

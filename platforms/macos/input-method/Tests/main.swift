@@ -52,6 +52,7 @@ struct InputMethodSmokeMain {
     try verifyCandidateReranking()
     try verifyRerankingSettings()
     try verifyMLXScoringFlow()
+    try verifyMultistageRerankingContext()
     try verifyMLXGenerationFlow()
     try verifyMLXContinuationFlow()
     try verifyModeIndicatorOwnership()
@@ -953,6 +954,98 @@ struct InputMethodSmokeMain {
       client.committed == committedBeforeSelectedReturn + selectedByReturn
     else {
       throw SmokeFailure.expectation("高亮非第一项时回车没有提交所选候选")
+    }
+  }
+
+  @MainActor
+  private static func verifyMultistageRerankingContext() throws {
+    guard let controller = InputController(server: nil, delegate: nil, client: nil) else {
+      throw SmokeFailure.controllerCreation
+    }
+    controller.secureInputEnabled = { false }
+    controller.scoringEnabled = { true }
+    controller.scoringDebounceMilliseconds = 0
+    controller.scoringPollMilliseconds = 1
+    controller.generationEnabled = { false }
+    controller.generationContextProvider = { _ in "前文" }
+    controller.focusIndicatorRetryDelaysMilliseconds = []
+    let presenter = SmokeCandidatePresenter()
+    controller.candidatePresenter = presenter
+    controller.generatedCandidatePresenter = SmokeGeneratedCandidatePresenter()
+    controller.modePresenter = SmokeModePresenter()
+    controller.persistentModePresenter = SmokePersistentModePresenter()
+
+    let defaultsName = "FeatherMultistageReranking-\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: defaultsName) else {
+      throw SmokeFailure.expectation("无法创建多分段 AI 重排测试设置")
+    }
+    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    controller.modeMemory = InputModeMemory(defaults: defaults)
+    controller.schemeMemory = InputSchemeMemory(defaults: defaults)
+    controller.rerankingSettings = RerankingSettings(defaults: defaults)
+    controller.continuationSettings = ContinuationSettings(defaults: defaults)
+
+    var contexts: [String] = []
+    var requests: [SmokeScoringRequest] = []
+    controller.scoringRequestFactory = {
+      _, _, _, context, _, _, _, _ in
+      contexts.append(context)
+      let request = SmokeScoringRequest(result: nil)
+      requests.append(request)
+      return request
+    }
+
+    let client = SmokeTextClient()
+    controller.activateServer(client)
+    defer { controller.deactivateServer(client) }
+    guard controller.handle(key("n", code: 45), client: client),
+      waitUntil({ requests.count == 1 }), contexts == ["前文"],
+      !presenter.candidates.isEmpty
+    else {
+      throw SmokeFailure.expectation("多分段测试没有创建第一阶段 AI 重排")
+    }
+
+    func stagedResponse(revision: UInt64, preedit: String) -> FeatherResponseValue {
+      let candidates = presenter.candidates.prefix(3).enumerated().map { index, candidate in
+        FeatherCandidateValue(
+          revision: revision,
+          value: candidate.value + UInt64(index + 1) * 10_000,
+          text: candidate.text
+        )
+      }
+      return FeatherResponseValue(
+        handled: true,
+        active: true,
+        directMode: false,
+        commit: nil,
+        preedit: preedit,
+        cursorUTF8: preedit.utf8.count,
+        revision: revision,
+        candidates: candidates,
+        highlighted: 0
+      )
+    }
+
+    controller.applyCandidateSelection(
+      stagedResponse(revision: 10_001, preedit: "shijie"),
+      selectedText: "你好",
+      to: client
+    )
+    guard waitUntil({ requests.count == 2 }), contexts.last == "前文你好",
+      requests[0].cancelCount == 1, requests[0].closeCount == 1
+    else {
+      throw SmokeFailure.expectation("第二分段 AI 重排没有包含第一分段选择")
+    }
+
+    controller.applyCandidateSelection(
+      stagedResponse(revision: 10_002, preedit: "mingtian"),
+      selectedText: "世界",
+      to: client
+    )
+    guard waitUntil({ requests.count == 3 }), contexts.last == "前文你好世界",
+      requests[1].cancelCount == 1, requests[1].closeCount == 1
+    else {
+      throw SmokeFailure.expectation("第三分段 AI 重排没有累积此前选择")
     }
   }
 
