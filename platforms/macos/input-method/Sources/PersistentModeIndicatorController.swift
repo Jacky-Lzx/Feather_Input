@@ -20,22 +20,29 @@ final class PersistentModeIndicatorController: PersistentModeIndicatorPresenting
   private static let panelSize = NSSize(width: 34, height: 34)
   private let settings: PersistentModeIndicatorSettings
   private let inputSourceIsSelected: @MainActor () -> Bool
+  private let inputSourceTransitionDelayNanoseconds: UInt64
   private let panel: PersistentModeIndicatorPanel
   private let label = NSTextField(labelWithString: "")
   private var requestedVisible = false
+  private var inputSourceIsConfirmedSelected: Bool
+  private var inputSourceHideTask: Task<Void, Never>?
   private var directMode = false
   private var observers: [(NotificationCenter, NSObjectProtocol)] = []
   private var inputSourceObserver: NSObjectProtocol?
 
   var isVisible: Bool { panel.isVisible }
+  var displayedModeText: String { label.stringValue }
 
   init(
     settings: PersistentModeIndicatorSettings = .shared,
     inputSourceIsSelected: @escaping @MainActor () -> Bool = PersistentModeIndicatorController
-      .currentInputSourceIsFeather
+      .currentInputSourceIsFeather,
+    inputSourceTransitionDelayMilliseconds: UInt64 = 150
   ) {
     self.settings = settings
     self.inputSourceIsSelected = inputSourceIsSelected
+    inputSourceTransitionDelayNanoseconds = inputSourceTransitionDelayMilliseconds * 1_000_000
+    inputSourceIsConfirmedSelected = inputSourceIsSelected()
     panel = PersistentModeIndicatorPanel(
       contentRect: NSRect(origin: .zero, size: Self.panelSize),
       styleMask: [.borderless, .nonactivatingPanel],
@@ -78,11 +85,12 @@ final class PersistentModeIndicatorController: PersistentModeIndicatorPresenting
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      MainActor.assumeIsolated { self?.refresh() }
+      MainActor.assumeIsolated { self?.inputSourceDidChange() }
     }
   }
 
   deinit {
+    inputSourceHideTask?.cancel()
     for (center, observer) in observers {
       center.removeObserver(observer)
     }
@@ -92,18 +100,23 @@ final class PersistentModeIndicatorController: PersistentModeIndicatorPresenting
   }
 
   func show(directMode: Bool) {
+    inputSourceHideTask?.cancel()
+    inputSourceHideTask = nil
+    inputSourceIsConfirmedSelected = true
     self.directMode = directMode
     requestedVisible = true
     refresh()
   }
 
   func hide() {
+    inputSourceHideTask?.cancel()
+    inputSourceHideTask = nil
     requestedVisible = false
     panel.orderOut(nil)
   }
 
   private func refresh() {
-    guard requestedVisible, settings.isEnabled, inputSourceIsSelected(),
+    guard requestedVisible, settings.isEnabled, inputSourceIsConfirmedSelected,
       let screen = primaryScreen()
     else {
       panel.orderOut(nil)
@@ -113,6 +126,31 @@ final class PersistentModeIndicatorController: PersistentModeIndicatorPresenting
     label.setAccessibilityLabel(directMode ? "英文输入" : "中文输入")
     panel.setFrameOrigin(NSPoint(x: screen.frame.minX + 12, y: screen.frame.minY + 40))
     panel.orderFrontRegardless()
+  }
+
+  func inputSourceDidChange() {
+    inputSourceHideTask?.cancel()
+    inputSourceHideTask = nil
+    if inputSourceIsSelected() {
+      inputSourceIsConfirmedSelected = true
+      refresh()
+      return
+    }
+    let delay = inputSourceTransitionDelayNanoseconds
+    inputSourceHideTask = Task { @MainActor [weak self] in
+      if delay > 0 {
+        try? await Task.sleep(nanoseconds: delay)
+      }
+      guard let self, !Task.isCancelled else { return }
+      self.inputSourceHideTask = nil
+      if self.inputSourceIsSelected() {
+        self.inputSourceIsConfirmedSelected = true
+        self.refresh()
+      } else {
+        self.inputSourceIsConfirmedSelected = false
+        self.panel.orderOut(nil)
+      }
+    }
   }
 
   private func primaryScreen() -> NSScreen? {

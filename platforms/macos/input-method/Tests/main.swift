@@ -1683,14 +1683,33 @@ struct InputMethodSmokeMain {
     }
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let settings = PersistentModeIndicatorSettings(defaults: defaults)
+    var inputSourceIsSelected = true
     let presenter = PersistentModeIndicatorController(
       settings: settings,
-      inputSourceIsSelected: { true }
+      inputSourceIsSelected: { inputSourceIsSelected },
+      inputSourceTransitionDelayMilliseconds: 10
     )
 
     presenter.show(directMode: false)
-    guard presenter.isVisible else {
+    guard presenter.isVisible, presenter.displayedModeText == "中" else {
       throw SmokeFailure.expectation("默认设置没有显示常驻模式提示")
+    }
+    inputSourceIsSelected = false
+    presenter.inputSourceDidChange()
+    presenter.show(directMode: true)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    guard presenter.isVisible, presenter.displayedModeText == "英" else {
+      throw SmokeFailure.expectation("FeatherInput 内部中英切换隐藏了常驻模式提示")
+    }
+    presenter.inputSourceDidChange()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    guard !presenter.isVisible else {
+      throw SmokeFailure.expectation("真正切换到其他输入源后常驻模式提示没有隐藏")
+    }
+    inputSourceIsSelected = true
+    presenter.inputSourceDidChange()
+    guard presenter.isVisible, presenter.displayedModeText == "英" else {
+      throw SmokeFailure.expectation("重新选择 FeatherInput 后常驻模式提示没有恢复")
     }
     settings.updateEnabled(false)
     guard !presenter.isVisible else {
